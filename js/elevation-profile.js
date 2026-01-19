@@ -214,12 +214,18 @@ const ElevationProfile = (function() {
 
         /**
          * Get color for a grade percentage
+         * Positive grades (climbing) = orange/red, negative grades (descending) = green
          */
         getGradeColor(grade) {
-            const absGrade = Math.abs(grade);
-            if (absGrade < 3) return GRADE_COLORS.flat;
-            if (absGrade < 6) return GRADE_COLORS.moderate;
-            if (absGrade < 10) return GRADE_COLORS.hard;
+            // Descending - always green
+            if (grade < -1) return GRADE_COLORS.flat;
+
+            // Flat or very slight grade
+            if (grade < 3) return GRADE_COLORS.flat;
+
+            // Climbing - color by intensity
+            if (grade < 6) return GRADE_COLORS.moderate;
+            if (grade < 10) return GRADE_COLORS.hard;
             return GRADE_COLORS.extreme;
         }
 
@@ -257,6 +263,7 @@ const ElevationProfile = (function() {
 
         /**
          * Render gradient fill based on grade
+         * Batches consecutive segments with the same color for clean rendering
          */
         renderGradientFill(ctx, chartWidth, chartHeight, padding) {
             const elevRange = this.maxElevation - this.minElevation;
@@ -267,32 +274,63 @@ const ElevationProfile = (function() {
             ctx.save();
             ctx.globalAlpha = this.options.fillAlpha;
 
-            // Draw filled segments
-            for (let i = 0; i < this.elevationData.length - 1; i++) {
-                const x1 = padding.left + (this.distanceData[i] / this.totalDistance) * chartWidth;
-                const x2 = padding.left + (this.distanceData[i + 1] / this.totalDistance) * chartWidth;
+            // Build color regions by batching consecutive same-color segments
+            const regions = [];
+            let currentRegion = null;
 
-                const y1 = padding.top + chartHeight -
-                    ((this.elevationData[i] - this.minElevation) / elevRange) * chartHeight;
-                const y2 = padding.top + chartHeight -
-                    ((this.elevationData[i + 1] - this.minElevation) / elevRange) * chartHeight;
-
-                // Smooth grade calculation using average of nearby points
+            for (let i = 0; i < this.elevationData.length; i++) {
                 const smoothedGrade = this.getSmoothedGrade(i);
                 const color = this.getGradeColor(smoothedGrade);
 
-                // Create vertical gradient
-                const gradient = ctx.createLinearGradient(x1, y1, x1, padding.top + chartHeight);
+                if (!currentRegion || currentRegion.color !== color) {
+                    // Start new region
+                    if (currentRegion) {
+                        currentRegion.endIndex = i;
+                        regions.push(currentRegion);
+                    }
+                    currentRegion = { color, startIndex: i, endIndex: i };
+                }
+            }
+            // Push final region
+            if (currentRegion) {
+                currentRegion.endIndex = this.elevationData.length - 1;
+                regions.push(currentRegion);
+            }
+
+            // Draw each color region as a single filled path
+            for (const region of regions) {
+                const { color, startIndex, endIndex } = region;
+                if (startIndex >= endIndex) continue;
+
+                ctx.beginPath();
+
+                // Build the top edge (elevation line)
+                for (let i = startIndex; i <= endIndex; i++) {
+                    const x = padding.left + (this.distanceData[i] / this.totalDistance) * chartWidth;
+                    const y = padding.top + chartHeight -
+                        ((this.elevationData[i] - this.minElevation) / elevRange) * chartHeight;
+
+                    if (i === startIndex) {
+                        ctx.moveTo(x, y);
+                    } else {
+                        ctx.lineTo(x, y);
+                    }
+                }
+
+                // Close the path along the bottom
+                const xEnd = padding.left + (this.distanceData[endIndex] / this.totalDistance) * chartWidth;
+                const xStart = padding.left + (this.distanceData[startIndex] / this.totalDistance) * chartWidth;
+                ctx.lineTo(xEnd, padding.top + chartHeight);
+                ctx.lineTo(xStart, padding.top + chartHeight);
+                ctx.closePath();
+
+                // Create vertical gradient for this region
+                const yTop = padding.top;
+                const gradient = ctx.createLinearGradient(0, yTop, 0, padding.top + chartHeight);
                 gradient.addColorStop(0, color);
                 gradient.addColorStop(1, 'rgba(0,0,0,0)');
 
                 ctx.fillStyle = gradient;
-                ctx.beginPath();
-                ctx.moveTo(x1, y1);
-                ctx.lineTo(x2, y2);
-                ctx.lineTo(x2, padding.top + chartHeight);
-                ctx.lineTo(x1, padding.top + chartHeight);
-                ctx.closePath();
                 ctx.fill();
             }
 
@@ -300,12 +338,12 @@ const ElevationProfile = (function() {
         }
 
         /**
-         * Get grade at index (already smoothed via segment-based calculation)
+         * Get grade at index with heavy smoothing for color stability
          */
         getSmoothedGrade(index) {
-            // Grades are already calculated over 50m segments, so minimal additional smoothing needed
-            // Just do a small 3-point average to smooth transitions between segments
-            const windowSize = 1;
+            // Use a large window to eliminate color flickering
+            // This averages over ~500m worth of points for stable color regions
+            const windowSize = Math.min(50, Math.floor(this.grades.length / 20));
             let sum = 0;
             let count = 0;
 
