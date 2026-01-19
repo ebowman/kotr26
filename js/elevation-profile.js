@@ -112,6 +112,7 @@ const ElevationProfile = (function() {
             this.minElevation = Infinity;
             this.maxElevation = -Infinity;
 
+            // First pass: collect elevation and distance data
             for (let i = 0; i < coords.length; i++) {
                 const elevation = coords[i][2] || 0;
                 this.elevationData.push(elevation);
@@ -127,20 +128,16 @@ const ElevationProfile = (function() {
                         coords[i][1], coords[i][0]
                     );
                     cumulativeDistance += dist;
-
-                    // Calculate grade using stored elevation data
-                    const prevElevation = this.elevationData[i - 1] || 0;
-                    const elevDiff = elevation - prevElevation;
-                    const grade = (dist > 0) ? (elevDiff / (dist * 1000)) * 100 : 0;
-                    this.grades.push(isFinite(grade) ? grade : 0);
-                } else {
-                    this.grades.push(0);
                 }
 
                 this.distanceData.push(cumulativeDistance);
             }
 
             this.totalDistance = cumulativeDistance;
+
+            // Second pass: calculate segment-based grades (50m segments)
+            // This eliminates GPS noise that causes unrealistic point-to-point gradients
+            this.grades = this.calculateSegmentGrades(50);
 
             // Handle edge cases for elevation range
             if (!isFinite(this.minElevation) || !isFinite(this.maxElevation)) {
@@ -158,6 +155,47 @@ const ElevationProfile = (function() {
                 this.minElevation -= 10;
                 this.maxElevation += 10;
             }
+        }
+
+        /**
+         * Calculate grades over fixed-length segments to reduce GPS noise
+         * @param {number} segmentLengthMeters - Length of each segment in meters
+         * @returns {number[]} Array of grades for each point
+         */
+        calculateSegmentGrades(segmentLengthMeters) {
+            const grades = [];
+            const segmentLengthKm = segmentLengthMeters / 1000;
+
+            let segmentStartIdx = 0;
+            let segmentStartDist = 0;
+
+            for (let i = 0; i < this.elevationData.length; i++) {
+                const currentDist = this.distanceData[i];
+                const segmentDist = currentDist - segmentStartDist;
+
+                // When we've traveled far enough, calculate the segment grade
+                if (segmentDist >= segmentLengthKm || i === this.elevationData.length - 1) {
+                    const elevDiff = this.elevationData[i] - this.elevationData[segmentStartIdx];
+                    const grade = segmentDist > 0 ? (elevDiff / (segmentDist * 1000)) * 100 : 0;
+                    const clampedGrade = Math.max(-25, Math.min(25, grade)); // Clamp to realistic range
+
+                    // Fill grades for all points in this segment
+                    while (grades.length <= i) {
+                        grades.push(isFinite(clampedGrade) ? clampedGrade : 0);
+                    }
+
+                    // Start new segment
+                    segmentStartIdx = i;
+                    segmentStartDist = currentDist;
+                }
+            }
+
+            // Ensure we have a grade for every point
+            while (grades.length < this.elevationData.length) {
+                grades.push(grades[grades.length - 1] || 0);
+            }
+
+            return grades;
         }
 
         /**
@@ -262,10 +300,12 @@ const ElevationProfile = (function() {
         }
 
         /**
-         * Get smoothed grade using moving average
+         * Get grade at index (already smoothed via segment-based calculation)
          */
         getSmoothedGrade(index) {
-            const windowSize = 5;
+            // Grades are already calculated over 50m segments, so minimal additional smoothing needed
+            // Just do a small 3-point average to smooth transitions between segments
+            const windowSize = 1;
             let sum = 0;
             let count = 0;
 

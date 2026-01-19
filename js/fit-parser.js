@@ -466,20 +466,31 @@ const FitParser = (function() {
                 .filter(r => r.latitude && r.longitude)
                 .map(r => [r.longitude, r.latitude, r.altitude || 0]);
 
-            // Calculate total stats
+            // Smooth elevation data to reduce GPS noise before calculating gain
+            // This prevents small oscillations from being counted as climbing
+            const smoothedElevations = this.smoothElevations(
+                coordinates.map(c => c[2]),
+                5 // window size of 5 points (~15-25m typically)
+            );
+
+            // Calculate total stats using smoothed elevation for gain calculation
             let totalDistance = 0;
             let totalElevationGain = 0;
             let minElevation = Infinity;
             let maxElevation = -Infinity;
 
             for (let i = 0; i < coordinates.length; i++) {
-                const elevation = coordinates[i][2];
+                const elevation = coordinates[i][2]; // Use raw for min/max
+                const smoothedElev = smoothedElevations[i];
+
                 if (elevation < minElevation) minElevation = elevation;
                 if (elevation > maxElevation) maxElevation = elevation;
 
                 if (i > 0) {
-                    const elevDiff = elevation - coordinates[i - 1][2];
-                    if (elevDiff > 0) {
+                    // Use smoothed elevation for gain calculation to reduce noise
+                    const elevDiff = smoothedElev - smoothedElevations[i - 1];
+                    // Only count gains above a small threshold to filter remaining noise
+                    if (elevDiff > 0.1) {
                         totalElevationGain += elevDiff;
                     }
                 }
@@ -544,6 +555,26 @@ const FitParser = (function() {
         }
 
         /**
+         * Smooth elevation data using a moving average to reduce GPS noise
+         * @param {number[]} elevations - Array of elevation values
+         * @param {number} windowSize - Number of points on each side to average
+         * @returns {number[]} Smoothed elevation array
+         */
+        smoothElevations(elevations, windowSize) {
+            const smoothed = [];
+            for (let i = 0; i < elevations.length; i++) {
+                let sum = 0;
+                let count = 0;
+                for (let j = Math.max(0, i - windowSize); j <= Math.min(elevations.length - 1, i + windowSize); j++) {
+                    sum += elevations[j];
+                    count++;
+                }
+                smoothed.push(sum / count);
+            }
+            return smoothed;
+        }
+
+        /**
          * Calculate geographic bounds
          */
         calculateBounds(coordinates) {
@@ -577,7 +608,40 @@ const FitParser = (function() {
         }
         const buffer = await response.arrayBuffer();
         const parser = new FitFileParser();
-        return parser.parse(buffer);
+        const routeData = parser.parse(buffer);
+
+        // Try to load DEM sidecar file for accurate elevation data
+        const demUrl = url.replace('.fit', '.dem.json');
+        try {
+            const demResponse = await fetch(demUrl);
+            if (demResponse.ok) {
+                const demData = await demResponse.json();
+                if (demData.elevations && demData.elevations.length === routeData.coordinates.length) {
+                    console.log(`Loaded DEM elevation data for ${url}`);
+
+                    // Replace GPS elevation with DEM elevation
+                    for (let i = 0; i < routeData.coordinates.length; i++) {
+                        routeData.coordinates[i][2] = demData.elevations[i];
+                    }
+
+                    // Update stats from DEM data
+                    routeData.elevationGain = demData.stats.elevationGain;
+                    routeData.minElevation = demData.stats.minElevation;
+                    routeData.maxElevation = demData.stats.maxElevation;
+                    routeData.elevationSource = 'dem';
+                } else {
+                    console.warn(`DEM data point count mismatch: ${demData.elevations?.length} vs ${routeData.coordinates.length}`);
+                    routeData.elevationSource = 'gps';
+                }
+            } else {
+                routeData.elevationSource = 'gps';
+            }
+        } catch (e) {
+            console.log(`No DEM data available for ${url}, using GPS elevation`);
+            routeData.elevationSource = 'gps';
+        }
+
+        return routeData;
     }
 
     /**
