@@ -691,6 +691,32 @@
             content: '👆 ';
         }
 
+        /* Zoom indicator */
+        .zoom-indicator {
+            position: fixed;
+            top: 120px;
+            left: var(--space-lg);
+            background: rgba(0, 0, 0, 0.6);
+            color: var(--color-text-secondary);
+            padding: 6px 12px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 500;
+            z-index: 100;
+            backdrop-filter: blur(4px);
+            border: 1px solid rgba(255,255,255,0.1);
+            transition: all 0.2s ease;
+        }
+
+        .zoom-indicator::before {
+            content: '🔍 ';
+        }
+
+        .zoom-indicator.flash {
+            background: rgba(230, 184, 0, 0.6);
+            color: var(--color-text);
+        }
+
         /* Responsive adjustments */
         @media (max-width: 768px) {
             .camera-modes {
@@ -702,6 +728,10 @@
             }
 
             .util-btn {
+                display: none;
+            }
+
+            .zoom-indicator {
                 display: none;
             }
         }
@@ -734,6 +764,9 @@
     <div class="camera-mode-indicator" id="camera-mode-indicator">
         <span class="mode-label">Cinematic</span>
     </div>
+
+    <!-- Zoom indicator -->
+    <div class="zoom-indicator" id="zoom-indicator">100%</div>
 
     <!-- Unified Progress Widget -->
     <div class="unified-progress-widget" id="unified-progress-widget">
@@ -844,6 +877,14 @@
             <div class="shortcut-row">
                 <div class="shortcut-keys"><kbd>↑</kbd> <kbd>↓</kbd></div>
                 <span>Adjust pitch (Chase)</span>
+            </div>
+            <div class="shortcut-row">
+                <div class="shortcut-keys"><kbd>K</kbd> <kbd>J</kbd></div>
+                <span>Zoom in / out</span>
+            </div>
+            <div class="shortcut-row">
+                <div class="shortcut-keys"><kbd>0</kbd></div>
+                <span>Reset zoom</span>
             </div>
             <div class="shortcut-divider"></div>
             <div class="shortcut-row">

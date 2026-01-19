@@ -99,6 +99,19 @@
     const PITCH_BIRDS_EYE_THRESHOLD = -70; // Switch to bird's eye when pitch goes below this
     let chaseCamPitch = loadPitchFromStorage();
 
+    // Zoom level control (camera distance from rider)
+    const ZOOM_MIN = 0.3;   // Closest zoom (30% of default distance)
+    const ZOOM_MAX = 3.0;   // Farthest zoom (300% of default distance)
+    const ZOOM_STEP = 0.15; // Per key/scroll increment
+    const ZOOM_DEFAULT = 1.0;
+    let zoomLevel = loadZoomFromStorage();
+
+    // Scrubber drag state for overview mode
+    let isScrubberDragging = false;
+    let overviewTransitionProgress = 0; // 0 = normal view, 1 = full overview
+    let overviewTargetState = null; // Cached overview camera state
+    let shouldReturnFromOverview = false; // Whether to zoom back after drag
+
     // User override state
     let userOverrideActive = false;
     let userOverrideTimeout = null;
@@ -160,6 +173,67 @@
             localStorage.setItem('kotr-flyover-pitch', pitch.toString());
         } catch (e) {
             // localStorage not available
+        }
+    }
+
+    /**
+     * Load zoom level from localStorage
+     */
+    function loadZoomFromStorage() {
+        try {
+            const stored = localStorage.getItem('kotr-flyover-zoom');
+            if (stored !== null) {
+                const zoom = parseFloat(stored);
+                if (!isNaN(zoom) && zoom >= ZOOM_MIN && zoom <= ZOOM_MAX) {
+                    return zoom;
+                }
+            }
+        } catch (e) {
+            // localStorage not available
+        }
+        return ZOOM_DEFAULT;
+    }
+
+    /**
+     * Save zoom level to localStorage
+     */
+    function saveZoomToStorage(zoom) {
+        try {
+            localStorage.setItem('kotr-flyover-zoom', zoom.toString());
+        } catch (e) {
+            // localStorage not available
+        }
+    }
+
+    /**
+     * Adjust zoom level
+     */
+    function adjustZoom(delta) {
+        const newZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, zoomLevel + delta));
+        if (newZoom !== zoomLevel) {
+            zoomLevel = newZoom;
+            saveZoomToStorage(zoomLevel);
+            updateZoomIndicator();
+
+            // Force immediate camera update
+            if (!isPlaying) {
+                freeNavigationEnabled = false;
+                updateCamera(0.016);
+                freeNavigationEnabled = true;
+            }
+        }
+    }
+
+    /**
+     * Update zoom indicator in UI
+     */
+    function updateZoomIndicator() {
+        const indicator = document.getElementById('zoom-indicator');
+        if (indicator) {
+            const percentage = Math.round(zoomLevel * 100);
+            indicator.textContent = `${percentage}%`;
+            indicator.classList.add('flash');
+            setTimeout(() => indicator.classList.remove('flash'), 300);
         }
     }
 
@@ -354,12 +428,16 @@
 
     /**
      * Calculate camera state for a given mode
+     * Applies zoomLevel multiplier to all distance/height parameters
      */
     function calculateCameraForMode(mode, dotPoint, nextPoint, deltaTime) {
         if (!dotPoint || !nextPoint) return null;
 
         const config = CameraModeConfig[mode];
         const forwardBearing = calculateBearing(dotPoint, nextPoint);
+
+        // Apply zoom level to all camera distances
+        const zoom = zoomLevel;
 
         let cameraLng, cameraLat, cameraAlt, cameraBearing, cameraPitch;
 
@@ -369,13 +447,14 @@
                 // Calculate altitude based on desired pitch angle
                 // tan(pitch) = altitude / horizontal_distance
                 // So: altitude = horizontal_distance * tan(|pitch|)
+                const offsetBehind = config.offsetBehind * zoom;
                 const pitchRadians = Math.abs(chaseCamPitch) * Math.PI / 180;
-                const calculatedAltitude = config.offsetBehind * Math.tan(pitchRadians);
+                const calculatedAltitude = offsetBehind * Math.tan(pitchRadians);
 
                 const behindBearing = (forwardBearing + 180) % 360;
                 const offsetPoint = turf.destination(
                     turf.point([dotPoint.lng, dotPoint.lat]),
-                    config.offsetBehind / 1000,
+                    offsetBehind / 1000,
                     behindBearing,
                     { units: 'kilometers' }
                 );
@@ -391,15 +470,16 @@
             case CameraModes.BIRDS_EYE: {
                 // Bird's eye: nearly above, looking down at the dot
                 // Offset slightly behind (south) to avoid gimbal lock with lookAtPoint
+                const offsetUp = config.offsetUp * zoom;
                 const behindOffset = turf.destination(
                     turf.point([dotPoint.lng, dotPoint.lat]),
-                    0.05, // 50 meters behind
+                    0.05 * zoom, // Scale the small behind offset too
                     (forwardBearing + 180) % 360, // behind the direction of travel
                     { units: 'kilometers' }
                 );
                 cameraLng = behindOffset.geometry.coordinates[0];
                 cameraLat = behindOffset.geometry.coordinates[1];
-                cameraAlt = dotPoint.alt + config.offsetUp;
+                cameraAlt = dotPoint.alt + offsetUp;
                 cameraBearing = forwardBearing; // Face direction of travel
                 cameraPitch = config.pitch;
                 break;
@@ -407,16 +487,18 @@
 
             case CameraModes.SIDE_VIEW: {
                 // Side view: perpendicular to route direction
+                const offsetSide = config.offsetSide * zoom;
+                const offsetUp = config.offsetUp * zoom;
                 const sideBearing = (forwardBearing + 90) % 360;
                 const offsetPoint = turf.destination(
                     turf.point([dotPoint.lng, dotPoint.lat]),
-                    config.offsetSide / 1000,
+                    offsetSide / 1000,
                     sideBearing,
                     { units: 'kilometers' }
                 );
                 cameraLng = offsetPoint.geometry.coordinates[0];
                 cameraLat = offsetPoint.geometry.coordinates[1];
-                cameraAlt = dotPoint.alt + config.offsetUp;
+                cameraAlt = dotPoint.alt + offsetUp;
                 // Look at the dot from the side
                 cameraBearing = (sideBearing + 180) % 360;
                 cameraPitch = config.pitch;
@@ -425,13 +507,17 @@
 
             case CameraModes.CINEMATIC: {
                 // Cinematic: orbiting around the dot
+                const orbitRadius = config.orbitRadius * zoom;
+                const heightMin = config.heightMin * zoom;
+                const heightMax = config.heightMax * zoom;
+
                 if (deltaTime) {
                     cinematicAngle += config.orbitSpeed * deltaTime;
                 }
                 const orbitBearing = (cinematicAngle * 180 / Math.PI) % 360;
                 const offsetPoint = turf.destination(
                     turf.point([dotPoint.lng, dotPoint.lat]),
-                    config.orbitRadius / 1000,
+                    orbitRadius / 1000,
                     orbitBearing,
                     { units: 'kilometers' }
                 );
@@ -439,7 +525,7 @@
                 cameraLat = offsetPoint.geometry.coordinates[1];
                 // Vary height sinusoidally
                 const heightT = (Math.sin(cinematicAngle * 0.5) + 1) / 2;
-                cameraAlt = dotPoint.alt + lerp(config.heightMin, config.heightMax, heightT);
+                cameraAlt = dotPoint.alt + lerp(heightMin, heightMax, heightT);
                 // Look at the dot
                 cameraBearing = (orbitBearing + 180) % 360;
                 // Vary pitch
@@ -899,16 +985,20 @@
             });
         }
 
-        // Draggable scrubber
+        // Draggable scrubber with overview zoom
         const scrubber = document.getElementById('scrubber-handle');
         if (scrubber && profileTrack) {
             let isDragging = false;
 
             const startDrag = (e) => {
                 isDragging = true;
+                isScrubberDragging = true;
                 e.preventDefault();
                 document.body.style.cursor = 'grabbing';
                 scrubber.style.cursor = 'grabbing';
+
+                // Start transition to overview (zoom out to see whole route)
+                startOverviewTransition();
             };
 
             const doDrag = (e) => {
@@ -919,14 +1009,18 @@
                 const clientX = e.touches ? e.touches[0].clientX : e.clientX;
                 let position = (clientX - rect.left) / rect.width;
                 position = Math.max(0, Math.min(1, position));
-                seekToPosition(position);
+                seekToPositionDuringDrag(position);
             };
 
             const endDrag = () => {
                 if (isDragging) {
                     isDragging = false;
+                    isScrubberDragging = false;
                     document.body.style.cursor = '';
                     scrubber.style.cursor = 'grab';
+
+                    // End overview transition
+                    endOverviewTransition();
                 }
             };
 
@@ -1048,8 +1142,40 @@
                     shortcutsHelp?.classList.toggle('hidden');
                     updateProgressWidgetForHelp();
                     break;
+                // Zoom controls (j/k like vim navigation)
+                case 'j':
+                case 'J':
+                    e.preventDefault();
+                    adjustZoom(ZOOM_STEP); // Zoom out = larger zoom value = farther
+                    break;
+                case 'k':
+                case 'K':
+                    e.preventDefault();
+                    adjustZoom(-ZOOM_STEP); // Zoom in = smaller zoom value = closer
+                    break;
+                case '0':
+                    e.preventDefault();
+                    zoomLevel = ZOOM_DEFAULT;
+                    saveZoomToStorage(zoomLevel);
+                    updateZoomIndicator();
+                    if (!isPlaying) {
+                        freeNavigationEnabled = false;
+                        updateCamera(0.016);
+                        freeNavigationEnabled = true;
+                    }
+                    break;
             }
         });
+
+        // Scroll wheel zoom control (when over the map)
+        mapCanvas.addEventListener('wheel', (e) => {
+            // Only handle scroll if not in free navigation mode or during playback
+            if (!freeNavigationEnabled || isPlaying) {
+                e.preventDefault();
+                const delta = e.deltaY > 0 ? ZOOM_STEP : -ZOOM_STEP;
+                adjustZoom(delta);
+            }
+        }, { passive: false });
     }
 
     /**
@@ -1107,6 +1233,152 @@
     }
 
     /**
+     * Calculate overview camera state that shows the entire route
+     */
+    function calculateOverviewCameraState() {
+        if (!routeData || !routeData.bounds) return null;
+
+        const bounds = routeData.bounds;
+        // Calculate center of the route
+        const centerLng = (bounds[0][0] + bounds[1][0]) / 2;
+        const centerLat = (bounds[0][1] + bounds[1][1]) / 2;
+
+        // Calculate the extent of the route for altitude
+        const lngSpan = Math.abs(bounds[1][0] - bounds[0][0]);
+        const latSpan = Math.abs(bounds[1][1] - bounds[0][1]);
+
+        // Approximate meters: 1 degree lat ~= 111km, 1 degree lng ~= 111km * cos(lat)
+        const latMeters = latSpan * 111000;
+        const lngMeters = lngSpan * 111000 * Math.cos(centerLat * Math.PI / 180);
+        const maxSpan = Math.max(latMeters, lngMeters);
+
+        // Calculate altitude to see the whole route (roughly 1.2x the span)
+        // Account for field of view (~60 degrees, so tan(30) ~= 0.577)
+        const altitude = maxSpan * 0.8;
+
+        // Get average elevation of the route for the center look-at point
+        const avgElevation = routeData.coordinates.reduce((sum, c) => sum + (c[2] || 0), 0) / routeData.coordinates.length;
+
+        // Calculate initial bearing from start of route for consistency
+        const initialBearing = calculateInitialBearing();
+
+        return createCameraState(
+            centerLng,
+            centerLat,
+            altitude + avgElevation,
+            initialBearing,
+            -60 // Looking down at a good angle
+        );
+    }
+
+    /**
+     * Start transition to overview mode when scrubber drag begins
+     */
+    function startOverviewTransition() {
+        overviewTransitionProgress = 0;
+        overviewTargetState = calculateOverviewCameraState();
+        shouldReturnFromOverview = isPlaying; // Remember if we should return after drag
+
+        // Store the current camera state as the starting point
+        transitionStartState = getCurrentCameraState();
+
+        // Start the overview animation
+        if (!isPlaying) {
+            // When paused, need to manually animate the transition
+            animateOverviewTransition();
+        }
+    }
+
+    /**
+     * Animate the overview transition (used when paused)
+     */
+    function animateOverviewTransition() {
+        if (!isScrubberDragging && overviewTransitionProgress >= 1) return;
+
+        const targetProgress = isScrubberDragging ? 1 : 0;
+        const speed = 3; // transitions per second
+
+        // Move towards target
+        if (overviewTransitionProgress < targetProgress) {
+            overviewTransitionProgress = Math.min(1, overviewTransitionProgress + speed * 0.016);
+        } else if (overviewTransitionProgress > targetProgress) {
+            overviewTransitionProgress = Math.max(0, overviewTransitionProgress - speed * 0.016);
+        }
+
+        // Apply the interpolated camera state
+        if (transitionStartState && overviewTargetState) {
+            const t = easeInOutCubic(overviewTransitionProgress);
+            const currentState = lerpCameraState(transitionStartState, overviewTargetState, t);
+
+            // Get current dot position for UI updates
+            const dotDistance = progress * totalDistance;
+            const dotPoint = getPointAlongRoute(dotDistance);
+
+            if (dotPoint) {
+                applyCameraState(currentState, dotPoint);
+                updateDotAndUI(dotPoint);
+            }
+        }
+
+        // Continue animation if not at target
+        if (Math.abs(overviewTransitionProgress - targetProgress) > 0.001) {
+            requestAnimationFrame(animateOverviewTransition);
+        } else if (!isScrubberDragging && overviewTransitionProgress <= 0.001) {
+            // Transition back complete - clean up
+            overviewTransitionProgress = 0;
+            transitionStartState = null;
+            overviewTargetState = null;
+        }
+    }
+
+    /**
+     * End overview transition when scrubber drag ends
+     */
+    function endOverviewTransition() {
+        if (!isPlaying) {
+            // When paused, stay in overview mode (don't transition back)
+            // The camera will remain showing the whole route
+            overviewTransitionProgress = 1; // Stay at overview
+        } else {
+            // When playing, smoothly transition back to normal camera
+            shouldReturnFromOverview = true;
+            // Store current overview state as start point for return transition
+            transitionStartState = getCurrentCameraState();
+            // Animation loop will handle the return transition
+        }
+    }
+
+    /**
+     * Seek to position during scrubber drag (updates dot but keeps overview camera)
+     */
+    function seekToPositionDuringDrag(newPosition) {
+        progress = Math.max(0, Math.min(1, newPosition));
+
+        // Get dot position and update UI
+        const dotDistance = progress * totalDistance;
+        const dotPoint = getPointAlongRoute(dotDistance);
+
+        if (dotPoint) {
+            // Update dot and UI, but keep camera in overview
+            updateDotAndUI(dotPoint);
+
+            // If we're still transitioning to overview, continue the transition
+            if (overviewTransitionProgress < 1 && transitionStartState && overviewTargetState) {
+                overviewTransitionProgress = Math.min(1, overviewTransitionProgress + 0.1);
+                const t = easeInOutCubic(overviewTransitionProgress);
+                const currentState = lerpCameraState(transitionStartState, overviewTargetState, t);
+                applyCameraState(currentState, dotPoint);
+            } else if (overviewTargetState) {
+                // Fully in overview mode - keep the overview camera but update look-at
+                applyCameraState(overviewTargetState, dotPoint);
+            }
+        }
+
+        // Update UI
+        updateProgress();
+    }
+
+    /**
      * Toggle fullscreen mode
      */
     function toggleFullscreen() {
@@ -1132,6 +1404,14 @@
             freeNavigationEnabled = false;
             userOverrideActive = false;
             clearTimeout(userOverrideTimeout);
+
+            // If we're in overview mode (from paused scrubber drag), start returning
+            if (overviewTransitionProgress > 0) {
+                shouldReturnFromOverview = true;
+                // Store current overview state as start point for return transition
+                transitionStartState = getCurrentCameraState();
+            }
+
             lastTimestamp = performance.now();
             animate(lastTimestamp);
         } else {
@@ -1222,7 +1502,7 @@
 
     /**
      * Update camera position using FreeCamera API with mode support
-     * Handles mode transitions and user override with smooth return
+     * Handles mode transitions, user override, and overview return with smooth transitions
      */
     function updateCamera(deltaTime = 0) {
         // Dot position from turf.along() - constant speed along the path
@@ -1244,6 +1524,36 @@
         // Handle free navigation mode (when paused, user can navigate freely)
         // Only update dot and UI, don't control camera
         if (freeNavigationEnabled && !isPlaying) {
+            updateDotAndUI(dotPoint);
+            return;
+        }
+
+        // Handle scrubber dragging - stay in overview mode
+        if (isScrubberDragging) {
+            // During drag, the seekToPositionDuringDrag handles camera
+            return;
+        }
+
+        // Handle return from overview mode (after scrubber drag ends during playback)
+        if (shouldReturnFromOverview && overviewTransitionProgress > 0) {
+            // Smoothly transition from overview back to normal camera
+            overviewTransitionProgress -= deltaTime * 2; // ~0.5 second return
+            overviewTransitionProgress = Math.max(0, overviewTransitionProgress);
+
+            if (overviewTransitionProgress > 0 && transitionStartState) {
+                const t = easeOutCubic(1 - overviewTransitionProgress);
+                finalState = lerpCameraState(transitionStartState, targetState, t);
+            } else {
+                // Transition complete
+                finalState = targetState;
+                shouldReturnFromOverview = false;
+                overviewTransitionProgress = 0;
+                transitionStartState = null;
+                overviewTargetState = null;
+            }
+
+            // Apply camera state
+            applyCameraState(finalState, dotPoint);
             updateDotAndUI(dotPoint);
             return;
         }
