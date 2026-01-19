@@ -1071,6 +1071,9 @@
             // Reset last dot point
             lastDotPoint = null;
 
+            // Initialize stats at position 0
+            initializeStats();
+
             // Hide loading overlay
             hideLoading();
 
@@ -2310,19 +2313,60 @@
 
     /**
      * Calculate cumulative elevation gain up to a position (0-1)
+     * Uses the same Strava-style algorithm as fit-parser.js for consistency:
+     * - Smooths elevations with 5-point moving average
+     * - Uses 3.5m threshold to filter GPS noise
+     * - Only counts direction changes that exceed threshold
      */
     function calculateElevationGainToPosition(position) {
         if (!routeData || !routeData.coordinates) return 0;
 
         const coords = routeData.coordinates;
         const targetIndex = Math.floor(position * (coords.length - 1));
-        let totalGain = 0;
+        if (targetIndex < 1) return 0;
 
-        for (let i = 1; i <= targetIndex && i < coords.length; i++) {
-            const elevDiff = (coords[i][2] || 0) - (coords[i - 1][2] || 0);
-            if (elevDiff > 0) {
-                totalGain += elevDiff;
+        // Extract elevations
+        const elevations = coords.slice(0, targetIndex + 1).map(c => c[2] || 0);
+
+        // Smooth elevations using 5-point moving average (same as fit-parser)
+        const windowSize = 5;
+        const smoothed = [];
+        for (let i = 0; i < elevations.length; i++) {
+            let sum = 0;
+            let count = 0;
+            for (let j = Math.max(0, i - windowSize); j <= Math.min(elevations.length - 1, i + windowSize); j++) {
+                sum += elevations[j];
+                count++;
             }
+            smoothed.push(sum / count);
+        }
+
+        // Apply Strava-style threshold algorithm
+        const THRESHOLD = 3.5;
+        let totalGain = 0;
+        let lastExtreme = smoothed[0];
+        let wasClimbing = smoothed.length > 1 ? smoothed[1] > smoothed[0] : false;
+
+        for (let i = 1; i < smoothed.length; i++) {
+            const isClimbing = smoothed[i] > smoothed[i - 1];
+
+            // Direction change detected - we found a local extremum
+            if (isClimbing !== wasClimbing) {
+                const change = smoothed[i - 1] - lastExtreme;
+                if (change >= THRESHOLD) {
+                    totalGain += change;
+                }
+                if (Math.abs(change) >= THRESHOLD) {
+                    lastExtreme = smoothed[i - 1];
+                }
+                wasClimbing = isClimbing;
+            }
+        }
+
+        // Handle final segment
+        const finalChange = smoothed[smoothed.length - 1] - lastExtreme;
+        if (finalChange >= THRESHOLD) {
+            totalGain += finalChange;
         }
 
         return totalGain;
@@ -2334,6 +2378,40 @@
      */
     function updateRouteGradient(progress) {
         // Route color is now constant - no gradient needed
+    }
+
+    /**
+     * Initialize stats display at position 0
+     */
+    function initializeStats() {
+        if (!routeData) return;
+
+        // Initialize distance stats
+        const distDone = document.getElementById('stat-distance-done');
+        const distLeft = document.getElementById('stat-distance-left');
+        if (distDone) distDone.textContent = '0.0';
+        if (distLeft) distLeft.textContent = `${totalDistance.toFixed(1)} km left`;
+
+        // Initialize grade
+        const gradeEl = document.getElementById('stat-grade');
+        if (gradeEl) gradeEl.textContent = '0.0';
+
+        // Initialize elevation stats
+        const elevClimbed = document.getElementById('stat-elev-climbed');
+        const elevLeft = document.getElementById('stat-elev-left');
+        if (elevClimbed) elevClimbed.textContent = '0';
+        if (elevLeft) elevLeft.textContent = `${routeData.elevationGain || 0} m to go`;
+
+        // Initialize scrubber position
+        const scrubber = document.getElementById('scrubber-handle');
+        const overlay = document.getElementById('progress-overlay');
+        if (scrubber) scrubber.style.left = '0%';
+        if (overlay) overlay.style.width = '0%';
+
+        // Set elevation profile to position 0
+        if (elevationProfile) {
+            elevationProfile.setPosition(0);
+        }
     }
 
     /**
