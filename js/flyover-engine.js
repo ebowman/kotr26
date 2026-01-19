@@ -106,6 +106,21 @@
     const ZOOM_DEFAULT = 1.0;
     let zoomLevel = loadZoomFromStorage();
 
+    // Side view direction control
+    // 'auto' = automatically pick lower terrain side, 'left' = +90°, 'right' = -90°
+    const SideViewModes = { AUTO: 'auto', LEFT: 'left', RIGHT: 'right' };
+    let sideViewMode = SideViewModes.AUTO;
+
+    // Camera stability detection - auto-fallback to bird's eye when chaotic
+    const STABILITY_HISTORY_SIZE = 10;          // Number of frames to track
+    const STABILITY_JITTER_THRESHOLD = 50;      // Max acceptable bearing change per frame (degrees)
+    const STABILITY_ALTITUDE_THRESHOLD = 200;   // Max acceptable altitude change per frame (meters)
+    const VISIBILITY_LOST_FRAMES = 15;          // Frames before considering rider "lost"
+    let cameraHistory = [];                     // Recent camera states for jitter detection
+    let framesWithRiderOutOfView = 0;           // Counter for visibility detection
+    let stabilityFallbackActive = false;        // Whether we auto-switched to bird's eye
+    let previousCameraMode = null;              // Mode to return to after stabilization
+
     // Scrubber drag state for overview mode
     let isScrubberDragging = false;
     let overviewTransitionProgress = 0; // 0 = normal view, 1 = full overview
@@ -487,15 +502,58 @@
 
             case CameraModes.SIDE_VIEW: {
                 // Side view: perpendicular to route direction
+                // Intelligently chooses the lower terrain side (valley) or uses manual override
                 const offsetSide = config.offsetSide * zoom;
                 const offsetUp = config.offsetUp * zoom;
-                const sideBearing = (forwardBearing + 90) % 360;
-                const offsetPoint = turf.destination(
+
+                // Calculate both potential side positions
+                const leftBearing = (forwardBearing + 90) % 360;
+                const rightBearing = (forwardBearing - 90 + 360) % 360;
+
+                const leftPoint = turf.destination(
                     turf.point([dotPoint.lng, dotPoint.lat]),
                     offsetSide / 1000,
-                    sideBearing,
+                    leftBearing,
                     { units: 'kilometers' }
                 );
+                const rightPoint = turf.destination(
+                    turf.point([dotPoint.lng, dotPoint.lat]),
+                    offsetSide / 1000,
+                    rightBearing,
+                    { units: 'kilometers' }
+                );
+
+                let chosenSide = 'left'; // default
+                let sideBearing = leftBearing;
+                let offsetPoint = leftPoint;
+
+                if (sideViewMode === SideViewModes.LEFT) {
+                    // Force left side (+90°)
+                    chosenSide = 'left';
+                } else if (sideViewMode === SideViewModes.RIGHT) {
+                    // Force right side (-90°)
+                    chosenSide = 'right';
+                } else {
+                    // Auto mode: query terrain on both sides and pick the lower one
+                    try {
+                        const leftTerrain = map.queryTerrainElevation(leftPoint.geometry.coordinates);
+                        const rightTerrain = map.queryTerrainElevation(rightPoint.geometry.coordinates);
+
+                        if (leftTerrain !== null && rightTerrain !== null) {
+                            // Pick the side with lower terrain (valley side)
+                            chosenSide = leftTerrain <= rightTerrain ? 'left' : 'right';
+                        }
+                    } catch (e) {
+                        // Terrain query failed, stick with default
+                    }
+                }
+
+                // Apply chosen side
+                if (chosenSide === 'right') {
+                    sideBearing = rightBearing;
+                    offsetPoint = rightPoint;
+                }
+
                 cameraLng = offsetPoint.geometry.coordinates[0];
                 cameraLat = offsetPoint.geometry.coordinates[1];
                 cameraAlt = dotPoint.alt + offsetUp;
@@ -538,7 +596,184 @@
                 return null;
         }
 
+        // Terrain collision detection: ensure camera is above terrain at its position
+        // This prevents the camera from being placed inside mountains on steep terrain
+        const minTerrainClearance = 50; // meters above terrain
+        try {
+            const terrainElevation = map.queryTerrainElevation([cameraLng, cameraLat]);
+            if (terrainElevation !== null && terrainElevation !== undefined) {
+                const minAltitude = terrainElevation + minTerrainClearance;
+                if (cameraAlt < minAltitude) {
+                    cameraAlt = minAltitude;
+                }
+            }
+        } catch (e) {
+            // Terrain query not available, continue with calculated altitude
+        }
+
         return createCameraState(cameraLng, cameraLat, cameraAlt, cameraBearing, cameraPitch);
+    }
+
+    /**
+     * Check if camera is experiencing chaotic jitter
+     * Returns true if the camera should fall back to a stable mode
+     */
+    function detectCameraInstability(currentState) {
+        if (!currentState || cameraHistory.length < 2) return false;
+
+        // Don't check stability if we're already in bird's eye (the stable fallback)
+        if (currentCameraMode === CameraModes.BIRDS_EYE) return false;
+
+        // Calculate bearing change from last frame
+        const lastState = cameraHistory[cameraHistory.length - 1];
+        if (!lastState) return false;
+
+        // Bearing difference (handle wrap-around)
+        let bearingDiff = Math.abs(currentState.bearing - lastState.bearing);
+        if (bearingDiff > 180) bearingDiff = 360 - bearingDiff;
+
+        // Altitude difference
+        const altDiff = Math.abs(currentState.alt - lastState.alt);
+
+        // Check for extreme single-frame changes
+        if (bearingDiff > STABILITY_JITTER_THRESHOLD || altDiff > STABILITY_ALTITUDE_THRESHOLD) {
+            return true;
+        }
+
+        // Check for sustained jitter over multiple frames
+        if (cameraHistory.length >= STABILITY_HISTORY_SIZE) {
+            let totalBearingChange = 0;
+            let directionReversals = 0;
+            let lastBearingDelta = 0;
+
+            for (let i = 1; i < cameraHistory.length; i++) {
+                let bDiff = cameraHistory[i].bearing - cameraHistory[i - 1].bearing;
+                // Normalize to -180 to 180
+                if (bDiff > 180) bDiff -= 360;
+                if (bDiff < -180) bDiff += 360;
+
+                totalBearingChange += Math.abs(bDiff);
+
+                // Count direction reversals (sign changes)
+                if (lastBearingDelta !== 0 && Math.sign(bDiff) !== Math.sign(lastBearingDelta)) {
+                    directionReversals++;
+                }
+                lastBearingDelta = bDiff;
+            }
+
+            // High total change with many reversals = jitter
+            const avgBearingChange = totalBearingChange / cameraHistory.length;
+            if (avgBearingChange > 15 && directionReversals >= STABILITY_HISTORY_SIZE / 2) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Check if the rider/dot is visible in the viewport
+     * Returns true if rider is visible
+     */
+    function isRiderVisible(dotPoint) {
+        if (!dotPoint || !map) return true; // Assume visible if we can't check
+
+        try {
+            // Project the rider's position to screen coordinates
+            const screenPos = map.project([dotPoint.lng, dotPoint.lat]);
+            const canvas = map.getCanvas();
+            const width = canvas.width;
+            const height = canvas.height;
+
+            // Check if within viewport (with some margin)
+            const margin = 50; // pixels
+            const visible = screenPos.x >= -margin &&
+                           screenPos.x <= width + margin &&
+                           screenPos.y >= -margin &&
+                           screenPos.y <= height + margin;
+
+            return visible;
+        } catch (e) {
+            return true; // Assume visible on error
+        }
+    }
+
+    /**
+     * Update camera history for stability tracking
+     */
+    function updateCameraHistory(state) {
+        if (!state) return;
+
+        cameraHistory.push({
+            lng: state.lng,
+            lat: state.lat,
+            alt: state.alt,
+            bearing: state.bearing,
+            pitch: state.pitch,
+            timestamp: performance.now()
+        });
+
+        // Keep only recent history
+        while (cameraHistory.length > STABILITY_HISTORY_SIZE) {
+            cameraHistory.shift();
+        }
+    }
+
+    /**
+     * Handle stability fallback - switch to bird's eye when camera is chaotic
+     * Returns the camera state to use (possibly overridden to bird's eye)
+     */
+    function handleStabilityFallback(originalState, dotPoint, nextPoint, deltaTime) {
+        // Check for instability
+        const isUnstable = detectCameraInstability(originalState);
+        const riderVisible = isRiderVisible(dotPoint);
+
+        // Track frames with rider out of view
+        if (!riderVisible) {
+            framesWithRiderOutOfView++;
+        } else {
+            framesWithRiderOutOfView = 0;
+        }
+
+        const riderLostTooLong = framesWithRiderOutOfView >= VISIBILITY_LOST_FRAMES;
+
+        // Trigger fallback if camera is unstable or rider is lost
+        if ((isUnstable || riderLostTooLong) && !stabilityFallbackActive) {
+            // Remember the mode we were in
+            previousCameraMode = currentCameraMode;
+            stabilityFallbackActive = true;
+
+            // Switch to bird's eye
+            console.log('Camera stability fallback: switching to bird\'s eye',
+                        isUnstable ? '(jitter detected)' : '(rider out of view)');
+            transitionToMode(CameraModes.BIRDS_EYE);
+
+            // Clear history to start fresh when we return
+            cameraHistory = [];
+        }
+
+        // Check if we can return from fallback
+        if (stabilityFallbackActive && currentCameraMode === CameraModes.BIRDS_EYE) {
+            // Stay in bird's eye - the user can manually switch back when ready
+            // We don't auto-return because the terrain might still be chaotic
+        }
+
+        // Return bird's eye state if fallback is active
+        if (stabilityFallbackActive) {
+            return calculateCameraForMode(CameraModes.BIRDS_EYE, dotPoint, nextPoint, deltaTime);
+        }
+
+        return originalState;
+    }
+
+    /**
+     * Reset stability fallback (called when user manually changes camera mode)
+     */
+    function resetStabilityFallback() {
+        stabilityFallbackActive = false;
+        previousCameraMode = null;
+        framesWithRiderOutOfView = 0;
+        cameraHistory = [];
     }
 
     // Flag for free navigation mode when animation is paused
@@ -549,6 +784,10 @@
      */
     function transitionToMode(newMode) {
         if (newMode === currentCameraMode && modeTransitionProgress >= 1) return;
+
+        // Reset stability fallback when user manually changes mode
+        // This allows them to try other modes after an auto-fallback
+        resetStabilityFallback();
 
         // Cancel user override and free navigation
         userOverrideActive = false;
@@ -606,10 +845,27 @@
         });
 
         // Update mode indicator
+        updateCameraModeIndicator();
+    }
+
+    /**
+     * Update the camera mode indicator text
+     * Shows side view direction when in side view mode
+     */
+    function updateCameraModeIndicator() {
         const indicator = document.getElementById('camera-mode-indicator');
         const label = indicator?.querySelector('.mode-label');
         if (label) {
-            label.textContent = CameraModeNames[mode] || mode;
+            let modeName = CameraModeNames[currentCameraMode] || currentCameraMode;
+
+            // Add side view direction indicator
+            if (currentCameraMode === CameraModes.SIDE_VIEW || targetCameraMode === CameraModes.SIDE_VIEW) {
+                const directionLabel = sideViewMode === SideViewModes.AUTO ? 'Auto' :
+                                       sideViewMode === SideViewModes.LEFT ? 'Left' : 'Right';
+                modeName = `Side View (${directionLabel})`;
+            }
+
+            label.textContent = modeName;
         }
         indicator?.classList.remove('user-control');
     }
@@ -630,12 +886,7 @@
      * Hide user control indicator and restore mode name
      */
     function hideUserControlIndicator() {
-        const indicator = document.getElementById('camera-mode-indicator');
-        const label = indicator?.querySelector('.mode-label');
-        if (label) {
-            label.textContent = CameraModeNames[currentCameraMode] || currentCameraMode;
-        }
-        indicator?.classList.remove('user-control');
+        updateCameraModeIndicator();
     }
 
     /**
@@ -1128,6 +1379,11 @@
                 case 'S':
                     transitionToMode(CameraModes.SIDE_VIEW);
                     break;
+                case 'x':
+                case 'X':
+                    // Cycle side view direction: auto -> left -> right -> auto
+                    cycleSideViewMode();
+                    break;
                 case 'v':
                 case 'V':
                     transitionToMode(CameraModes.CINEMATIC);
@@ -1227,6 +1483,37 @@
         freeNavigationEnabled = false;
         updateCamera(0.016);
         // Re-enable free navigation if paused
+        if (!isPlaying) {
+            freeNavigationEnabled = true;
+        }
+    }
+
+    /**
+     * Cycle through side view modes: auto -> left -> right -> auto
+     * Updates the camera mode indicator to show current mode
+     * Also switches to side view if not already in it
+     */
+    function cycleSideViewMode() {
+        // Cycle through modes
+        if (sideViewMode === SideViewModes.AUTO) {
+            sideViewMode = SideViewModes.LEFT;
+        } else if (sideViewMode === SideViewModes.LEFT) {
+            sideViewMode = SideViewModes.RIGHT;
+        } else {
+            sideViewMode = SideViewModes.AUTO;
+        }
+
+        // If not in side view, switch to it
+        if (currentCameraMode !== CameraModes.SIDE_VIEW && targetCameraMode !== CameraModes.SIDE_VIEW) {
+            transitionToMode(CameraModes.SIDE_VIEW);
+        }
+
+        // Update the camera mode indicator
+        updateCameraModeIndicator();
+
+        // Force camera update to apply the new side immediately
+        freeNavigationEnabled = false;
+        updateCamera(0.016);
         if (!isPlaying) {
             freeNavigationEnabled = true;
         }
@@ -1516,8 +1803,15 @@
         if (!dotPoint || !directionPoint) return;
 
         // Calculate target camera state for the current/target mode
-        const targetState = calculateCameraForMode(targetCameraMode, dotPoint, directionPoint, deltaTime);
+        let targetState = calculateCameraForMode(targetCameraMode, dotPoint, directionPoint, deltaTime);
         if (!targetState) return;
+
+        // Check for camera stability and apply fallback if needed
+        // This detects jitter/chaos and rider visibility issues
+        targetState = handleStabilityFallback(targetState, dotPoint, directionPoint, deltaTime);
+
+        // Update camera history for stability tracking
+        updateCameraHistory(targetState);
 
         let finalState;
 
