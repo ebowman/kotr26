@@ -45,25 +45,33 @@
         <section class="routes-section">
             <div class="container">
                 <h2>Route Schedule</h2>
+                <p class="routes-intro">Choose your adventure each day. Compare short and long options at a glance.</p>
+
                 <div class="route-cards" id="route-cards">
-                    <!-- Day 1 -->
-                    <article class="route-card" data-day="1">
+                    <!-- Day 1 - Warmup (No Options) -->
+                    <article class="route-card warmup" data-day="1">
                         <div class="card-header">
                             <span class="day-badge">Day 1</span>
-                            <time datetime="2026-05-29">May 29, 2026</time>
+                            <time datetime="2026-05-29">May 29</time>
+                            <span class="route-type-badge warmup">WARMUP</span>
                         </div>
-                        <h3>Avignon Exploration</h3>
-                        <div class="route-stats">
+                        <h3>Shake Out the Travel Legs</h3>
+                        <div class="route-stats-single">
                             <div class="stat">
-                                <span class="stat-value">80</span>
+                                <span class="stat-value">46</span>
                                 <span class="stat-label">km</span>
                             </div>
                             <div class="stat">
-                                <span class="stat-value">800</span>
+                                <span class="stat-value">240</span>
                                 <span class="stat-label">m elev</span>
                             </div>
+                            <div class="difficulty" data-level="1">
+                                <span class="difficulty-dots" aria-label="Difficulty: Easy">●○○○</span>
+                                <span class="difficulty-label">Easy</span>
+                            </div>
+                            <div class="duration">~2 hours</div>
                         </div>
-                        <p class="route-description">Discover the historic city of Avignon and its stunning surroundings.</p>
+                        <p class="route-description">Ease into the adventure with a gentle spin through Provençal countryside.</p>
                         <div class="card-actions">
                             <button class="btn btn-flyover" data-route="KOTR_Avignon_D1.fit">
                                 <span class="icon">🎬</span> 3D Flyover
@@ -74,108 +82,181 @@
                         </div>
                     </article>
 
-                    <!-- Day 2 -->
+                    <!-- Day 2 - Side-by-Side Comparison -->
                     <article class="route-card" data-day="2">
                         <div class="card-header">
                             <span class="day-badge">Day 2</span>
-                            <time datetime="2026-05-30">May 30, 2026</time>
+                            <time datetime="2026-05-30">May 30</time>
                         </div>
-                        <h3>Wine Country North</h3>
-                        <div class="route-stats">
-                            <div class="stat">
-                                <span class="stat-value">95</span>
-                                <span class="stat-label">km</span>
-                            </div>
-                            <div class="stat">
-                                <span class="stat-value">600</span>
-                                <span class="stat-label">m elev</span>
-                            </div>
-                        </div>
-                        <p class="route-description">Rolling through the famous Côtes du Rhône vineyards.</p>
-                        <div class="route-options">
-                            <button class="btn btn-option active" data-variant="standard">Standard</button>
-                            <button class="btn btn-option" data-variant="long">Long</button>
-                        </div>
-                        <div class="card-actions">
-                            <button class="btn btn-flyover" data-route="KOTR_Avignon_Standard_D2.fit" data-route-long="KOTR_Avignon_Long_D2.fit">
-                                <span class="icon">🎬</span> 3D Flyover
-                            </button>
-                            <button class="btn btn-download" data-route="KOTR_Avignon_Standard_D2.fit" data-route-long="KOTR_Avignon_Long_D2.fit">
-                                <span class="icon">📥</span> GPX
-                            </button>
-                        </div>
-                    </article>
+                        <h3>Find Your Rhythm</h3>
 
-                    <!-- Day 3 - THE BIG ONE -->
-                    <article class="route-card featured" data-day="3">
-                        <div class="card-header">
-                            <span class="day-badge">Day 3</span>
-                            <time datetime="2026-05-31">May 31, 2026</time>
-                            <span class="featured-badge">EPIC DAY</span>
-                        </div>
-                        <h3>Luberon Villages</h3>
-                        <div class="route-stats">
-                            <div class="stat">
-                                <span class="stat-value">95</span>
-                                <span class="stat-label">km</span>
+                        <div class="route-comparison">
+                            <div class="route-option" data-variant="short">
+                                <div class="option-header">SHORT</div>
+                                <div class="option-stats">
+                                    <div class="stat-row"><span class="stat-value">80</span> km</div>
+                                    <div class="stat-row"><span class="stat-value">600</span> m elev</div>
+                                </div>
+                                <div class="difficulty" data-level="2">
+                                    <span class="difficulty-dots" aria-label="Difficulty: Moderate">●●○○</span>
+                                    <span class="difficulty-label">Moderate</span>
+                                </div>
+                                <div class="duration">~3-4 hours</div>
                             </div>
-                            <div class="stat">
-                                <span class="stat-value">1,000</span>
-                                <span class="stat-label">m elev</span>
+
+                            <div class="route-option" data-variant="long">
+                                <div class="option-header">LONG</div>
+                                <div class="option-stats">
+                                    <div class="stat-row"><span class="stat-value">106</span> km</div>
+                                    <div class="stat-row"><span class="stat-value">1,000</span> m elev</div>
+                                </div>
+                                <div class="difficulty" data-level="3">
+                                    <span class="difficulty-dots" aria-label="Difficulty: Challenging">●●●○</span>
+                                    <span class="difficulty-label">Challenging</span>
+                                </div>
+                                <div class="duration">~4-5 hours</div>
                             </div>
                         </div>
-                        <div class="route-long-option">
-                            <div class="ventoux-callout">
-                                <span class="mountain-icon">🏔️</span>
-                                <div>
-                                    <strong>Long Option: Mont Ventoux!</strong>
-                                    <p>~140 km • ~2,500 m elevation • The Beast of Provence</p>
+
+                        <div class="card-actions">
+                            <div class="action-group">
+                                <button class="btn btn-flyover btn-split" data-route-short="KOTR_Avignon_Standard_D2.fit" data-route-long="KOTR_Avignon_Long_D2.fit">
+                                    <span class="icon">🎬</span> 3D Flyover <span class="caret">▾</span>
+                                </button>
+                                <div class="dropdown">
+                                    <button class="dropdown-item" data-variant="short">Short Route</button>
+                                    <button class="dropdown-item" data-variant="long">Long Route</button>
+                                </div>
+                            </div>
+                            <div class="action-group">
+                                <button class="btn btn-download btn-split" data-route-short="KOTR_Avignon_Standard_D2.fit" data-route-long="KOTR_Avignon_Long_D2.fit">
+                                    <span class="icon">📥</span> GPX <span class="caret">▾</span>
+                                </button>
+                                <div class="dropdown">
+                                    <button class="dropdown-item" data-variant="short">Short Route</button>
+                                    <button class="dropdown-item" data-variant="long">Long Route</button>
                                 </div>
                             </div>
                         </div>
-                        <div class="route-options">
-                            <button class="btn btn-option active" data-variant="standard">Standard</button>
-                            <button class="btn btn-option ventoux" data-variant="long">Ventoux 🏔️</button>
+                    </article>
+
+                    <!-- Day 3 - EPIC DAY: Luberon vs Ventoux -->
+                    <article class="route-card featured" data-day="3">
+                        <div class="card-header">
+                            <span class="day-badge">Day 3</span>
+                            <time datetime="2026-05-31">May 31</time>
+                            <span class="featured-badge">EPIC DAY</span>
                         </div>
+                        <h3>The Main Event</h3>
+
+                        <div class="route-comparison epic">
+                            <div class="route-option" data-variant="short">
+                                <div class="option-header">LUBERON</div>
+                                <div class="option-stats">
+                                    <div class="stat-row"><span class="stat-value">100</span> km</div>
+                                    <div class="stat-row"><span class="stat-value">1,100</span> m elev</div>
+                                </div>
+                                <div class="difficulty" data-level="3">
+                                    <span class="difficulty-dots" aria-label="Difficulty: Challenging">●●●○</span>
+                                    <span class="difficulty-label">Challenging</span>
+                                </div>
+                                <div class="duration">~4-5 hours</div>
+                            </div>
+
+                            <div class="route-option ventoux" data-variant="long">
+                                <div class="option-header">
+                                    <span class="mountain-icon">🏔️</span> MONT VENTOUX
+                                </div>
+                                <div class="option-stats">
+                                    <div class="stat-row"><span class="stat-value">131</span> km</div>
+                                    <div class="stat-row"><span class="stat-value">2,200</span> m elev</div>
+                                </div>
+                                <div class="difficulty" data-level="4">
+                                    <span class="difficulty-dots" aria-label="Difficulty: Epic">●●●●</span>
+                                    <span class="difficulty-label">Epic</span>
+                                </div>
+                                <div class="duration">~6-7 hours</div>
+                                <div class="special-note">Beast of Provence • Summit 1,909m</div>
+                            </div>
+                        </div>
+
                         <div class="card-actions">
-                            <button class="btn btn-flyover" data-route="KOTR_Avignon_D3_Standard.fit" data-route-long="KOTR_Ventoux_D3_Long.fit">
-                                <span class="icon">🎬</span> 3D Flyover
-                            </button>
-                            <button class="btn btn-download" data-route="KOTR_Avignon_D3_Standard.fit" data-route-long="KOTR_Ventoux_D3_Long.fit">
-                                <span class="icon">📥</span> GPX
-                            </button>
+                            <div class="action-group">
+                                <button class="btn btn-flyover btn-split" data-route-short="KOTR_Avignon_D3_Standard.fit" data-route-long="KOTR_Ventoux_D3_Long.fit">
+                                    <span class="icon">🎬</span> 3D Flyover <span class="caret">▾</span>
+                                </button>
+                                <div class="dropdown">
+                                    <button class="dropdown-item" data-variant="short">Luberon</button>
+                                    <button class="dropdown-item" data-variant="long">Mont Ventoux</button>
+                                </div>
+                            </div>
+                            <div class="action-group">
+                                <button class="btn btn-download btn-split" data-route-short="KOTR_Avignon_D3_Standard.fit" data-route-long="KOTR_Ventoux_D3_Long.fit">
+                                    <span class="icon">📥</span> GPX <span class="caret">▾</span>
+                                </button>
+                                <div class="dropdown">
+                                    <button class="dropdown-item" data-variant="short">Luberon</button>
+                                    <button class="dropdown-item" data-variant="long">Mont Ventoux</button>
+                                </div>
+                            </div>
                         </div>
                     </article>
 
-                    <!-- Day 4 -->
+                    <!-- Day 4 - Final Celebration -->
                     <article class="route-card" data-day="4">
                         <div class="card-header">
                             <span class="day-badge">Day 4</span>
-                            <time datetime="2026-06-01">June 1, 2026</time>
+                            <time datetime="2026-06-01">June 1</time>
                         </div>
-                        <h3>Final Celebration</h3>
-                        <div class="route-stats">
-                            <div class="stat">
-                                <span class="stat-value">84.7</span>
-                                <span class="stat-label">km</span>
+                        <h3>Celebrate Together</h3>
+
+                        <div class="route-comparison">
+                            <div class="route-option" data-variant="short">
+                                <div class="option-header">SHORT</div>
+                                <div class="option-stats">
+                                    <div class="stat-row"><span class="stat-value">85</span> km</div>
+                                    <div class="stat-row"><span class="stat-value">500</span> m elev</div>
+                                </div>
+                                <div class="difficulty" data-level="2">
+                                    <span class="difficulty-dots" aria-label="Difficulty: Moderate">●●○○</span>
+                                    <span class="difficulty-label">Moderate</span>
+                                </div>
+                                <div class="duration">~3-4 hours</div>
                             </div>
-                            <div class="stat">
-                                <span class="stat-value">738</span>
-                                <span class="stat-label">m elev</span>
+
+                            <div class="route-option" data-variant="long">
+                                <div class="option-header">LONG</div>
+                                <div class="option-stats">
+                                    <div class="stat-row"><span class="stat-value">95</span> km</div>
+                                    <div class="stat-row"><span class="stat-value">620</span> m elev</div>
+                                </div>
+                                <div class="difficulty" data-level="2">
+                                    <span class="difficulty-dots" aria-label="Difficulty: Moderate">●●○○</span>
+                                    <span class="difficulty-label">Moderate</span>
+                                </div>
+                                <div class="duration">~3.5-4.5 hours</div>
                             </div>
                         </div>
-                        <p class="route-description">Celebratory ride back to Avignon. Details to be finalized.</p>
-                        <div class="route-options">
-                            <button class="btn btn-option active" data-variant="standard">Standard</button>
-                            <button class="btn btn-option" data-variant="long">Long</button>
-                        </div>
+
                         <div class="card-actions">
-                            <button class="btn btn-flyover" data-route="KOTR_Avignon_D4_Standard.fit" data-route-long="KOTR_Avignon_D4_Long.fit">
-                                <span class="icon">🎬</span> 3D Flyover
-                            </button>
-                            <button class="btn btn-download" data-route="KOTR_Avignon_D4_Standard.fit" data-route-long="KOTR_Avignon_D4_Long.fit">
-                                <span class="icon">📥</span> GPX
-                            </button>
+                            <div class="action-group">
+                                <button class="btn btn-flyover btn-split" data-route-short="KOTR_Avignon_D4_Standard.fit" data-route-long="KOTR_Avignon_D4_Long.fit">
+                                    <span class="icon">🎬</span> 3D Flyover <span class="caret">▾</span>
+                                </button>
+                                <div class="dropdown">
+                                    <button class="dropdown-item" data-variant="short">Short Route</button>
+                                    <button class="dropdown-item" data-variant="long">Long Route</button>
+                                </div>
+                            </div>
+                            <div class="action-group">
+                                <button class="btn btn-download btn-split" data-route-short="KOTR_Avignon_D4_Standard.fit" data-route-long="KOTR_Avignon_D4_Long.fit">
+                                    <span class="icon">📥</span> GPX <span class="caret">▾</span>
+                                </button>
+                                <div class="dropdown">
+                                    <button class="dropdown-item" data-variant="short">Short Route</button>
+                                    <button class="dropdown-item" data-variant="long">Long Route</button>
+                                </div>
+                            </div>
                         </div>
                     </article>
                 </div>

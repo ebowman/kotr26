@@ -10,36 +10,44 @@
     // For demo purposes, using a placeholder that should be replaced
     const MAPBOX_TOKEN = 'pk.eyJ1IjoiZWJvd21hbiIsImEiOiJjbWE1ZWVwdzYwODhwMmlzZnU4NTlyem1rIn0.E10X5hj2NTgViJexKpvrOg';
 
-    // Route configurations
+    // Route configurations - Updated with correct data from specification
     const ROUTES = {
         day1: {
             standard: 'routes/KOTR_Avignon_D1.fit',
-            name: 'Day 1 - Avignon Exploration',
-            distance: 80,
-            elevation: 800
+            name: 'Day 1 - Warmup',
+            tagline: 'Shake out the travel legs',
+            type: 'warmup',
+            distance: 46,
+            elevation: 240,
+            difficulty: 1,
+            duration: '~2 hours'
         },
         day2: {
             standard: 'routes/KOTR_Avignon_Standard_D2.fit',
             long: 'routes/KOTR_Avignon_Long_D2.fit',
-            name: 'Day 2 - Wine Country',
-            distance: 95,
-            elevation: 600
+            name: 'Day 2 - Wine Country West',
+            tagline: 'Find your rhythm',
+            type: 'choice',
+            short: { distance: 80, elevation: 600, difficulty: 2, duration: '~3-4 hours' },
+            long: { distance: 106, elevation: 1000, difficulty: 3, duration: '~4-5 hours' }
         },
         day3: {
             standard: 'routes/KOTR_Avignon_D3_Standard.fit',
             long: 'routes/KOTR_Ventoux_D3_Long.fit',
-            name: 'Day 3 - Luberon / Ventoux',
-            distance: 95,
-            longDistance: 140,
-            elevation: 1000,
-            longElevation: 2500
+            name: 'Day 3 - Luberon & Ventoux',
+            tagline: 'The Main Event',
+            type: 'epic',
+            short: { label: 'Luberon', distance: 100, elevation: 1100, difficulty: 3, duration: '~4-5 hours' },
+            long: { label: 'Mont Ventoux', distance: 131, elevation: 2200, difficulty: 4, duration: '~6-7 hours', special: true }
         },
         day4: {
             standard: 'routes/KOTR_Avignon_D4_Standard.fit',
             long: 'routes/KOTR_Avignon_D4_Long.fit',
             name: 'Day 4 - Final Celebration',
-            distance: null,
-            elevation: null
+            tagline: 'Celebrate together',
+            type: 'choice',
+            short: { distance: 85, elevation: 500, difficulty: 2, duration: '~3-4 hours' },
+            long: { distance: 95, elevation: 620, difficulty: 2, duration: '~3.5-4.5 hours' }
         }
     };
 
@@ -142,70 +150,104 @@
     }
 
     /**
-     * Setup flyover buttons
+     * Setup flyover buttons and dropdown items
      */
     function setupFlyoverButtons() {
-        const flyoverButtons = document.querySelectorAll('.btn-flyover');
-
-        flyoverButtons.forEach(btn => {
+        // Handle simple flyover buttons (Day 1 warmup)
+        const simpleFlyoverButtons = document.querySelectorAll('.btn-flyover:not(.btn-split)');
+        simpleFlyoverButtons.forEach(btn => {
             btn.addEventListener('click', () => {
-                const card = btn.closest('.route-card');
-                const day = parseInt(card.dataset.day);
-                const variant = selectedVariants[day] || 'standard';
+                const routeFile = btn.dataset.route;
+                if (routeFile) {
+                    window.location.href = `flyover.html?route=${encodeURIComponent(routeFile)}`;
+                }
+            });
+        });
+
+        // Handle dropdown flyover items (Days 2-4)
+        const flyoverDropdowns = document.querySelectorAll('.action-group:has(.btn-flyover) .dropdown-item');
+        flyoverDropdowns.forEach(item => {
+            item.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const actionGroup = item.closest('.action-group');
+                const btn = actionGroup.querySelector('.btn-flyover');
+                const variant = item.dataset.variant;
 
                 let routeFile;
-                if (variant === 'long' && btn.dataset.routeLong) {
+                if (variant === 'long') {
                     routeFile = btn.dataset.routeLong;
                 } else {
-                    routeFile = btn.dataset.route;
+                    routeFile = btn.dataset.routeShort;
                 }
 
-                // Navigate to flyover page with route parameter
-                window.location.href = `flyover.html?route=${encodeURIComponent(routeFile)}`;
+                if (routeFile) {
+                    window.location.href = `flyover.html?route=${encodeURIComponent(routeFile)}`;
+                }
             });
         });
     }
 
     /**
-     * Setup download buttons
+     * Setup download buttons and dropdown items
      */
     function setupDownloadButtons() {
-        const downloadButtons = document.querySelectorAll('.btn-download');
-
-        downloadButtons.forEach(btn => {
+        // Handle simple download buttons (Day 1 warmup)
+        const simpleDownloadButtons = document.querySelectorAll('.btn-download:not(.btn-split)');
+        simpleDownloadButtons.forEach(btn => {
             btn.addEventListener('click', async () => {
-                const card = btn.closest('.route-card');
-                const day = parseInt(card.dataset.day);
-                const variant = selectedVariants[day] || 'standard';
-
-                let routeFile;
-                if (variant === 'long' && btn.dataset.routeLong) {
-                    routeFile = btn.dataset.routeLong;
-                } else {
-                    routeFile = btn.dataset.route;
-                }
-
-                // Show loading state
-                const originalText = btn.innerHTML;
-                btn.innerHTML = '<span class="icon">⏳</span> Loading...';
-                btn.disabled = true;
-
-                try {
-                    // Load and parse FIT file
-                    const routeData = await FitParser.loadFitFile(`routes/${routeFile.split('/').pop()}`);
-
-                    // Download as GPX
-                    const gpxFilename = routeFile.replace('.fit', '.gpx').split('/').pop();
-                    FitParser.downloadGPX(routeData, gpxFilename);
-                } catch (error) {
-                    console.error('Failed to download route:', error);
-                    alert('Failed to download route. Please try again.');
-                } finally {
-                    btn.innerHTML = originalText;
-                    btn.disabled = false;
+                const routeFile = btn.dataset.route;
+                if (routeFile) {
+                    await downloadRoute(btn, routeFile);
                 }
             });
         });
+
+        // Handle dropdown download items (Days 2-4)
+        const downloadDropdowns = document.querySelectorAll('.action-group:has(.btn-download) .dropdown-item');
+        downloadDropdowns.forEach(item => {
+            item.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                const actionGroup = item.closest('.action-group');
+                const btn = actionGroup.querySelector('.btn-download');
+                const variant = item.dataset.variant;
+
+                let routeFile;
+                if (variant === 'long') {
+                    routeFile = btn.dataset.routeLong;
+                } else {
+                    routeFile = btn.dataset.routeShort;
+                }
+
+                if (routeFile) {
+                    await downloadRoute(btn, routeFile);
+                }
+            });
+        });
+    }
+
+    /**
+     * Download a route file as GPX
+     */
+    async function downloadRoute(btn, routeFile) {
+        // Show loading state
+        const originalText = btn.innerHTML;
+        btn.innerHTML = '<span class="icon">⏳</span> Loading...';
+        btn.disabled = true;
+
+        try {
+            // Load and parse FIT file
+            const routeData = await FitParser.loadFitFile(`routes/${routeFile.split('/').pop()}`);
+
+            // Download as GPX
+            const gpxFilename = routeFile.replace('.fit', '.gpx').split('/').pop();
+            FitParser.downloadGPX(routeData, gpxFilename);
+        } catch (error) {
+            console.error('Failed to download route:', error);
+            alert('Failed to download route. Please try again.');
+        } finally {
+            btn.innerHTML = originalText;
+            btn.disabled = false;
+        }
     }
 
     /**
@@ -236,6 +278,43 @@
     }
 
     /**
+     * Setup dropdown toggle for touch devices
+     */
+    function setupDropdownToggles() {
+        const splitButtons = document.querySelectorAll('.btn-split');
+
+        splitButtons.forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                // Check if touch device
+                if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
+                    e.preventDefault();
+                    e.stopPropagation();
+
+                    const actionGroup = btn.closest('.action-group');
+                    const dropdown = actionGroup.querySelector('.dropdown');
+
+                    // Close other open dropdowns
+                    document.querySelectorAll('.dropdown.open').forEach(d => {
+                        if (d !== dropdown) d.classList.remove('open');
+                    });
+
+                    // Toggle this dropdown
+                    dropdown.classList.toggle('open');
+                }
+            });
+        });
+
+        // Close dropdowns when clicking outside
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('.action-group')) {
+                document.querySelectorAll('.dropdown.open').forEach(d => {
+                    d.classList.remove('open');
+                });
+            }
+        });
+    }
+
+    /**
      * Initialize everything on DOM ready
      */
     function init() {
@@ -243,6 +322,7 @@
         setupRouteOptions();
         setupFlyoverButtons();
         setupDownloadButtons();
+        setupDropdownToggles();
         initWeather();
         setupSmoothScroll();
 

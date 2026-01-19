@@ -30,6 +30,28 @@
         gap: var(--space-md);
     }
 
+    /* Reset warmup banner to stack on tablet/mobile */
+    .route-card.warmup {
+        display: block; /* Reset grid to normal block */
+    }
+
+    .route-card.warmup h3 {
+        margin-bottom: var(--space-md);
+    }
+
+    .route-card.warmup .route-stats-single {
+        margin-bottom: var(--space-md);
+    }
+
+    .route-card.warmup .route-description {
+        margin-bottom: var(--space-md);
+    }
+
+    /* Route comparison stays side-by-side on tablet */
+    .route-comparison {
+        grid-template-columns: 1fr 1fr;
+    }
+
     .route-stats {
         gap: var(--space-lg);
     }
@@ -38,10 +60,16 @@
         font-size: 1.25rem;
     }
 
+    /* Action groups stack on mobile */
     .card-actions {
         flex-direction: column;
     }
 
+    .action-group {
+        width: 100%;
+    }
+
+    .action-group .btn,
     .card-actions .btn {
         width: 100%;
         justify-content: center;
@@ -97,6 +125,53 @@
         justify-content: center;
     }
 
+    /* Route comparison mobile layout */
+    .route-comparison {
+        grid-template-columns: 1fr;
+        gap: var(--space-sm);
+    }
+
+    .route-option {
+        padding: var(--space-sm) var(--space-md);
+    }
+
+    .option-header {
+        font-size: 0.6875rem;
+    }
+
+    .stat-row .stat-value {
+        font-size: 1.125rem;
+    }
+
+    /* Single stats row mobile */
+    .route-stats-single {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: var(--space-sm);
+    }
+
+    .route-stats-single .duration {
+        margin-left: 0;
+    }
+
+    /* Action groups mobile */
+    .card-actions {
+        flex-direction: column;
+    }
+
+    .action-group {
+        width: 100%;
+    }
+
+    .action-group .btn {
+        width: 100%;
+        justify-content: center;
+    }
+
+    .dropdown {
+        min-width: 100%;
+    }
+
     .weather-widget {
         grid-template-columns: repeat(3, 1fr);
     }
@@ -116,6 +191,11 @@
     .routes-section h2,
     .weather-section h2 {
         font-size: 1.5rem;
+    }
+
+    .routes-intro {
+        font-size: 0.875rem;
+        padding: 0 var(--space-sm);
     }
 }
 
@@ -141,8 +221,28 @@
         transform: none;
     }
 
+    .route-option:hover {
+        transform: none;
+        border-color: transparent;
+    }
+
+    .route-option.ventoux:hover {
+        border-color: var(--color-ventoux);
+    }
+
     .weather-day:hover {
         transform: none;
+    }
+
+    /* Touch-friendly dropdowns - require tap instead of hover */
+    .action-group .dropdown {
+        /* Start hidden, JS will toggle */
+    }
+
+    .dropdown-item {
+        min-height: 44px;
+        display: flex;
+        align-items: center;
     }
 }
 
@@ -193,6 +293,27 @@
 
     .route-card.featured {
         background: linear-gradient(180deg, rgba(74, 144, 164, 0.15) 0%, var(--color-surface) 100%);
+    }
+
+    .route-card.warmup {
+        border-left-color: var(--elev-easy);
+    }
+
+    .route-option {
+        background: var(--color-bg);
+    }
+
+    .route-option.ventoux {
+        background: linear-gradient(180deg, rgba(74, 144, 164, 0.2) 0%, var(--color-bg) 100%);
+    }
+
+    .dropdown {
+        background: var(--color-surface);
+        border-color: var(--color-border);
+    }
+
+    .dropdown-item:hover {
+        background: var(--color-bg);
     }
 
     .weather-day {
