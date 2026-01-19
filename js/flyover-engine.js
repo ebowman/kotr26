@@ -843,9 +843,6 @@
         document.getElementById('route-title').textContent = name;
         document.getElementById('stat-distance').textContent = routeData.distance.toFixed(1);
         document.getElementById('stat-elevation').textContent = routeData.elevationGain;
-
-        document.getElementById('elev-min').textContent = `Min: ${routeData.minElevation}m`;
-        document.getElementById('elev-max').textContent = `Max: ${routeData.maxElevation}m`;
     }
 
     /**
@@ -886,11 +883,57 @@
             });
         });
 
-        progressBar.addEventListener('click', (e) => {
-            const rect = progressBar.getBoundingClientRect();
-            const position = (e.clientX - rect.left) / rect.width;
-            seekToPosition(position);
-        });
+        // Profile track click to seek
+        const profileTrack = document.getElementById('profile-track');
+        if (profileTrack) {
+            profileTrack.addEventListener('click', (e) => {
+                const rect = profileTrack.getBoundingClientRect();
+                const position = (e.clientX - rect.left) / rect.width;
+                seekToPosition(position);
+            });
+        }
+
+        // Draggable scrubber
+        const scrubber = document.getElementById('scrubber-handle');
+        if (scrubber && profileTrack) {
+            let isDragging = false;
+
+            const startDrag = (e) => {
+                isDragging = true;
+                e.preventDefault();
+                document.body.style.cursor = 'grabbing';
+                scrubber.style.cursor = 'grabbing';
+            };
+
+            const doDrag = (e) => {
+                if (!isDragging) return;
+                e.preventDefault();
+
+                const rect = profileTrack.getBoundingClientRect();
+                const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+                let position = (clientX - rect.left) / rect.width;
+                position = Math.max(0, Math.min(1, position));
+                seekToPosition(position);
+            };
+
+            const endDrag = () => {
+                if (isDragging) {
+                    isDragging = false;
+                    document.body.style.cursor = '';
+                    scrubber.style.cursor = 'grab';
+                }
+            };
+
+            // Mouse events
+            scrubber.addEventListener('mousedown', startDrag);
+            document.addEventListener('mousemove', doDrag);
+            document.addEventListener('mouseup', endDrag);
+
+            // Touch events
+            scrubber.addEventListener('touchstart', startDrag, { passive: false });
+            document.addEventListener('touchmove', doDrag, { passive: false });
+            document.addEventListener('touchend', endDrag);
+        }
 
         // Camera mode buttons
         modeBtns.forEach(btn => {
@@ -903,9 +946,22 @@
         });
 
         // Shortcuts help toggle
+        const progressWidget = document.getElementById('unified-progress-widget');
+
+        const updateProgressWidgetForHelp = () => {
+            const isHelpVisible = shortcutsHelp && !shortcutsHelp.classList.contains('hidden');
+            if (progressWidget) {
+                progressWidget.classList.toggle('help-visible', isHelpVisible);
+            }
+        };
+
+        // Initialize based on current help state
+        updateProgressWidgetForHelp();
+
         if (shortcutsClose) {
             shortcutsClose.addEventListener('click', () => {
                 shortcutsHelp?.classList.add('hidden');
+                updateProgressWidgetForHelp();
             });
         }
 
@@ -984,6 +1040,7 @@
                 // Help toggle
                 case '?':
                     shortcutsHelp?.classList.toggle('hidden');
+                    updateProgressWidgetForHelp();
                     break;
             }
         });
@@ -1248,14 +1305,66 @@
         // Update route gradient to show progress
         updateRouteGradient(progress);
 
-        // Update elevation profile
+        // Update elevation profile and stats
         if (elevationProfile) {
             const data = elevationProfile.setPosition(progress);
-            document.getElementById('elev-current').textContent = `Current: ${Math.round(data.elevation)}m`;
+
+            // Update grade stat with color coding
+            const gradeEl = document.getElementById('stat-grade');
+            const gradeGroup = gradeEl?.closest('.stat-group');
+            if (gradeEl) {
+                const grade = data.grade || 0;
+                gradeEl.textContent = grade.toFixed(1);
+
+                // Update grade color class
+                if (gradeGroup) {
+                    gradeGroup.classList.remove('climbing', 'steep', 'descending');
+                    if (grade > 8) {
+                        gradeGroup.classList.add('steep');
+                    } else if (grade > 3) {
+                        gradeGroup.classList.add('climbing');
+                    } else if (grade < -2) {
+                        gradeGroup.classList.add('descending');
+                    }
+                }
+            }
+
+            // Update elevation climbed/remaining
+            const elevClimbed = document.getElementById('stat-elev-climbed');
+            const elevLeft = document.getElementById('stat-elev-left');
+            if (elevClimbed && routeData) {
+                // Calculate cumulative elevation gain up to current position
+                const climbedSoFar = calculateElevationGainToPosition(progress);
+                const totalGain = routeData.elevationGain || 0;
+                const remaining = Math.max(0, totalGain - climbedSoFar);
+
+                elevClimbed.textContent = Math.round(climbedSoFar);
+                if (elevLeft) elevLeft.textContent = `${Math.round(remaining)} m to go`;
+            }
         }
 
         // Check for Ventoux summit
         checkVentouxSummit(dotPoint);
+    }
+
+    /**
+     * Calculate cumulative elevation gain up to a position (0-1)
+     */
+    function calculateElevationGainToPosition(position) {
+        if (!routeData || !routeData.coordinates) return 0;
+
+        const coords = routeData.coordinates;
+        const targetIndex = Math.floor(position * (coords.length - 1));
+        let totalGain = 0;
+
+        for (let i = 1; i <= targetIndex && i < coords.length; i++) {
+            const elevDiff = (coords[i][2] || 0) - (coords[i - 1][2] || 0);
+            if (elevDiff > 0) {
+                totalGain += elevDiff;
+            }
+        }
+
+        return totalGain;
     }
 
     /**
@@ -1284,14 +1393,30 @@
     }
 
     /**
-     * Update progress UI elements
+     * Update unified progress widget
      */
     function updateProgress() {
         const currentDistance = progress * totalDistance;
+        const remainingDistance = totalDistance - currentDistance;
+        const progressPercent = progress * 100;
 
-        document.getElementById('progress-fill').style.width = `${progress * 100}%`;
-        document.getElementById('progress-distance').textContent = `${currentDistance.toFixed(1)} km`;
-        document.getElementById('progress-percent').textContent = `${Math.round(progress * 100)}%`;
+        // Update scrubber position and progress overlay
+        const scrubber = document.getElementById('scrubber-handle');
+        const overlay = document.getElementById('progress-overlay');
+        if (scrubber) {
+            scrubber.style.left = `${progressPercent}%`;
+        }
+        if (overlay) {
+            overlay.style.width = `${progressPercent}%`;
+        }
+
+        // Update distance stats
+        const distDone = document.getElementById('stat-distance-done');
+        const distLeft = document.getElementById('stat-distance-left');
+        if (distDone) distDone.textContent = currentDistance.toFixed(1);
+        if (distLeft) distLeft.textContent = `${remainingDistance.toFixed(1)} km left`;
+
+        // Grade and elevation stats are updated in updateDotAndUI via elevationProfile
     }
 
     /**
