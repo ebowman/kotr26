@@ -473,27 +473,47 @@ const FitParser = (function() {
                 5 // window size of 5 points (~15-25m typically)
             );
 
-            // Calculate total stats using smoothed elevation for gain calculation
+            // Calculate total stats using industry-standard algorithm
+            // Track direction changes and only count segments that exceed threshold
+            // This matches how Strava and other apps calculate elevation gain
             let totalDistance = 0;
             let totalElevationGain = 0;
             let minElevation = Infinity;
             let maxElevation = -Infinity;
 
+            // Threshold for counting a climb/descent (calibrated to match Strava)
+            const THRESHOLD = 3.5;
+            let lastExtreme = smoothedElevations[0];
+            let wasClimbing = smoothedElevations.length > 1 ?
+                smoothedElevations[1] > smoothedElevations[0] : false;
+
             for (let i = 0; i < coordinates.length; i++) {
                 const elevation = coordinates[i][2]; // Use raw for min/max
-                const smoothedElev = smoothedElevations[i];
 
                 if (elevation < minElevation) minElevation = elevation;
                 if (elevation > maxElevation) maxElevation = elevation;
 
                 if (i > 0) {
-                    // Use smoothed elevation for gain calculation to reduce noise
-                    const elevDiff = smoothedElev - smoothedElevations[i - 1];
-                    // Only count gains above a small threshold to filter remaining noise
-                    if (elevDiff > 0.1) {
-                        totalElevationGain += elevDiff;
+                    const isClimbing = smoothedElevations[i] > smoothedElevations[i - 1];
+
+                    // Direction change detected - we found a local extremum
+                    if (isClimbing !== wasClimbing) {
+                        const change = smoothedElevations[i - 1] - lastExtreme;
+                        if (change >= THRESHOLD) {
+                            totalElevationGain += change;
+                        }
+                        if (Math.abs(change) >= THRESHOLD) {
+                            lastExtreme = smoothedElevations[i - 1];
+                        }
+                        wasClimbing = isClimbing;
                     }
                 }
+            }
+
+            // Handle final segment
+            const finalChange = smoothedElevations[smoothedElevations.length - 1] - lastExtreme;
+            if (finalChange >= THRESHOLD) {
+                totalElevationGain += finalChange;
             }
 
             // Get distance from last record or calculate

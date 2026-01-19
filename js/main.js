@@ -10,15 +10,16 @@
     // For demo purposes, using a placeholder that should be replaced
     const MAPBOX_TOKEN = 'pk.eyJ1IjoiZWJvd21hbiIsImEiOiJjbWE1ZWVwdzYwODhwMmlzZnU4NTlyem1rIn0.E10X5hj2NTgViJexKpvrOg';
 
-    // Route configurations - Updated with correct data from specification
+    // Route configurations - Updated with DEM-calculated elevation values
+    // Elevation gain calculated using industry-standard algorithm matching Strava
     const ROUTES = {
         day1: {
             standard: 'routes/KOTR_Avignon_D1.fit',
             name: 'Day 1 - Warmup',
             tagline: 'Shake out the travel legs',
             type: 'warmup',
-            distance: 46,
-            elevation: 240,
+            distance: 45,
+            elevation: 100,
             difficulty: 1,
             duration: '~2 hours'
         },
@@ -28,8 +29,8 @@
             name: 'Day 2 - Wine Country West',
             tagline: 'Find your rhythm',
             type: 'choice',
-            short: { distance: 80, elevation: 600, difficulty: 2, duration: '~3-4 hours' },
-            long: { distance: 106, elevation: 1000, difficulty: 3, duration: '~4-5 hours' }
+            short: { distance: 80, elevation: 540, difficulty: 2, duration: '~3-4 hours' },
+            long: { distance: 106, elevation: 910, difficulty: 3, duration: '~4-5 hours' }
         },
         day3: {
             standard: 'routes/KOTR_Avignon_D3_Standard.fit',
@@ -37,8 +38,8 @@
             name: 'Day 3 - Luberon & Ventoux',
             tagline: 'The Main Event',
             type: 'epic',
-            short: { label: 'Luberon', distance: 100, elevation: 1100, difficulty: 3, duration: '~4-5 hours' },
-            long: { label: 'Mont Ventoux', distance: 131, elevation: 2200, difficulty: 4, duration: '~6-7 hours', special: true }
+            short: { label: 'Luberon', distance: 100, elevation: 1020, difficulty: 3, duration: '~4-5 hours' },
+            long: { label: 'Mont Ventoux', distance: 131, elevation: 2230, difficulty: 4, duration: '~6-7 hours', special: true }
         },
         day4: {
             standard: 'routes/KOTR_Avignon_D4_Standard.fit',
@@ -46,8 +47,8 @@
             name: 'Day 4 - Final Celebration',
             tagline: 'Celebrate together',
             type: 'choice',
-            short: { distance: 85, elevation: 500, difficulty: 2, duration: '~3-4 hours' },
-            long: { distance: 95, elevation: 620, difficulty: 2, duration: '~3.5-4.5 hours' }
+            short: { distance: 85, elevation: 330, difficulty: 2, duration: '~3-4 hours' },
+            long: { distance: 95, elevation: 410, difficulty: 2, duration: '~3.5-4.5 hours' }
         }
     };
 

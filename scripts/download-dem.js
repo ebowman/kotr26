@@ -169,20 +169,63 @@ async function processRoute(fitFilePath, force = false) {
 
     console.log(`  Fetched ${records.length}/${records.length} elevations (${tileCache.size} tiles cached)`);
 
-    // Calculate stats
+    // Smooth elevation data to reduce noise (moving average)
+    const smoothed = [];
+    const windowSize = 5; // ~25-50m window depending on point spacing
+    for (let i = 0; i < demElevations.length; i++) {
+        let sum = 0;
+        let count = 0;
+        for (let j = Math.max(0, i - windowSize); j <= Math.min(demElevations.length - 1, i + windowSize); j++) {
+            sum += demElevations[j];
+            count++;
+        }
+        smoothed.push(sum / count);
+    }
+
+    // Calculate stats using industry-standard algorithm:
+    // Track direction changes and only count segments that exceed threshold
+    // This matches how Strava and other apps calculate elevation gain
     let elevGain = 0, elevLoss = 0;
     let minElev = Infinity, maxElev = -Infinity;
 
+    // Threshold for counting a climb/descent (calibrated to match Strava)
+    const THRESHOLD = 3.5;
+
+    // Find local extrema (peaks and valleys) and sum significant changes
+    let lastExtreme = smoothed[0];
+    let wasClimbing = smoothed.length > 1 ? smoothed[1] > smoothed[0] : false;
+
     for (let i = 0; i < demElevations.length; i++) {
-        const elev = demElevations[i];
-        if (elev < minElev) minElev = elev;
-        if (elev > maxElev) maxElev = elev;
+        const rawElev = demElevations[i];
+
+        // Track raw min/max from original data
+        if (rawElev < minElev) minElev = rawElev;
+        if (rawElev > maxElev) maxElev = rawElev;
 
         if (i > 0) {
-            const diff = elev - demElevations[i - 1];
-            if (diff > 0.5) elevGain += diff;
-            else if (diff < -0.5) elevLoss += Math.abs(diff);
+            const isClimbing = smoothed[i] > smoothed[i - 1];
+
+            // Direction change detected - we found a local extremum
+            if (isClimbing !== wasClimbing) {
+                const change = smoothed[i - 1] - lastExtreme;
+                if (Math.abs(change) >= THRESHOLD) {
+                    if (change > 0) {
+                        elevGain += change;
+                    } else {
+                        elevLoss += Math.abs(change);
+                    }
+                    lastExtreme = smoothed[i - 1];
+                }
+                wasClimbing = isClimbing;
+            }
         }
+    }
+
+    // Handle final segment
+    const finalChange = smoothed[smoothed.length - 1] - lastExtreme;
+    if (Math.abs(finalChange) >= THRESHOLD) {
+        if (finalChange > 0) elevGain += finalChange;
+        else elevLoss += Math.abs(finalChange);
     }
 
     // Create DEM data file
