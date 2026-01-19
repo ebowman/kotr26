@@ -1,0 +1,271 @@
+/* KOTR 2026 - Mobile Responsive Styles */
+
+/* Tablet and below */
+@media (max-width: 768px) {
+    :root {
+        --space-lg: 1.25rem;
+        --space-xl: 1.5rem;
+        --space-2xl: 2rem;
+    }
+
+    .hero {
+        min-height: 50vh;
+    }
+
+    .hero h1 {
+        font-size: 2.5rem;
+    }
+
+    .hero .subtitle {
+        font-size: 1.125rem;
+    }
+
+    .fundraising-banner .container {
+        flex-direction: column;
+        text-align: center;
+    }
+
+    .route-cards {
+        grid-template-columns: 1fr;
+        gap: var(--space-md);
+    }
+
+    .route-stats {
+        gap: var(--space-lg);
+    }
+
+    .stat-value {
+        font-size: 1.25rem;
+    }
+
+    .card-actions {
+        flex-direction: column;
+    }
+
+    .card-actions .btn {
+        width: 100%;
+        justify-content: center;
+    }
+
+    .weather-widget {
+        grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+    }
+
+    .info-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* Mobile phones */
+@media (max-width: 480px) {
+    .hero {
+        min-height: 45vh;
+    }
+
+    .hero h1 {
+        font-size: 2rem;
+    }
+
+    .hero-content {
+        padding: var(--space-lg);
+    }
+
+    .charity-badge {
+        padding: var(--space-sm) var(--space-md);
+    }
+
+    .route-card {
+        padding: var(--space-md);
+    }
+
+    .route-card h3 {
+        font-size: 1.125rem;
+    }
+
+    .ventoux-callout {
+        flex-direction: column;
+        gap: var(--space-sm);
+    }
+
+    .route-options {
+        flex-wrap: wrap;
+    }
+
+    .btn-option {
+        flex: 1;
+        min-width: 80px;
+        justify-content: center;
+    }
+
+    .weather-widget {
+        grid-template-columns: repeat(3, 1fr);
+    }
+
+    .weather-day {
+        padding: var(--space-sm);
+    }
+
+    .weather-icon {
+        font-size: 1.5rem;
+    }
+
+    .weather-temp {
+        font-size: 1rem;
+    }
+
+    .routes-section h2,
+    .weather-section h2 {
+        font-size: 1.5rem;
+    }
+}
+
+/* Landscape mobile */
+@media (max-width: 768px) and (orientation: landscape) {
+    .hero {
+        min-height: 70vh;
+    }
+}
+
+/* Touch device optimizations */
+@media (hover: none) and (pointer: coarse) {
+    .btn {
+        min-height: 44px;
+        padding: var(--space-sm) var(--space-lg);
+    }
+
+    .btn-option {
+        min-height: 40px;
+    }
+
+    .route-card:hover {
+        transform: none;
+    }
+
+    .weather-day:hover {
+        transform: none;
+    }
+}
+
+/* High contrast mode */
+@media (prefers-contrast: high) {
+    :root {
+        --color-text-muted: #333333;
+        --color-border: #999999;
+    }
+
+    .btn-option {
+        border-width: 2px;
+    }
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
+
+    html {
+        scroll-behavior: auto;
+    }
+}
+
+/* Dark mode (optional support) */
+@media (prefers-color-scheme: dark) {
+    :root {
+        --color-bg: #1A1A1A;
+        --color-surface: #2A2A2A;
+        --color-text: #F5F5F5;
+        --color-text-muted: #AAAAAA;
+        --color-border: #404040;
+    }
+
+    .hero {
+        background: linear-gradient(135deg, #4A2800 0%, #2A1800 100%);
+    }
+
+    .route-card {
+        box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+    }
+
+    .route-card.featured {
+        background: linear-gradient(180deg, rgba(74, 144, 164, 0.15) 0%, var(--color-surface) 100%);
+    }
+
+    .weather-day {
+        background: var(--color-surface);
+    }
+
+    .weather-day.event-day {
+        background: linear-gradient(180deg, rgba(123, 63, 0, 0.2) 0%, var(--color-surface) 100%);
+    }
+
+    .ventoux-callout {
+        background: linear-gradient(135deg, rgba(74, 144, 164, 0.2) 0%, rgba(74, 144, 164, 0.1) 100%);
+    }
+
+    footer {
+        background: #0A0A0A;
+    }
+}
+
+/* Safe area insets for notched devices */
+@supports (padding: env(safe-area-inset-bottom)) {
+    .hero-content {
+        padding-top: calc(var(--space-2xl) + env(safe-area-inset-top));
+    }
+
+    footer {
+        padding-bottom: calc(var(--space-xl) + env(safe-area-inset-bottom));
+    }
+}
+
+/* Flyover page specific mobile styles */
+.flyover-mobile-controls {
+    display: none;
+}
+
+@media (max-width: 768px) {
+    .flyover-controls {
+        bottom: auto;
+        top: var(--space-md);
+        left: var(--space-md);
+        right: auto;
+        flex-direction: row;
+    }
+
+    .flyover-mobile-controls {
+        display: flex;
+        position: fixed;
+        bottom: var(--space-md);
+        left: var(--space-md);
+        right: var(--space-md);
+        justify-content: center;
+        gap: var(--space-md);
+        z-index: 1000;
+    }
+
+    .elevation-panel {
+        height: 120px;
+    }
+
+    .elevation-stats {
+        flex-direction: column;
+        gap: var(--space-sm);
+    }
+}
+
+/* Larger touch targets for mobile map interaction */
+@media (max-width: 768px) {
+    .mapboxgl-ctrl-group button {
+        width: 44px;
+        height: 44px;
+    }
+
+    .mapboxgl-ctrl-attrib {
+        font-size: 10px;
+    }
+}

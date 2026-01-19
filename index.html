@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KOTR 2026 - King of the Road Avignon</title>
+    <meta name="description" content="KOTR 2026 charity cycling event in Avignon, France supporting Médecins Sans Frontières. May 28 - June 1, 2026.">
+
+    <!-- Mapbox GL JS -->
+    <script src="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.js"></script>
+    <link href="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.css" rel="stylesheet">
+
+    <!-- Turf.js for geospatial calculations -->
+    <script src="https://unpkg.com/@turf/turf@6.5.0/turf.min.js"></script>
+
+    <!-- Styles -->
+    <link rel="stylesheet" href="css/main.css">
+    <link rel="stylesheet" href="css/mobile.css">
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🚴</text></svg>">
+</head>
+<body>
+    <header class="hero">
+        <div class="hero-content">
+            <h1>KOTR 2026</h1>
+            <p class="subtitle">King of the Road - Avignon</p>
+            <p class="dates">May 28 - June 1, 2026</p>
+            <div class="charity-badge">
+                <span>Supporting</span>
+                <strong>Médecins Sans Frontières</strong>
+            </div>
+        </div>
+        <div class="hero-map" id="overview-map"></div>
+    </header>
+
+    <main>
+        <section class="fundraising-banner">
+            <div class="container">
+                <p>Fundraising Target: <strong>£500 / €550 / $600</strong> per rider</p>
+                <a href="https://www.msf.org/" target="_blank" rel="noopener" class="btn btn-primary">Donate to MSF</a>
+            </div>
+        </section>
+
+        <section class="routes-section">
+            <div class="container">
+                <h2>Route Schedule</h2>
+                <div class="route-cards" id="route-cards">
+                    <!-- Day 1 -->
+                    <article class="route-card" data-day="1">
+                        <div class="card-header">
+                            <span class="day-badge">Day 1</span>
+                            <time datetime="2026-05-29">May 29, 2026</time>
+                        </div>
+                        <h3>Avignon Exploration</h3>
+                        <div class="route-stats">
+                            <div class="stat">
+                                <span class="stat-value">80</span>
+                                <span class="stat-label">km</span>
+                            </div>
+                            <div class="stat">
+                                <span class="stat-value">800</span>
+                                <span class="stat-label">m elev</span>
+                            </div>
+                        </div>
+                        <p class="route-description">Discover the historic city of Avignon and its stunning surroundings.</p>
+                        <div class="card-actions">
+                            <button class="btn btn-flyover" data-route="KOTR_Avignon_D1.fit">
+                                <span class="icon">🎬</span> 3D Flyover
+                            </button>
+                            <button class="btn btn-download" data-route="KOTR_Avignon_D1.fit">
+                                <span class="icon">📥</span> GPX
+                            </button>
+                        </div>
+                    </article>
+
+                    <!-- Day 2 -->
+                    <article class="route-card" data-day="2">
+                        <div class="card-header">
+                            <span class="day-badge">Day 2</span>
+                            <time datetime="2026-05-30">May 30, 2026</time>
+                        </div>
+                        <h3>Wine Country North</h3>
+                        <div class="route-stats">
+                            <div class="stat">
+                                <span class="stat-value">95</span>
+                                <span class="stat-label">km</span>
+                            </div>
+                            <div class="stat">
+                                <span class="stat-value">600</span>
+                                <span class="stat-label">m elev</span>
+                            </div>
+                        </div>
+                        <p class="route-description">Rolling through the famous Côtes du Rhône vineyards.</p>
+                        <div class="route-options">
+                            <button class="btn btn-option active" data-variant="standard">Standard</button>
+                            <button class="btn btn-option" data-variant="long">Long</button>
+                        </div>
+                        <div class="card-actions">
+                            <button class="btn btn-flyover" data-route="KOTR_Avignon_Standard_D2.fit" data-route-long="KOTR_Avignon_Long_D2.fit">
+                                <span class="icon">🎬</span> 3D Flyover
+                            </button>
+                            <button class="btn btn-download" data-route="KOTR_Avignon_Standard_D2.fit" data-route-long="KOTR_Avignon_Long_D2.fit">
+                                <span class="icon">📥</span> GPX
+                            </button>
+                        </div>
+                    </article>
+
+                    <!-- Day 3 - THE BIG ONE -->
+                    <article class="route-card featured" data-day="3">
+                        <div class="card-header">
+                            <span class="day-badge">Day 3</span>
+                            <time datetime="2026-05-31">May 31, 2026</time>
+                            <span class="featured-badge">EPIC DAY</span>
+                        </div>
+                        <h3>Luberon Villages</h3>
+                        <div class="route-stats">
+                            <div class="stat">
+                                <span class="stat-value">95</span>
+                                <span class="stat-label">km</span>
+                            </div>
+                            <div class="stat">
+                                <span class="stat-value">1,000</span>
+                                <span class="stat-label">m elev</span>
+                            </div>
+                        </div>
+                        <div class="route-long-option">
+                            <div class="ventoux-callout">
+                                <span class="mountain-icon">🏔️</span>
+                                <div>
+                                    <strong>Long Option: Mont Ventoux!</strong>
+                                    <p>~140 km • ~2,500 m elevation • The Beast of Provence</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="route-options">
+                            <button class="btn btn-option active" data-variant="standard">Standard</button>
+                            <button class="btn btn-option ventoux" data-variant="long">Ventoux 🏔️</button>
+                        </div>
+                        <div class="card-actions">
+                            <button class="btn btn-flyover" data-route="KOTR_Avignon_D3_Standard.fit" data-route-long="KOTR_Ventoux_D3_Long.fit">
+                                <span class="icon">🎬</span> 3D Flyover
+                            </button>
+                            <button class="btn btn-download" data-route="KOTR_Avignon_D3_Standard.fit" data-route-long="KOTR_Ventoux_D3_Long.fit">
+                                <span class="icon">📥</span> GPX
+                            </button>
+                        </div>
+                    </article>
+
+                    <!-- Day 4 -->
+                    <article class="route-card" data-day="4">
+                        <div class="card-header">
+                            <span class="day-badge">Day 4</span>
+                            <time datetime="2026-06-01">June 1, 2026</time>
+                        </div>
+                        <h3>Final Celebration</h3>
+                        <div class="route-stats">
+                            <div class="stat">
+                                <span class="stat-value">TBD</span>
+                                <span class="stat-label">km</span>
+                            </div>
+                            <div class="stat">
+                                <span class="stat-value">TBD</span>
+                                <span class="stat-label">m elev</span>
+                            </div>
+                        </div>
+                        <p class="route-description">Celebratory ride back to Avignon. Details to be finalized.</p>
+                        <div class="route-options">
+                            <button class="btn btn-option active" data-variant="standard">Standard</button>
+                            <button class="btn btn-option" data-variant="long">Long</button>
+                        </div>
+                        <div class="card-actions">
+                            <button class="btn btn-flyover" data-route="KOTR_Avignon_D4_Standard.fit" data-route-long="KOTR_Avignon_D4_Long.fit">
+                                <span class="icon">🎬</span> 3D Flyover
+                            </button>
+                            <button class="btn btn-download" data-route="KOTR_Avignon_D4_Standard.fit" data-route-long="KOTR_Avignon_D4_Long.fit">
+                                <span class="icon">📥</span> GPX
+                            </button>
+                        </div>
+                    </article>
+                </div>
+            </div>
+        </section>
+
+        <section class="weather-section">
+            <div class="container">
+                <h2>Weather Forecast</h2>
+                <p class="weather-subtitle">Avignon, France • Event Week</p>
+                <div class="weather-widget" id="weather-widget">
+                    <div class="weather-loading">Loading weather data...</div>
+                </div>
+            </div>
+        </section>
+
+        <section class="info-section">
+            <div class="container">
+                <div class="info-grid">
+                    <div class="info-card">
+                        <h3>🗺️ About the Routes</h3>
+                        <p>All routes start and end in Avignon. Download the GPX files for your bike computer, or experience them first in our 3D flyover.</p>
+                    </div>
+                    <div class="info-card">
+                        <h3>🏔️ Mont Ventoux</h3>
+                        <p>The "Beast of Provence" rises to 1,909m. The climb from Bédoin is 21.5km at 7.5% average. The last 6km above the tree line are legendary.</p>
+                    </div>
+                    <div class="info-card">
+                        <h3>❤️ Médecins Sans Frontières</h3>
+                        <p>Every pedal stroke supports MSF's life-saving work. Doctors Without Borders provides medical care where it's needed most.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <div class="container">
+            <p>KOTR 2026 • Supporting <a href="https://www.msf.org/" target="_blank" rel="noopener">Médecins Sans Frontières</a></p>
+            <p class="copyright">Made with ❤️ for charity cycling</p>
+        </div>
+    </footer>
+
+    <!-- Scripts -->
+    <script src="js/fit-parser.js"></script>
+    <script src="js/weather-widget.js"></script>
+    <script src="js/main.js"></script>
+</body>
+</html>

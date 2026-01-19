@@ -1,0 +1,597 @@
+/* KOTR 2026 - Main Styles */
+
+:root {
+    /* Colors - Provence inspired */
+    --color-primary: #7B3F00;       /* Terracotta */
+    --color-primary-dark: #5C2E00;
+    --color-accent: #E6B800;         /* Lavender gold */
+    --color-accent-light: #FFD700;
+    --color-ventoux: #4A90A4;        /* Ventoux blue/gray */
+    --color-success: #4CAF50;
+    --color-warning: #FF9800;
+    --color-danger: #F44336;
+
+    /* Elevation gradient colors */
+    --elev-easy: #22C55E;
+    --elev-moderate: #EAB308;
+    --elev-hard: #F97316;
+    --elev-extreme: #EF4444;
+
+    /* Neutrals */
+    --color-bg: #FAF7F2;
+    --color-surface: #FFFFFF;
+    --color-text: #1A1A1A;
+    --color-text-muted: #666666;
+    --color-border: #E5E5E5;
+
+    /* Spacing */
+    --space-xs: 0.25rem;
+    --space-sm: 0.5rem;
+    --space-md: 1rem;
+    --space-lg: 1.5rem;
+    --space-xl: 2rem;
+    --space-2xl: 3rem;
+
+    /* Typography */
+    --font-sans: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    --font-display: 'Georgia', serif;
+
+    /* Border radius */
+    --radius-sm: 4px;
+    --radius-md: 8px;
+    --radius-lg: 12px;
+    --radius-xl: 16px;
+
+    /* Shadows */
+    --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
+    --shadow-md: 0 4px 6px rgba(0,0,0,0.07);
+    --shadow-lg: 0 10px 15px rgba(0,0,0,0.1);
+    --shadow-xl: 0 20px 25px rgba(0,0,0,0.15);
+}
+
+/* Reset */
+*, *::before, *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+html {
+    scroll-behavior: smooth;
+}
+
+body {
+    font-family: var(--font-sans);
+    background: var(--color-bg);
+    color: var(--color-text);
+    line-height: 1.6;
+    min-height: 100vh;
+}
+
+/* Container */
+.container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 var(--space-md);
+}
+
+/* Hero Section */
+.hero {
+    position: relative;
+    min-height: 60vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-dark) 100%);
+    color: white;
+    overflow: hidden;
+}
+
+.hero-map {
+    position: absolute;
+    inset: 0;
+    opacity: 0.3;
+    z-index: 0;
+}
+
+.hero-content {
+    position: relative;
+    z-index: 1;
+    text-align: center;
+    padding: var(--space-2xl);
+}
+
+.hero h1 {
+    font-family: var(--font-display);
+    font-size: clamp(3rem, 10vw, 6rem);
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    margin-bottom: var(--space-sm);
+    text-shadow: 2px 4px 10px rgba(0,0,0,0.3);
+}
+
+.hero .subtitle {
+    font-size: clamp(1.25rem, 3vw, 1.75rem);
+    opacity: 0.95;
+    margin-bottom: var(--space-sm);
+}
+
+.hero .dates {
+    font-size: 1.125rem;
+    opacity: 0.85;
+    margin-bottom: var(--space-lg);
+}
+
+.charity-badge {
+    display: inline-flex;
+    flex-direction: column;
+    background: rgba(255,255,255,0.15);
+    backdrop-filter: blur(10px);
+    padding: var(--space-md) var(--space-xl);
+    border-radius: var(--radius-lg);
+    border: 1px solid rgba(255,255,255,0.2);
+}
+
+.charity-badge span {
+    font-size: 0.875rem;
+    opacity: 0.8;
+}
+
+.charity-badge strong {
+    font-size: 1.125rem;
+}
+
+/* Fundraising Banner */
+.fundraising-banner {
+    background: var(--color-accent);
+    color: var(--color-text);
+    padding: var(--space-md) 0;
+}
+
+.fundraising-banner .container {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: var(--space-md);
+}
+
+.fundraising-banner p {
+    font-size: 1rem;
+}
+
+/* Buttons */
+.btn {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-sm);
+    padding: var(--space-sm) var(--space-md);
+    border: none;
+    border-radius: var(--radius-md);
+    font-family: inherit;
+    font-size: 0.875rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    text-decoration: none;
+}
+
+.btn-primary {
+    background: var(--color-primary);
+    color: white;
+}
+
+.btn-primary:hover {
+    background: var(--color-primary-dark);
+    transform: translateY(-1px);
+}
+
+.btn-flyover {
+    background: var(--color-primary);
+    color: white;
+}
+
+.btn-flyover:hover {
+    background: var(--color-primary-dark);
+    box-shadow: var(--shadow-md);
+}
+
+.btn-download {
+    background: var(--color-surface);
+    color: var(--color-text);
+    border: 1px solid var(--color-border);
+}
+
+.btn-download:hover {
+    background: var(--color-bg);
+    border-color: var(--color-text-muted);
+}
+
+.btn-option {
+    background: var(--color-surface);
+    color: var(--color-text-muted);
+    border: 1px solid var(--color-border);
+    padding: var(--space-xs) var(--space-md);
+    font-size: 0.8125rem;
+}
+
+.btn-option.active {
+    background: var(--color-primary);
+    color: white;
+    border-color: var(--color-primary);
+}
+
+.btn-option.ventoux.active {
+    background: var(--color-ventoux);
+    border-color: var(--color-ventoux);
+}
+
+.btn .icon {
+    font-size: 1rem;
+}
+
+/* Routes Section */
+.routes-section {
+    padding: var(--space-2xl) 0;
+}
+
+.routes-section h2 {
+    font-family: var(--font-display);
+    font-size: 2rem;
+    text-align: center;
+    margin-bottom: var(--space-xl);
+    color: var(--color-primary);
+}
+
+.route-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: var(--space-lg);
+}
+
+/* Route Card */
+.route-card {
+    background: var(--color-surface);
+    border-radius: var(--radius-xl);
+    padding: var(--space-lg);
+    box-shadow: var(--shadow-md);
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.route-card:hover {
+    transform: translateY(-4px);
+    box-shadow: var(--shadow-lg);
+}
+
+.route-card.featured {
+    border: 2px solid var(--color-ventoux);
+    background: linear-gradient(180deg, rgba(74, 144, 164, 0.05) 0%, var(--color-surface) 100%);
+}
+
+.card-header {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    margin-bottom: var(--space-md);
+    flex-wrap: wrap;
+}
+
+.day-badge {
+    background: var(--color-primary);
+    color: white;
+    padding: var(--space-xs) var(--space-sm);
+    border-radius: var(--radius-sm);
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.featured-badge {
+    background: var(--color-ventoux);
+    color: white;
+    padding: var(--space-xs) var(--space-sm);
+    border-radius: var(--radius-sm);
+    font-size: 0.75rem;
+    font-weight: 600;
+    margin-left: auto;
+}
+
+.card-header time {
+    font-size: 0.875rem;
+    color: var(--color-text-muted);
+}
+
+.route-card h3 {
+    font-size: 1.25rem;
+    margin-bottom: var(--space-md);
+    color: var(--color-text);
+}
+
+.route-stats {
+    display: flex;
+    gap: var(--space-xl);
+    margin-bottom: var(--space-md);
+}
+
+.stat {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-xs);
+}
+
+.stat-value {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--color-primary);
+}
+
+.stat-label {
+    font-size: 0.875rem;
+    color: var(--color-text-muted);
+}
+
+.route-description {
+    font-size: 0.875rem;
+    color: var(--color-text-muted);
+    margin-bottom: var(--space-md);
+}
+
+/* Ventoux Callout */
+.ventoux-callout {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-md);
+    background: linear-gradient(135deg, rgba(74, 144, 164, 0.1) 0%, rgba(74, 144, 164, 0.05) 100%);
+    padding: var(--space-md);
+    border-radius: var(--radius-md);
+    margin-bottom: var(--space-md);
+    border-left: 3px solid var(--color-ventoux);
+}
+
+.mountain-icon {
+    font-size: 1.5rem;
+}
+
+.ventoux-callout strong {
+    color: var(--color-ventoux);
+    display: block;
+    margin-bottom: var(--space-xs);
+}
+
+.ventoux-callout p {
+    font-size: 0.8125rem;
+    color: var(--color-text-muted);
+    margin: 0;
+}
+
+.route-options {
+    display: flex;
+    gap: var(--space-sm);
+    margin-bottom: var(--space-md);
+}
+
+.card-actions {
+    display: flex;
+    gap: var(--space-sm);
+    flex-wrap: wrap;
+}
+
+/* Weather Section */
+.weather-section {
+    padding: var(--space-2xl) 0;
+    background: var(--color-surface);
+}
+
+.weather-section h2 {
+    font-family: var(--font-display);
+    font-size: 2rem;
+    text-align: center;
+    margin-bottom: var(--space-sm);
+    color: var(--color-primary);
+}
+
+.weather-subtitle {
+    text-align: center;
+    color: var(--color-text-muted);
+    margin-bottom: var(--space-xl);
+}
+
+.weather-widget {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: var(--space-md);
+}
+
+.weather-day {
+    background: var(--color-bg);
+    border-radius: var(--radius-lg);
+    padding: var(--space-md);
+    text-align: center;
+    transition: transform 0.2s ease;
+}
+
+.weather-day:hover {
+    transform: translateY(-2px);
+}
+
+.weather-day.event-day {
+    border: 2px solid var(--color-primary);
+    background: linear-gradient(180deg, rgba(123, 63, 0, 0.05) 0%, var(--color-bg) 100%);
+}
+
+.weather-date {
+    font-size: 0.75rem;
+    color: var(--color-text-muted);
+    margin-bottom: var(--space-xs);
+}
+
+.weather-day-name {
+    font-weight: 600;
+    font-size: 0.875rem;
+    margin-bottom: var(--space-sm);
+}
+
+.weather-icon {
+    font-size: 2rem;
+    margin-bottom: var(--space-sm);
+}
+
+.weather-temp {
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: var(--color-primary);
+}
+
+.weather-temp-range {
+    font-size: 0.75rem;
+    color: var(--color-text-muted);
+}
+
+.weather-precip {
+    font-size: 0.75rem;
+    color: var(--color-ventoux);
+    margin-top: var(--space-xs);
+}
+
+.weather-loading {
+    grid-column: 1 / -1;
+    text-align: center;
+    padding: var(--space-xl);
+    color: var(--color-text-muted);
+}
+
+/* Info Section */
+.info-section {
+    padding: var(--space-2xl) 0;
+}
+
+.info-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: var(--space-lg);
+}
+
+.info-card {
+    background: var(--color-surface);
+    border-radius: var(--radius-lg);
+    padding: var(--space-lg);
+    box-shadow: var(--shadow-sm);
+}
+
+.info-card h3 {
+    font-size: 1.125rem;
+    margin-bottom: var(--space-md);
+    color: var(--color-text);
+}
+
+.info-card p {
+    font-size: 0.9375rem;
+    color: var(--color-text-muted);
+    line-height: 1.7;
+}
+
+/* Footer */
+footer {
+    background: var(--color-primary-dark);
+    color: white;
+    padding: var(--space-xl) 0;
+    text-align: center;
+}
+
+footer a {
+    color: var(--color-accent-light);
+    text-decoration: none;
+}
+
+footer a:hover {
+    text-decoration: underline;
+}
+
+.copyright {
+    margin-top: var(--space-sm);
+    font-size: 0.875rem;
+    opacity: 0.8;
+}
+
+/* Map styles */
+.mapboxgl-canvas {
+    outline: none;
+}
+
+/* Loading states */
+.loading {
+    opacity: 0.6;
+    pointer-events: none;
+}
+
+/* Animations */
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.route-card {
+    animation: fadeIn 0.3s ease forwards;
+}
+
+.route-card:nth-child(2) { animation-delay: 0.1s; }
+.route-card:nth-child(3) { animation-delay: 0.2s; }
+.route-card:nth-child(4) { animation-delay: 0.3s; }
+
+/* Focus styles for accessibility */
+.btn:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+}
+
+/* Weather notice */
+.weather-notice {
+    grid-column: 1 / -1;
+    background: rgba(74, 144, 164, 0.1);
+    border: 1px solid var(--color-ventoux);
+    border-radius: var(--radius-md);
+    padding: var(--space-md);
+    text-align: center;
+    margin-bottom: var(--space-md);
+}
+
+.weather-notice p {
+    margin: 0;
+    font-size: 0.875rem;
+    color: var(--color-text-muted);
+}
+
+.weather-notice p:first-child {
+    color: var(--color-ventoux);
+    margin-bottom: var(--space-xs);
+}
+
+/* Weather Ventoux note */
+.weather-ventoux-note {
+    grid-column: 1 / -1;
+    background: linear-gradient(135deg, rgba(74, 144, 164, 0.1) 0%, rgba(74, 144, 164, 0.05) 100%);
+    border-left: 3px solid var(--color-ventoux);
+    padding: var(--space-md);
+    border-radius: var(--radius-md);
+    margin-top: var(--space-md);
+}
+
+.weather-ventoux-note p {
+    margin: 0;
+    font-size: 0.875rem;
+    color: var(--color-text-muted);
+}
+
+/* Print styles */
+@media print {
+    .hero-map,
+    .btn-flyover,
+    .weather-widget {
+        display: none;
+    }
+
+    .hero {
+        min-height: auto;
+        padding: var(--space-lg);
+    }
+}
