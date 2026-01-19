@@ -55,9 +55,9 @@
     let map = null;
     let routeLayers = [];
     let selectedVariants = {
-        2: 'standard',
-        3: 'standard',
-        4: 'standard'
+        2: 'short',
+        3: 'short',
+        4: 'short'
     };
 
     /**
@@ -133,19 +133,32 @@
 
         routeCards.forEach(card => {
             const day = parseInt(card.dataset.day);
-            const optionButtons = card.querySelectorAll('.btn-option');
+            const optionElements = card.querySelectorAll('.route-option');
 
-            optionButtons.forEach(btn => {
-                btn.addEventListener('click', () => {
+            optionElements.forEach(option => {
+                option.addEventListener('click', () => {
                     // Update active state
-                    optionButtons.forEach(b => b.classList.remove('active'));
-                    btn.classList.add('active');
+                    optionElements.forEach(o => o.classList.remove('active'));
+                    option.classList.add('active');
 
                     // Store selection
-                    const variant = btn.dataset.variant;
+                    const variant = option.dataset.variant;
                     selectedVariants[day] = variant;
+
+                    // Update route analysis for this card with new variant
+                    if (typeof RiderProfile !== 'undefined' && RiderProfile.isConfigured()) {
+                        const profile = RiderProfile.get();
+                        updateCardAnalysis(card, profile.weight, profile.ftp);
+                    }
                 });
             });
+
+            // Set initial active state based on default selection
+            const defaultVariant = selectedVariants[day] || 'short';
+            const defaultOption = card.querySelector(`.route-option[data-variant="${defaultVariant}"]`);
+            if (defaultOption) {
+                defaultOption.classList.add('active');
+            }
         });
     }
 
@@ -315,6 +328,145 @@
     }
 
     /**
+     * Route analysis cache
+     */
+    const routeAnalysisCache = new Map();
+
+    /**
+     * Calculate and display route analysis on cards
+     */
+    function updateRouteAnalysis() {
+        // Check if profile is configured
+        if (!RiderProfile || !RiderProfile.isConfigured()) {
+            // Remove any existing analysis displays
+            document.querySelectorAll('.route-analysis').forEach(el => el.remove());
+            return;
+        }
+
+        const profile = RiderProfile.get();
+        const { weight, ftp } = profile;
+
+        // Update analysis for each route card
+        document.querySelectorAll('.route-card').forEach(card => {
+            updateCardAnalysis(card, weight, ftp);
+        });
+    }
+
+    /**
+     * Update analysis display for a single route card
+     */
+    function updateCardAnalysis(card, weight, ftp) {
+        const day = parseInt(card.dataset.day);
+        const routeConfig = ROUTES[`day${day}`];
+        if (!routeConfig) return;
+
+        // Determine which variant is currently selected
+        const selectedVariant = selectedVariants[day] || 'standard';
+        const isLongSelected = selectedVariant === 'long';
+
+        // Get distance and elevation based on selection
+        let distance, elevation;
+
+        if (routeConfig.type === 'warmup') {
+            // Day 1 has no variant options
+            distance = routeConfig.distance;
+            elevation = routeConfig.elevation;
+        } else if (isLongSelected && routeConfig.long) {
+            // Long variant selected
+            distance = routeConfig.long.distance;
+            elevation = routeConfig.long.elevation;
+        } else if (routeConfig.short) {
+            // Short/standard variant selected (or fallback)
+            distance = routeConfig.short.distance;
+            elevation = routeConfig.short.elevation;
+        } else {
+            // Fallback to top-level config
+            distance = routeConfig.distance || 0;
+            elevation = routeConfig.elevation || 0;
+        }
+
+        // Create mock route data for calculation
+        const mockRouteData = {
+            distance: distance,
+            elevationGain: elevation,
+            coordinates: generateMockCoordinates(distance, elevation)
+        };
+
+        // Calculate metrics
+        const metrics = PowerCalculator.calculateRouteMetrics(mockRouteData, weight, ftp);
+        if (!metrics) return;
+
+        // Remove existing analysis if present
+        const existingAnalysis = card.querySelector('.route-analysis');
+        if (existingAnalysis) {
+            existingAnalysis.remove();
+        }
+
+        // Create analysis display
+        const analysisHtml = createAnalysisHTML(metrics, weight, ftp);
+
+        // Insert before card actions
+        const cardActions = card.querySelector('.card-actions');
+        if (cardActions) {
+            cardActions.insertAdjacentHTML('beforebegin', analysisHtml);
+        }
+    }
+
+    /**
+     * Generate mock coordinates for route analysis
+     * This is a simplified approximation for display purposes
+     */
+    function generateMockCoordinates(distanceKm, elevationGainM) {
+        const numPoints = 100;
+        const coords = [];
+        const avgGrade = elevationGainM / (distanceKm * 1000);
+
+        for (let i = 0; i < numPoints; i++) {
+            const progress = i / (numPoints - 1);
+            // Simple sinusoidal elevation profile
+            const elevation = elevationGainM * progress * (1 + 0.2 * Math.sin(progress * Math.PI * 4));
+            coords.push([
+                4.8 + progress * 0.5,  // Longitude (approximate for Avignon area)
+                43.9 + progress * 0.3, // Latitude
+                Math.max(0, elevation)
+            ]);
+        }
+
+        return coords;
+    }
+
+    /**
+     * Create HTML for route analysis display
+     */
+    function createAnalysisHTML(metrics, weight, ftp) {
+        const difficultyClass = PowerCalculator.getDifficultyClass(metrics.difficultyScore);
+        const steadyTime = metrics.timeEstimates.find(t => t.label === 'Steady');
+
+        return `
+            <div class="route-analysis">
+                <div class="route-analysis-header">
+                    <span class="profile-icon">&#128692;</span>
+                    <span>For You (${weight}kg, ${ftp}W)</span>
+                </div>
+                <div class="route-analysis-stats">
+                    <div class="analysis-stat">
+                        <span class="difficulty-badge ${difficultyClass}">${metrics.difficultyScore.toFixed(1)}/10</span>
+                        <span class="analysis-stat-label">${metrics.difficultyLabel}</span>
+                    </div>
+                    <div class="analysis-stat">
+                        <span class="analysis-stat-value">${steadyTime ? steadyTime.formatted : '--'}</span>
+                        <span class="analysis-stat-label">@ 75% FTP</span>
+                    </div>
+                    <div class="analysis-stat">
+                        <span class="analysis-stat-value">${metrics.energy.kilojoules.toLocaleString()}</span>
+                        <span class="analysis-stat-label">kJ (${metrics.energy.calories} kcal)</span>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    /**
      * Initialize everything on DOM ready
      */
     function init() {
@@ -325,6 +477,19 @@
         setupDropdownToggles();
         initWeather();
         setupSmoothScroll();
+
+        // Initialize rider profile
+        if (typeof RiderProfile !== 'undefined') {
+            RiderProfile.init();
+
+            // Listen for profile changes
+            RiderProfile.setOnChange(() => {
+                updateRouteAnalysis();
+            });
+
+            // Initial analysis update
+            updateRouteAnalysis();
+        }
 
         console.log('KOTR 2026 initialized');
     }

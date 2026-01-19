@@ -1,17 +1,34 @@
 /**
  * KOTR 2026 - Elevation Profile Component
  * Interactive elevation visualization with gradient coloring
+ * Supports both grade-based and effort zone coloring modes
  */
 
 const ElevationProfile = (function() {
     'use strict';
 
-    // Gradient colors based on grade percentage
+    // Gradient colors based on grade percentage (default mode)
     const GRADE_COLORS = {
         flat: '#22C55E',      // < 3% - Green
         moderate: '#EAB308',   // 3-6% - Yellow
         hard: '#F97316',       // 6-10% - Orange
         extreme: '#EF4444'     // > 10% - Red
+    };
+
+    // Effort zone colors (when rider profile is configured)
+    const EFFORT_ZONE_COLORS = {
+        recovery:  '#22C55E',  // < 55% FTP - Green
+        endurance: '#3B82F6',  // 55-75% FTP - Blue
+        tempo:     '#EAB308',  // 75-90% FTP - Yellow
+        threshold: '#F97316',  // 90-105% FTP - Orange
+        vo2max:    '#EF4444',  // 105-120% FTP - Red
+        anaerobic: '#DC2626'   // > 120% FTP - Dark Red
+    };
+
+    // Color mode
+    const COLOR_MODES = {
+        GRADE: 'grade',
+        EFFORT: 'effort'
     };
 
     class ElevationProfileRenderer {
@@ -43,6 +60,12 @@ const ElevationProfile = (function() {
             // Event callbacks
             this.onPositionChange = null;
             this.onHover = null;
+
+            // Color mode (grade or effort)
+            this.colorMode = COLOR_MODES.GRADE;
+            this.riderWeight = 75;  // Default weight in kg
+            this.riderFTP = 200;    // Default FTP in watts
+            this.targetSpeed = 15;  // Target speed in km/h for effort calculations
 
             // Setup canvas and events
             this.setupCanvas();
@@ -230,6 +253,107 @@ const ElevationProfile = (function() {
         }
 
         /**
+         * Set color mode (grade or effort)
+         * @param {string} mode - 'grade' or 'effort'
+         */
+        setColorMode(mode) {
+            if (mode === COLOR_MODES.GRADE || mode === COLOR_MODES.EFFORT) {
+                this.colorMode = mode;
+                this.render();
+            }
+        }
+
+        /**
+         * Get current color mode
+         */
+        getColorMode() {
+            return this.colorMode;
+        }
+
+        /**
+         * Set rider profile for effort calculations
+         * @param {number} weight - Rider weight in kg
+         * @param {number} ftp - Functional Threshold Power in watts
+         */
+        setRiderProfile(weight, ftp) {
+            this.riderWeight = weight || 75;
+            this.riderFTP = ftp || 200;
+            if (this.colorMode === COLOR_MODES.EFFORT) {
+                this.render();
+            }
+        }
+
+        /**
+         * Set target speed for effort calculations
+         * @param {number} speed - Target speed in km/h
+         */
+        setTargetSpeed(speed) {
+            this.targetSpeed = speed || 15;
+            if (this.colorMode === COLOR_MODES.EFFORT) {
+                this.render();
+            }
+        }
+
+        /**
+         * Calculate power required for given grade and speed
+         * Uses same physics model as PowerCalculator
+         */
+        calculatePowerForGrade(grade, speed) {
+            const weight = this.riderWeight;
+            const bikeWeight = 9; // kg
+            const totalMass = weight + bikeWeight;
+            const g = 9.81;
+            const Crr = 0.005;
+            const CdA = 0.35;
+            const rho = 1.2;
+
+            const gradeDecimal = grade / 100;
+            const speedMs = speed / 3.6;
+
+            // Power components
+            const Pgravity = totalMass * g * gradeDecimal * speedMs;
+            const Prolling = Crr * totalMass * g * Math.cos(Math.atan(gradeDecimal)) * speedMs;
+            const Paero = 0.5 * CdA * rho * Math.pow(speedMs, 3);
+
+            const totalPower = Pgravity + Prolling + Paero;
+
+            // For descents, power can be negative (coasting)
+            return Math.max(0, totalPower);
+        }
+
+        /**
+         * Get effort zone color based on power as percentage of FTP
+         * @param {number} power - Power in watts
+         * @returns {string} Color for the effort zone
+         */
+        getEffortZoneColor(power) {
+            const ftpPercent = (power / this.riderFTP) * 100;
+
+            if (ftpPercent < 55) return EFFORT_ZONE_COLORS.recovery;
+            if (ftpPercent < 75) return EFFORT_ZONE_COLORS.endurance;
+            if (ftpPercent < 90) return EFFORT_ZONE_COLORS.tempo;
+            if (ftpPercent < 105) return EFFORT_ZONE_COLORS.threshold;
+            if (ftpPercent < 120) return EFFORT_ZONE_COLORS.vo2max;
+            return EFFORT_ZONE_COLORS.anaerobic;
+        }
+
+        /**
+         * Get color for segment based on current color mode
+         * @param {number} index - Index in the data arrays
+         * @returns {string} Color for this segment
+         */
+        getSegmentColor(index) {
+            const grade = this.getSmoothedGrade(index);
+
+            if (this.colorMode === COLOR_MODES.EFFORT) {
+                const power = this.calculatePowerForGrade(grade, this.targetSpeed);
+                return this.getEffortZoneColor(power);
+            }
+
+            return this.getGradeColor(grade);
+        }
+
+        /**
          * Render the elevation profile
          */
         render() {
@@ -279,8 +403,7 @@ const ElevationProfile = (function() {
             let currentRegion = null;
 
             for (let i = 0; i < this.elevationData.length; i++) {
-                const smoothedGrade = this.getSmoothedGrade(i);
-                const color = this.getGradeColor(smoothedGrade);
+                const color = this.getSegmentColor(i);
 
                 if (!currentRegion || currentRegion.color !== color) {
                     // Start new region
@@ -514,7 +637,9 @@ const ElevationProfile = (function() {
     // Public API
     return {
         ElevationProfileRenderer,
-        GRADE_COLORS
+        GRADE_COLORS,
+        EFFORT_ZONE_COLORS,
+        COLOR_MODES
     };
 })();
 

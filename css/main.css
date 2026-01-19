@@ -666,12 +666,23 @@ footer a:hover {
     padding: var(--space-md);
     text-align: center;
     border: 2px solid transparent;
-    transition: border-color 0.2s, transform 0.2s;
+    transition: border-color 0.2s, transform 0.2s, box-shadow 0.2s;
+    cursor: pointer;
 }
 
 .route-option:hover {
     border-color: var(--color-primary);
     transform: translateY(-2px);
+}
+
+.route-option.active {
+    border-color: var(--color-primary);
+    background: rgba(123, 63, 0, 0.08);
+    box-shadow: 0 2px 8px rgba(123, 63, 0, 0.15);
+}
+
+.route-option.active .option-header {
+    color: var(--color-primary);
 }
 
 .option-header {
@@ -899,6 +910,439 @@ footer a:hover {
 
     .dropdown {
         min-width: 100%;
+    }
+}
+
+/* ==============================================
+   Rider Profile Settings
+   ============================================== */
+
+/* Settings button - fixed position bottom left */
+.rider-settings-btn {
+    position: fixed !important;
+    bottom: var(--space-lg) !important;
+    left: var(--space-lg) !important;
+    top: auto !important;
+    right: auto !important;
+    z-index: 100;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-sm);
+    background: rgba(0,0,0,0.7);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255,255,255,0.2);
+    color: white;
+    padding: var(--space-sm) var(--space-md);
+    border-radius: var(--radius-md);
+    font-family: inherit;
+    font-size: 0.875rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.3);
+}
+
+.rider-settings-btn:hover {
+    background: rgba(0,0,0,0.85);
+    transform: translateY(-1px);
+}
+
+.settings-icon {
+    font-size: 1.125rem;
+}
+
+.profile-status {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.3);
+    transition: background 0.2s;
+}
+
+.profile-status.configured {
+    background: var(--color-success);
+    box-shadow: 0 0 8px var(--color-success);
+}
+
+/* Modal overlay */
+.rider-profile-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--space-md);
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+.rider-profile-modal.visible {
+    opacity: 1;
+}
+
+.rider-profile-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(0,0,0,0.6);
+    backdrop-filter: blur(4px);
+}
+
+/* Modal content */
+.rider-profile-content {
+    position: relative;
+    background: var(--color-surface);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-xl);
+    max-width: 440px;
+    width: 100%;
+    max-height: 90vh;
+    overflow-y: auto;
+    padding: var(--space-xl);
+    transform: translateY(20px);
+    transition: transform 0.3s ease;
+}
+
+.rider-profile-modal.visible .rider-profile-content {
+    transform: translateY(0);
+}
+
+.rider-profile-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: var(--space-md);
+}
+
+.rider-profile-header h2 {
+    font-size: 1.5rem;
+    color: var(--color-primary);
+    margin: 0;
+}
+
+.rider-profile-close {
+    background: none;
+    border: none;
+    font-size: 1.5rem;
+    color: var(--color-text-muted);
+    cursor: pointer;
+    padding: var(--space-xs);
+    line-height: 1;
+    transition: color 0.2s;
+}
+
+.rider-profile-close:hover {
+    color: var(--color-text);
+}
+
+.rider-profile-intro {
+    font-size: 0.9375rem;
+    color: var(--color-text-muted);
+    margin-bottom: var(--space-lg);
+    line-height: 1.6;
+}
+
+/* Form fields */
+.rider-profile-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-lg);
+}
+
+.rider-profile-field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+}
+
+.rider-profile-field label {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+}
+
+.field-label {
+    font-weight: 600;
+    color: var(--color-text);
+}
+
+.field-value {
+    font-size: 1.125rem;
+    font-weight: 700;
+    color: var(--color-primary);
+}
+
+.rider-profile-field input[type="range"] {
+    width: 100%;
+    height: 8px;
+    -webkit-appearance: none;
+    appearance: none;
+    background: linear-gradient(to right, var(--color-primary) 0%, var(--color-accent) 100%);
+    border-radius: 4px;
+    outline: none;
+}
+
+.rider-profile-field input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: var(--color-surface);
+    border: 3px solid var(--color-primary);
+    cursor: pointer;
+    box-shadow: var(--shadow-md);
+    transition: transform 0.15s ease;
+}
+
+.rider-profile-field input[type="range"]::-webkit-slider-thumb:hover {
+    transform: scale(1.1);
+}
+
+.rider-profile-field input[type="range"]::-moz-range-thumb {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: var(--color-surface);
+    border: 3px solid var(--color-primary);
+    cursor: pointer;
+    box-shadow: var(--shadow-md);
+}
+
+.range-labels {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.75rem;
+    color: var(--color-text-muted);
+}
+
+/* FTP Help */
+.ftp-help {
+    margin-top: var(--space-sm);
+}
+
+.ftp-help-toggle {
+    background: none;
+    border: none;
+    color: var(--color-ventoux);
+    font-size: 0.8125rem;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-xs);
+    padding: 0;
+}
+
+.ftp-help-toggle:hover {
+    text-decoration: underline;
+}
+
+.help-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--color-ventoux);
+    color: white;
+    font-size: 0.625rem;
+    font-weight: 700;
+}
+
+.ftp-help-content {
+    margin-top: var(--space-sm);
+    padding: var(--space-md);
+    background: var(--color-bg);
+    border-radius: var(--radius-md);
+    font-size: 0.8125rem;
+    line-height: 1.6;
+}
+
+.ftp-help-content p {
+    margin: 0 0 var(--space-sm);
+    color: var(--color-text-muted);
+}
+
+.ftp-help-content ul {
+    margin: 0;
+    padding-left: var(--space-md);
+    color: var(--color-text-muted);
+}
+
+.ftp-help-content li {
+    margin-bottom: var(--space-xs);
+}
+
+/* Summary display */
+.rider-profile-summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--space-md);
+    background: linear-gradient(135deg, rgba(123,63,0,0.08) 0%, rgba(230,184,0,0.08) 100%);
+    border-radius: var(--radius-md);
+    border: 1px solid rgba(123,63,0,0.1);
+}
+
+.summary-stat {
+    display: flex;
+    flex-direction: column;
+}
+
+.summary-label {
+    font-size: 0.75rem;
+    color: var(--color-text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.summary-value {
+    font-size: 1.75rem;
+    font-weight: 700;
+    color: var(--color-primary);
+}
+
+.summary-rating {
+    padding: var(--space-xs) var(--space-md);
+    background: var(--color-primary);
+    color: white;
+    border-radius: var(--radius-sm);
+    font-size: 0.8125rem;
+    font-weight: 600;
+}
+
+/* Modal actions */
+.rider-profile-actions {
+    display: flex;
+    gap: var(--space-sm);
+    margin-top: var(--space-xl);
+}
+
+.rider-profile-actions .btn {
+    flex: 1;
+    justify-content: center;
+    padding: var(--space-md);
+}
+
+.btn-secondary {
+    background: var(--color-bg);
+    color: var(--color-text);
+    border: 1px solid var(--color-border);
+}
+
+.btn-secondary:hover {
+    background: var(--color-border);
+}
+
+.rider-profile-reset {
+    margin-top: var(--space-md);
+    text-align: center;
+}
+
+.btn-reset {
+    background: none;
+    border: none;
+    color: var(--color-danger);
+    font-size: 0.8125rem;
+    cursor: pointer;
+    padding: var(--space-xs);
+}
+
+.btn-reset:hover {
+    text-decoration: underline;
+}
+
+/* ==============================================
+   Route Power Analysis Display
+   ============================================== */
+
+/* Analysis summary on route cards */
+.route-analysis {
+    margin-top: var(--space-md);
+    padding: var(--space-md);
+    background: linear-gradient(135deg, rgba(123,63,0,0.05) 0%, rgba(230,184,0,0.05) 100%);
+    border-radius: var(--radius-md);
+    border-left: 3px solid var(--color-primary);
+}
+
+.route-analysis-header {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    margin-bottom: var(--space-sm);
+    font-size: 0.75rem;
+    color: var(--color-text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.route-analysis-header .profile-icon {
+    font-size: 0.875rem;
+}
+
+.route-analysis-stats {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: var(--space-md);
+}
+
+.analysis-stat {
+    text-align: center;
+}
+
+.analysis-stat-value {
+    font-size: 1.125rem;
+    font-weight: 700;
+    color: var(--color-primary);
+}
+
+.analysis-stat-label {
+    font-size: 0.6875rem;
+    color: var(--color-text-muted);
+    display: block;
+    margin-top: 2px;
+}
+
+/* Difficulty badge */
+.difficulty-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-xs);
+    padding: 2px 8px;
+    border-radius: var(--radius-sm);
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+.difficulty-badge.easy { background: var(--elev-easy); color: white; }
+.difficulty-badge.moderate { background: var(--elev-moderate); color: var(--color-text); }
+.difficulty-badge.hard { background: var(--elev-hard); color: white; }
+.difficulty-badge.very-hard { background: var(--elev-extreme); color: white; }
+
+/* Responsive modal */
+@media (max-width: 480px) {
+    .rider-profile-content {
+        padding: var(--space-lg);
+    }
+
+    .rider-profile-header h2 {
+        font-size: 1.25rem;
+    }
+
+    .rider-profile-actions {
+        flex-direction: column;
+    }
+
+    .route-analysis-stats {
+        grid-template-columns: 1fr;
+        gap: var(--space-sm);
+    }
+
+    .analysis-stat {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        text-align: left;
     }
 }
 

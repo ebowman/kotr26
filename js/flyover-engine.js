@@ -1077,6 +1077,9 @@
             // Setup controls
             setupControls();
 
+            // Setup climb analysis panel
+            setupClimbAnalysis();
+
         } catch (error) {
             console.error('Failed to load route:', error);
             showError(`Failed to load route: ${error.message}`);
@@ -1199,6 +1202,329 @@
         elevationProfile.onPositionChange = (newPosition) => {
             seekToPosition(newPosition);
         };
+
+        // Load rider profile if available and apply to elevation profile
+        if (typeof RiderProfile !== 'undefined') {
+            RiderProfile.load();
+            const profile = RiderProfile.get();
+            if (profile.isConfigured) {
+                elevationProfile.setRiderProfile(profile.weight, profile.ftp);
+            }
+        }
+    }
+
+    /**
+     * Setup effort zone toggle for elevation profile
+     */
+    function setupEffortToggle() {
+        const toggle = document.getElementById('effort-toggle');
+        const toggleContainer = document.getElementById('color-mode-toggle');
+        const legend = document.getElementById('effort-legend');
+
+        if (!toggle || !toggleContainer || !elevationProfile) return;
+
+        // Check if rider profile is configured
+        const updateToggleState = () => {
+            if (typeof RiderProfile !== 'undefined') {
+                RiderProfile.load();
+                const profile = RiderProfile.get();
+                if (profile.isConfigured) {
+                    toggleContainer.classList.remove('disabled');
+                    toggleContainer.title = 'Toggle effort zone coloring';
+                    elevationProfile.setRiderProfile(profile.weight, profile.ftp);
+                } else {
+                    toggleContainer.classList.add('disabled');
+                    toggleContainer.title = 'Set rider profile to enable';
+                    // Switch back to grade mode if profile is cleared
+                    if (elevationProfile.getColorMode() === ElevationProfile.COLOR_MODES.EFFORT) {
+                        elevationProfile.setColorMode(ElevationProfile.COLOR_MODES.GRADE);
+                        toggle.classList.remove('active');
+                        legend.classList.remove('visible');
+                    }
+                }
+            }
+        };
+
+        // Initial check
+        updateToggleState();
+
+        // Listen for profile changes
+        if (typeof RiderProfile !== 'undefined') {
+            RiderProfile.setOnChange(() => {
+                updateToggleState();
+                // Refresh the elevation profile render
+                if (elevationProfile.getColorMode() === ElevationProfile.COLOR_MODES.EFFORT) {
+                    elevationProfile.render();
+                }
+            });
+        }
+
+        // Toggle click handler
+        toggle.addEventListener('click', () => {
+            if (toggleContainer.classList.contains('disabled')) return;
+
+            const isEffortMode = toggle.classList.toggle('active');
+            const mode = isEffortMode ?
+                ElevationProfile.COLOR_MODES.EFFORT :
+                ElevationProfile.COLOR_MODES.GRADE;
+
+            elevationProfile.setColorMode(mode);
+            legend.classList.toggle('visible', isEffortMode);
+        });
+    }
+
+    // Climb analysis state
+    let detectedClimbs = [];
+    let activeClimbIndex = -1;
+
+    /**
+     * Setup climb analysis panel
+     */
+    function setupClimbAnalysis() {
+        console.log('setupClimbAnalysis called', { routeData: !!routeData, PowerCalculator: typeof PowerCalculator });
+        if (!routeData || typeof PowerCalculator === 'undefined') {
+            console.log('setupClimbAnalysis returning early - no routeData or PowerCalculator');
+            return;
+        }
+
+        const toggleBtn = document.getElementById('climb-toggle-btn');
+        const panel = document.getElementById('climb-analysis-panel');
+        const closeBtn = document.getElementById('climb-panel-close');
+        const content = document.getElementById('climb-panel-content');
+        const badge = document.getElementById('climb-count-badge');
+        const profileNotice = document.getElementById('climb-profile-notice');
+
+        console.log('Elements found:', { toggleBtn: !!toggleBtn, panel: !!panel, content: !!content });
+        if (!toggleBtn || !panel || !content) {
+            console.log('setupClimbAnalysis returning early - missing elements');
+            return;
+        }
+
+        // Detect climbs using PowerCalculator
+        detectedClimbs = PowerCalculator.detectClimbs(routeData);
+
+        // Update badge count
+        if (detectedClimbs.length > 0) {
+            toggleBtn.classList.add('has-climbs');
+            badge.textContent = detectedClimbs.length;
+            badge.style.display = 'flex';
+        } else {
+            badge.style.display = 'none';
+        }
+
+        // Get rider profile
+        let riderWeight = 75;
+        let riderFTP = 200;
+        let hasProfile = false;
+
+        if (typeof RiderProfile !== 'undefined') {
+            RiderProfile.load();
+            const profile = RiderProfile.get();
+            if (profile.isConfigured) {
+                riderWeight = profile.weight;
+                riderFTP = profile.ftp;
+                hasProfile = true;
+            }
+        }
+
+        // Show/hide profile notice
+        if (profileNotice) {
+            profileNotice.style.display = hasProfile ? 'none' : 'flex';
+        }
+
+        // Populate climb cards
+        if (detectedClimbs.length > 0) {
+            content.innerHTML = detectedClimbs.map((climb, index) => {
+                const climbTable = PowerCalculator.calculateClimbTable(climb, riderWeight, riderFTP);
+                return createClimbCardHTML(climb, climbTable, index, hasProfile, riderFTP);
+            }).join('');
+
+            // Add expand/collapse handlers
+            content.querySelectorAll('.climb-card-header').forEach((header, index) => {
+                header.addEventListener('click', () => {
+                    const card = header.closest('.climb-card');
+                    const wasExpanded = card.classList.contains('expanded');
+
+                    // Collapse all cards
+                    content.querySelectorAll('.climb-card').forEach(c => c.classList.remove('expanded'));
+
+                    // Expand clicked card if it wasn't already expanded
+                    if (!wasExpanded) {
+                        card.classList.add('expanded');
+                    }
+                });
+            });
+        }
+
+        // Toggle button handler
+        toggleBtn.addEventListener('click', () => {
+            panel.classList.add('visible');
+            toggleBtn.classList.add('panel-open');
+        });
+
+        // Close button handler
+        closeBtn.addEventListener('click', () => {
+            panel.classList.remove('visible');
+            toggleBtn.classList.remove('panel-open');
+        });
+
+        // Update climb cards on profile change
+        if (typeof RiderProfile !== 'undefined') {
+            RiderProfile.setOnChange((newProfile) => {
+                // Re-render climb cards with new profile
+                if (detectedClimbs.length > 0) {
+                    const w = newProfile.weight;
+                    const ftp = newProfile.ftp;
+                    const configured = newProfile.isConfigured;
+
+                    if (profileNotice) {
+                        profileNotice.style.display = configured ? 'none' : 'flex';
+                    }
+
+                    content.innerHTML = detectedClimbs.map((climb, index) => {
+                        const climbTable = PowerCalculator.calculateClimbTable(climb, w, ftp);
+                        return createClimbCardHTML(climb, climbTable, index, configured, ftp);
+                    }).join('');
+
+                    // Re-add expand handlers
+                    content.querySelectorAll('.climb-card-header').forEach((header) => {
+                        header.addEventListener('click', () => {
+                            const card = header.closest('.climb-card');
+                            const wasExpanded = card.classList.contains('expanded');
+                            content.querySelectorAll('.climb-card').forEach(c => c.classList.remove('expanded'));
+                            if (!wasExpanded) {
+                                card.classList.add('expanded');
+                            }
+                        });
+                    });
+                }
+            });
+        }
+    }
+
+    /**
+     * Create HTML for a climb card
+     */
+    function createClimbCardHTML(climb, climbTable, index, hasProfile, ftp) {
+        const distanceKm = (climb.distance / 1000).toFixed(1); // distance is in meters
+        const avgGrade = climb.avgGrade.toFixed(1);
+        const elevGain = Math.round(climb.elevationGain);
+        const startKm = climb.startDistance.toFixed(1); // startDistance is already in km
+
+        // Create W/kg table rows
+        let tableRows = '';
+        if (climbTable && climbTable.length > 0) {
+            tableRows = climbTable.map(row => {
+                const powerClass = getWkgClass(row.power, ftp);
+                return `
+                    <tr>
+                        <td>${row.speed} km/h</td>
+                        <td>${row.wPerKg} W/kg</td>
+                        <td class="${powerClass}">${row.power}W</td>
+                        <td>${row.time}</td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        return `
+            <div class="climb-card" data-climb-index="${index}" data-start="${climb.startDistance}" data-end="${climb.endDistance}">
+                <div class="climb-card-header">
+                    <span class="climb-name">Climb ${index + 1} @ ${startKm}km</span>
+                    <div class="climb-quick-stats">
+                        <span class="climb-quick-stat">${distanceKm}km</span>
+                        <span class="climb-quick-stat">${avgGrade}%</span>
+                    </div>
+                </div>
+                <div class="climb-detail">
+                    <div class="climb-stats-row">
+                        <div class="climb-stat">
+                            <div class="climb-stat-value">${distanceKm}</div>
+                            <div class="climb-stat-label">km</div>
+                        </div>
+                        <div class="climb-stat">
+                            <div class="climb-stat-value">${avgGrade}%</div>
+                            <div class="climb-stat-label">avg grade</div>
+                        </div>
+                        <div class="climb-stat">
+                            <div class="climb-stat-value">${elevGain}</div>
+                            <div class="climb-stat-label">m gain</div>
+                        </div>
+                    </div>
+                    ${hasProfile ? `
+                    <table class="climb-wkg-table">
+                        <thead>
+                            <tr>
+                                <th>Speed</th>
+                                <th>W/kg</th>
+                                <th>Your W</th>
+                                <th>Time</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${tableRows}
+                        </tbody>
+                    </table>
+                    ` : `
+                    <p style="font-size: 0.75rem; color: rgba(255,255,255,0.5); text-align: center; padding: 12px 0;">
+                        Set rider profile for W/kg analysis
+                    </p>
+                    `}
+                </div>
+            </div>
+        `;
+    }
+
+    /**
+     * Get CSS class for power value based on FTP
+     */
+    function getWkgClass(power, ftp) {
+        const percent = (power / ftp) * 100;
+        if (percent < 90) return 'wkg-sustainable';
+        if (percent < 105) return 'wkg-hard';
+        return 'wkg-unsustainable';
+    }
+
+    /**
+     * Format time in seconds to MM:SS or HH:MM:SS
+     */
+    function formatTime(seconds) {
+        const h = Math.floor(seconds / 3600);
+        const m = Math.floor((seconds % 3600) / 60);
+        const s = Math.round(seconds % 60);
+
+        if (h > 0) {
+            return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+        }
+        return `${m}:${s.toString().padStart(2, '0')}`;
+    }
+
+    /**
+     * Update active climb highlight based on current position
+     */
+    function updateActiveClimb(currentDistance) {
+        const content = document.getElementById('climb-panel-content');
+        if (!content || detectedClimbs.length === 0) return;
+
+        // Find current climb
+        let newActiveIndex = -1;
+        for (let i = 0; i < detectedClimbs.length; i++) {
+            const climb = detectedClimbs[i];
+            if (currentDistance >= climb.startDistance && currentDistance <= climb.endDistance) {
+                newActiveIndex = i;
+                break;
+            }
+        }
+
+        // Only update if changed
+        if (newActiveIndex !== activeClimbIndex) {
+            activeClimbIndex = newActiveIndex;
+
+            // Update card styling
+            content.querySelectorAll('.climb-card').forEach((card, index) => {
+                card.classList.toggle('active', index === activeClimbIndex);
+            });
+        }
     }
 
     /**
@@ -1432,6 +1758,9 @@
                 adjustZoom(delta);
             }
         }, { passive: false });
+
+        // Effort zone toggle for elevation profile
+        setupEffortToggle();
     }
 
     /**
@@ -2032,6 +2361,9 @@
         if (distLeft) distLeft.textContent = `${remainingDistance.toFixed(1)} km left`;
 
         // Grade and elevation stats are updated in updateDotAndUI via elevationProfile
+
+        // Update active climb highlight (distance in meters for climb detection)
+        updateActiveClimb(currentDistance * 1000);
     }
 
     /**
