@@ -71,10 +71,16 @@
             right: 0;
             display: flex;
             align-items: center;
-            justify-content: space-between;
+            justify-content: flex-start;
             padding: var(--space-md);
             background: linear-gradient(180deg, rgba(0,0,0,0.7) 0%, transparent 100%);
             z-index: 100;
+        }
+
+        .route-title {
+            position: absolute;
+            left: 50%;
+            transform: translateX(-50%);
         }
 
         .back-link {
@@ -717,16 +723,6 @@
             <span>←</span> Back to Routes
         </a>
         <h1 class="route-title" id="route-title">Loading...</h1>
-        <div class="route-stats-bar" id="route-stats">
-            <div class="stat-item">
-                <span class="stat-value" id="stat-distance">--</span>
-                <span class="stat-unit">km</span>
-            </div>
-            <div class="stat-item">
-                <span class="stat-value" id="stat-elevation">--</span>
-                <span class="stat-unit">m ↑</span>
-            </div>
-        </div>
     </div>
 
     <!-- Summit badge (for Ventoux) -->

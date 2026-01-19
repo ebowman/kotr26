@@ -31,8 +31,7 @@
 
         // Route visualization
         routeLineWidth: 4,
-        routeLineColor: '#E6B800',
-        trailColor: '#7B3F00',
+        routeLineColor: '#FFD700',  // Bright gold/yellow - constant color
         trailWidth: 6,
 
         // Speed multipliers (adjusted so tiles can keep up)
@@ -390,11 +389,18 @@
             }
 
             case CameraModes.BIRDS_EYE: {
-                // Bird's eye: directly above, looking down
-                cameraLng = dotPoint.lng;
-                cameraLat = dotPoint.lat;
+                // Bird's eye: nearly above, looking down at the dot
+                // Offset slightly behind (south) to avoid gimbal lock with lookAtPoint
+                const behindOffset = turf.destination(
+                    turf.point([dotPoint.lng, dotPoint.lat]),
+                    0.05, // 50 meters behind
+                    (forwardBearing + 180) % 360, // behind the direction of travel
+                    { units: 'kilometers' }
+                );
+                cameraLng = behindOffset.geometry.coordinates[0];
+                cameraLat = behindOffset.geometry.coordinates[1];
                 cameraAlt = dotPoint.alt + config.offsetUp;
-                cameraBearing = 0; // North-up
+                cameraBearing = forwardBearing; // Face direction of travel
                 cameraPitch = config.pitch;
                 break;
             }
@@ -449,15 +455,19 @@
         return createCameraState(cameraLng, cameraLat, cameraAlt, cameraBearing, cameraPitch);
     }
 
+    // Flag for free navigation mode when animation is paused
+    let freeNavigationEnabled = false;
+
     /**
      * Transition to a new camera mode
      */
     function transitionToMode(newMode) {
         if (newMode === currentCameraMode && modeTransitionProgress >= 1) return;
 
-        // Cancel user override
+        // Cancel user override and free navigation
         userOverrideActive = false;
         userIsInteracting = false;
+        freeNavigationEnabled = false;
         clearTimeout(userOverrideTimeout);
         returnProgress = 1;
         lastUserCameraState = null;
@@ -471,6 +481,23 @@
 
         // Update UI
         updateCameraModeUI(newMode);
+
+        // Immediately update camera position (works whether playing or not)
+        // Complete the transition instantly when not playing
+        if (!isPlaying) {
+            // Fast-forward the transition
+            modeTransitionProgress = 1;
+            currentCameraMode = targetCameraMode;
+            transitionStartState = null;
+
+            // Temporarily disable free navigation to allow camera update
+            freeNavigationEnabled = false;
+            updateCamera(0.016);
+
+            // Enable free navigation mode when animation is paused
+            // This allows user to pan/zoom/rotate freely after mode change
+            freeNavigationEnabled = true;
+        }
     }
 
     /**
@@ -730,34 +757,15 @@
             lineMetrics: true
         });
 
-        // Trail layer (what's been traveled)
-        map.addLayer({
-            id: 'route-trail',
-            type: 'line',
-            source: 'route',
-            paint: {
-                'line-color': CONFIG.trailColor,
-                'line-width': CONFIG.trailWidth,
-                'line-opacity': 0.8
-            }
-        });
-
-        // Main route layer with gradient
+        // Main route layer - constant bright yellow
         map.addLayer({
             id: 'route-line',
             type: 'line',
             source: 'route',
             paint: {
                 'line-color': CONFIG.routeLineColor,
-                'line-width': CONFIG.routeLineWidth,
-                'line-opacity': 1,
-                'line-gradient': [
-                    'interpolate',
-                    ['linear'],
-                    ['line-progress'],
-                    0, CONFIG.routeLineColor,
-                    1, CONFIG.routeLineColor
-                ]
+                'line-width': CONFIG.trailWidth,
+                'line-opacity': 1
             },
             layout: {
                 'line-cap': 'round',
@@ -841,8 +849,6 @@
         }
 
         document.getElementById('route-title').textContent = name;
-        document.getElementById('stat-distance').textContent = routeData.distance.toFixed(1);
-        document.getElementById('stat-elevation').textContent = routeData.elevationGain;
     }
 
     /**
@@ -1057,10 +1063,7 @@
             chaseCamPitch = PITCH_BIRDS_EYE_THRESHOLD + PITCH_STEP;
             savePitchToStorage(chaseCamPitch);
             transitionToMode(CameraModes.CHASE);
-            // Force immediate update to complete the mode switch
-            currentCameraMode = CameraModes.CHASE;
-            modeTransitionProgress = 1;
-            updateCamera(0.016);
+            // transitionToMode already handles camera update when not playing
             return;
         }
 
@@ -1069,9 +1072,7 @@
             // If pressing up in another mode, switch to chase first
             if (delta < 0) {
                 transitionToMode(CameraModes.CHASE);
-                currentCameraMode = CameraModes.CHASE;
-                modeTransitionProgress = 1;
-                updateCamera(0.016);
+                // transitionToMode already handles camera update when not playing
             }
             return;
         }
@@ -1088,7 +1089,7 @@
         // Check if we should switch to Bird's Eye
         if (newPitch <= PITCH_BIRDS_EYE_THRESHOLD) {
             transitionToMode(CameraModes.BIRDS_EYE);
-            updateCamera(0.016);
+            // transitionToMode already handles camera update when not playing
             return;
         }
 
@@ -1096,7 +1097,13 @@
         savePitchToStorage(chaseCamPitch);
 
         // Force camera update to apply the new pitch immediately
+        // Temporarily disable free navigation to allow this update
+        freeNavigationEnabled = false;
         updateCamera(0.016);
+        // Re-enable free navigation if paused
+        if (!isPlaying) {
+            freeNavigationEnabled = true;
+        }
     }
 
     /**
@@ -1121,10 +1128,16 @@
 
         if (isPlaying) {
             playBtn.innerHTML = '⏸️';
+            // Disable free navigation when animation starts
+            freeNavigationEnabled = false;
+            userOverrideActive = false;
+            clearTimeout(userOverrideTimeout);
             lastTimestamp = performance.now();
             animate(lastTimestamp);
         } else {
             playBtn.innerHTML = '▶️';
+            // Enable free navigation when animation stops
+            freeNavigationEnabled = true;
             if (animationId) {
                 cancelAnimationFrame(animationId);
                 animationId = null;
@@ -1153,8 +1166,16 @@
             transitionStartState = null;
         }
 
+        // Temporarily disable free navigation to update camera during seek
+        freeNavigationEnabled = false;
+
         // Update camera immediately (use small deltaTime for cinematic mode)
         updateCamera(0.016); // ~60fps frame time
+
+        // Re-enable free navigation if we're paused
+        if (!isPlaying) {
+            freeNavigationEnabled = true;
+        }
 
         // Update UI
         updateProgress();
@@ -1219,6 +1240,13 @@
         if (!targetState) return;
 
         let finalState;
+
+        // Handle free navigation mode (when paused, user can navigate freely)
+        // Only update dot and UI, don't control camera
+        if (freeNavigationEnabled && !isPlaying) {
+            updateDotAndUI(dotPoint);
+            return;
+        }
 
         // Handle user override with smooth return
         if (userOverrideActive) {
@@ -1369,27 +1397,10 @@
 
     /**
      * Update route gradient to show progress
+     * (Currently no-op since route is constant color)
      */
     function updateRouteGradient(progress) {
-        // Ensure progress values are strictly ascending
-        const p = Math.max(0.001, Math.min(0.999, progress));
-        const trailEnd = Math.max(0.0001, p - 0.01);
-
-        try {
-            // Update the line gradient to show traveled portion
-            map.setPaintProperty('route-line', 'line-gradient', [
-                'interpolate',
-                ['linear'],
-                ['line-progress'],
-                0, CONFIG.trailColor,
-                trailEnd, CONFIG.trailColor,
-                p, CONFIG.routeLineColor,
-                1, CONFIG.routeLineColor
-            ]);
-        } catch (e) {
-            // Gradient not supported, fallback
-            console.warn('Gradient update failed:', e.message);
-        }
+        // Route color is now constant - no gradient needed
     }
 
     /**
