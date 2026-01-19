@@ -20,7 +20,7 @@
 
     // Animation configuration
     const CONFIG = {
-        // Camera settings
+        // Camera settings (legacy - now in CameraModeConfig)
         cameraAltitude: 300,           // Base altitude above terrain (meters)
         cameraOffset: 200,              // Offset behind current position (meters)
         lookAheadDistance: 50,          // How far ahead camera looks (meters) - small to keep dot centered
@@ -35,15 +35,77 @@
         trailColor: '#7B3F00',
         trailWidth: 6,
 
-        // Speed multipliers
+        // Speed multipliers (adjusted so tiles can keep up)
+        // Display label -> actual multiplier
         speeds: {
-            '0.25': 0.25,
-            '0.5': 0.5,
-            '1': 1,
-            '2': 2,
-            '4': 4
+            '0.5': 0.125,   // Half speed
+            '1': 0.25,      // Normal (what was 1/4x)
+            '2': 0.5,       // 2x (what was 1/2x)
+            '4': 1          // Max (what was 1x)
         }
     };
+
+    // Camera Mode System
+    const CameraModes = {
+        CHASE: 'chase',
+        BIRDS_EYE: 'birds_eye',
+        SIDE_VIEW: 'side_view',
+        CINEMATIC: 'cinematic'
+    };
+
+    const CameraModeConfig = {
+        chase: {
+            offsetBehind: 200,      // meters behind the dot
+            offsetUp: 300,          // meters above terrain (matches original CONFIG.cameraAltitude)
+            offsetSide: 0,          // meters to the side
+            pitch: -15,             // degrees (negative = looking down)
+            transitionDuration: 1000 // ms
+        },
+        birds_eye: {
+            offsetBehind: 0,
+            offsetUp: 800,
+            offsetSide: 0,
+            pitch: -75,
+            transitionDuration: 1000
+        },
+        side_view: {
+            offsetBehind: 0,
+            offsetUp: 100,
+            offsetSide: 400,        // meters to the side
+            pitch: -10,
+            transitionDuration: 1000
+        },
+        cinematic: {
+            orbitRadius: 300,       // meters from dot
+            orbitSpeed: 0.15,       // radians per second
+            pitchMin: -30,
+            pitchMax: -5,
+            heightMin: 100,
+            heightMax: 400,
+            transitionDuration: 1500
+        }
+    };
+
+    // Camera mode state
+    let currentCameraMode = CameraModes.CINEMATIC;
+    let targetCameraMode = CameraModes.CINEMATIC;
+    let modeTransitionProgress = 1; // 0 = transitioning, 1 = complete
+    let transitionStartState = null;
+    let cinematicAngle = 0; // For cinematic orbit
+
+    // Chase cam pitch adjustment (stored in localStorage)
+    const PITCH_MIN = -75;  // Maximum downward (transitions to bird's eye)
+    const PITCH_MAX = -5;   // Most horizontal
+    const PITCH_STEP = 5;   // Degrees per arrow key press
+    const PITCH_BIRDS_EYE_THRESHOLD = -70; // Switch to bird's eye when pitch goes below this
+    let chaseCamPitch = loadPitchFromStorage();
+
+    // User override state
+    let userOverrideActive = false;
+    let userOverrideTimeout = null;
+    let returnProgress = 1;
+    let lastUserCameraState = null;
+    let userIsInteracting = false; // True when user has mouse/touch down on map
 
     // Mont Ventoux detection
     const VENTOUX_SUMMIT = {
@@ -62,7 +124,7 @@
     let isPlaying = false;
     let animationId = null;
     let progress = 0;
-    let speedMultiplier = 1;
+    let speedMultiplier = 0.25; // Default to 1x speed (matches CONFIG.speeds['1'])
     let lastTimestamp = 0;
 
     // Previous position for bearing calculation
@@ -72,6 +134,35 @@
     let routeLine = null;
     let cameraPath = null;
     let totalDistance = 0;
+
+    /**
+     * Load pitch from localStorage
+     */
+    function loadPitchFromStorage() {
+        try {
+            const stored = localStorage.getItem('kotr-flyover-pitch');
+            if (stored !== null) {
+                const pitch = parseFloat(stored);
+                if (!isNaN(pitch) && pitch >= PITCH_MIN && pitch <= PITCH_MAX) {
+                    return pitch;
+                }
+            }
+        } catch (e) {
+            // localStorage not available
+        }
+        return -15; // Default pitch
+    }
+
+    /**
+     * Save pitch to localStorage
+     */
+    function savePitchToStorage(pitch) {
+        try {
+            localStorage.setItem('kotr-flyover-pitch', pitch.toString());
+        } catch (e) {
+            // localStorage not available
+        }
+    }
 
     /**
      * Linear interpolation
@@ -89,6 +180,81 @@
             lat: lerp(start.lat, end.lat, t),
             alt: lerp(start.alt || 0, end.alt || 0, t)
         };
+    }
+
+    /**
+     * Ease-out cubic for smooth deceleration
+     */
+    function easeOutCubic(t) {
+        return 1 - Math.pow(1 - t, 3);
+    }
+
+    /**
+     * Ease-in-out cubic for smooth both ends
+     */
+    function easeInOutCubic(t) {
+        return t < 0.5
+            ? 4 * t * t * t
+            : 1 - Math.pow(-2 * t + 2, 3) / 2;
+    }
+
+    /**
+     * Camera state object for transitions
+     */
+    function createCameraState(lng, lat, alt, bearing, pitch) {
+        return { lng, lat, alt, bearing, pitch };
+    }
+
+    /**
+     * Interpolate between two camera states
+     */
+    function lerpCameraState(start, end, t) {
+        // Handle bearing wrap-around (e.g., 350 to 10 degrees)
+        let startBearing = start.bearing;
+        let endBearing = end.bearing;
+        let bearingDiff = endBearing - startBearing;
+
+        if (bearingDiff > 180) startBearing += 360;
+        else if (bearingDiff < -180) endBearing += 360;
+
+        return {
+            lng: lerp(start.lng, end.lng, t),
+            lat: lerp(start.lat, end.lat, t),
+            alt: lerp(start.alt, end.alt, t),
+            bearing: (lerp(startBearing, endBearing, t) + 360) % 360,
+            pitch: lerp(start.pitch, end.pitch, t)
+        };
+    }
+
+    /**
+     * Get current camera state from map
+     */
+    function getCurrentCameraState() {
+        try {
+            const camera = map.getFreeCameraOptions();
+            const pos = camera.position;
+            const lngLat = pos.toLngLat();
+            const center = map.getCenter();
+            const bearing = map.getBearing();
+            const pitch = map.getPitch();
+
+            return createCameraState(
+                lngLat.lng,
+                lngLat.lat,
+                pos.toAltitude(),
+                bearing,
+                pitch
+            );
+        } catch (e) {
+            // Fallback
+            return createCameraState(
+                map.getCenter().lng,
+                map.getCenter().lat,
+                1000,
+                map.getBearing(),
+                map.getPitch()
+            );
+        }
     }
 
     /**
@@ -160,7 +326,7 @@
     }
 
     /**
-     * Get camera position offset from route point
+     * Get camera position offset from route point (legacy - used as fallback)
      */
     function getCameraPosition(routePoint, nextPoint, altitude) {
         if (!routePoint || !nextPoint) return routePoint;
@@ -185,6 +351,209 @@
             lat: offsetPoint.geometry.coordinates[1],
             alt: routePoint.alt + altitude
         };
+    }
+
+    /**
+     * Calculate camera state for a given mode
+     */
+    function calculateCameraForMode(mode, dotPoint, nextPoint, deltaTime) {
+        if (!dotPoint || !nextPoint) return null;
+
+        const config = CameraModeConfig[mode];
+        const forwardBearing = calculateBearing(dotPoint, nextPoint);
+
+        let cameraLng, cameraLat, cameraAlt, cameraBearing, cameraPitch;
+
+        switch (mode) {
+            case CameraModes.CHASE: {
+                // Chase cam: behind and above the dot
+                // Calculate altitude based on desired pitch angle
+                // tan(pitch) = altitude / horizontal_distance
+                // So: altitude = horizontal_distance * tan(|pitch|)
+                const pitchRadians = Math.abs(chaseCamPitch) * Math.PI / 180;
+                const calculatedAltitude = config.offsetBehind * Math.tan(pitchRadians);
+
+                const behindBearing = (forwardBearing + 180) % 360;
+                const offsetPoint = turf.destination(
+                    turf.point([dotPoint.lng, dotPoint.lat]),
+                    config.offsetBehind / 1000,
+                    behindBearing,
+                    { units: 'kilometers' }
+                );
+                cameraLng = offsetPoint.geometry.coordinates[0];
+                cameraLat = offsetPoint.geometry.coordinates[1];
+                // Use calculated altitude based on pitch, plus terrain following
+                cameraAlt = dotPoint.alt + calculatedAltitude + (dotPoint.alt * 0.1);
+                cameraBearing = forwardBearing;
+                cameraPitch = chaseCamPitch;
+                break;
+            }
+
+            case CameraModes.BIRDS_EYE: {
+                // Bird's eye: directly above, looking down
+                cameraLng = dotPoint.lng;
+                cameraLat = dotPoint.lat;
+                cameraAlt = dotPoint.alt + config.offsetUp;
+                cameraBearing = 0; // North-up
+                cameraPitch = config.pitch;
+                break;
+            }
+
+            case CameraModes.SIDE_VIEW: {
+                // Side view: perpendicular to route direction
+                const sideBearing = (forwardBearing + 90) % 360;
+                const offsetPoint = turf.destination(
+                    turf.point([dotPoint.lng, dotPoint.lat]),
+                    config.offsetSide / 1000,
+                    sideBearing,
+                    { units: 'kilometers' }
+                );
+                cameraLng = offsetPoint.geometry.coordinates[0];
+                cameraLat = offsetPoint.geometry.coordinates[1];
+                cameraAlt = dotPoint.alt + config.offsetUp;
+                // Look at the dot from the side
+                cameraBearing = (sideBearing + 180) % 360;
+                cameraPitch = config.pitch;
+                break;
+            }
+
+            case CameraModes.CINEMATIC: {
+                // Cinematic: orbiting around the dot
+                if (deltaTime) {
+                    cinematicAngle += config.orbitSpeed * deltaTime;
+                }
+                const orbitBearing = (cinematicAngle * 180 / Math.PI) % 360;
+                const offsetPoint = turf.destination(
+                    turf.point([dotPoint.lng, dotPoint.lat]),
+                    config.orbitRadius / 1000,
+                    orbitBearing,
+                    { units: 'kilometers' }
+                );
+                cameraLng = offsetPoint.geometry.coordinates[0];
+                cameraLat = offsetPoint.geometry.coordinates[1];
+                // Vary height sinusoidally
+                const heightT = (Math.sin(cinematicAngle * 0.5) + 1) / 2;
+                cameraAlt = dotPoint.alt + lerp(config.heightMin, config.heightMax, heightT);
+                // Look at the dot
+                cameraBearing = (orbitBearing + 180) % 360;
+                // Vary pitch
+                const pitchT = (Math.sin(cinematicAngle * 0.3) + 1) / 2;
+                cameraPitch = lerp(config.pitchMin, config.pitchMax, pitchT);
+                break;
+            }
+
+            default:
+                return null;
+        }
+
+        return createCameraState(cameraLng, cameraLat, cameraAlt, cameraBearing, cameraPitch);
+    }
+
+    /**
+     * Transition to a new camera mode
+     */
+    function transitionToMode(newMode) {
+        if (newMode === currentCameraMode && modeTransitionProgress >= 1) return;
+
+        // Cancel user override
+        userOverrideActive = false;
+        userIsInteracting = false;
+        clearTimeout(userOverrideTimeout);
+        returnProgress = 1;
+        lastUserCameraState = null;
+
+        // Hide user control indicator if showing
+        hideUserControlIndicator();
+
+        targetCameraMode = newMode;
+        modeTransitionProgress = 0;
+        transitionStartState = getCurrentCameraState();
+
+        // Update UI
+        updateCameraModeUI(newMode);
+    }
+
+    /**
+     * Mode display names
+     */
+    const CameraModeNames = {
+        chase: 'Chase Cam',
+        birds_eye: "Bird's Eye",
+        side_view: 'Side View',
+        cinematic: 'Cinematic'
+    };
+
+    /**
+     * Update camera mode button UI and indicator
+     */
+    function updateCameraModeUI(mode) {
+        const btns = document.querySelectorAll('.mode-btn');
+        btns.forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.mode === mode);
+        });
+
+        // Update mode indicator
+        const indicator = document.getElementById('camera-mode-indicator');
+        const label = indicator?.querySelector('.mode-label');
+        if (label) {
+            label.textContent = CameraModeNames[mode] || mode;
+        }
+        indicator?.classList.remove('user-control');
+    }
+
+    /**
+     * Show user control indicator
+     */
+    function showUserControlIndicator() {
+        const indicator = document.getElementById('camera-mode-indicator');
+        const label = indicator?.querySelector('.mode-label');
+        if (label) {
+            label.textContent = 'Free Look';
+        }
+        indicator?.classList.add('user-control');
+    }
+
+    /**
+     * Hide user control indicator and restore mode name
+     */
+    function hideUserControlIndicator() {
+        const indicator = document.getElementById('camera-mode-indicator');
+        const label = indicator?.querySelector('.mode-label');
+        if (label) {
+            label.textContent = CameraModeNames[currentCameraMode] || currentCameraMode;
+        }
+        indicator?.classList.remove('user-control');
+    }
+
+    /**
+     * Handle user starting interaction with the map (mousedown/touchstart)
+     */
+    function handleUserInteractionStart() {
+        userIsInteracting = true;
+        userOverrideActive = true;
+        returnProgress = 1;
+        clearTimeout(userOverrideTimeout);
+
+        // Show user control indicator
+        showUserControlIndicator();
+    }
+
+    /**
+     * Handle user ending interaction with the map (mouseup/touchend)
+     */
+    function handleUserInteractionEnd() {
+        userIsInteracting = false;
+
+        // After 2 seconds of no interaction, start smooth return
+        clearTimeout(userOverrideTimeout);
+        userOverrideTimeout = setTimeout(() => {
+            if (!userIsInteracting) {
+                userOverrideActive = false;
+                returnProgress = 0;
+                lastUserCameraState = getCurrentCameraState();
+                hideUserControlIndicator();
+            }
+        }, 2000);
     }
 
     /**
@@ -501,6 +870,9 @@
         const forwardBtn = document.getElementById('btn-forward');
         const speedBtns = document.querySelectorAll('.speed-btn');
         const progressBar = document.getElementById('progress-bar');
+        const modeBtns = document.querySelectorAll('.mode-btn');
+        const shortcutsHelp = document.getElementById('shortcuts-help');
+        const shortcutsClose = document.getElementById('shortcuts-close');
 
         playBtn.addEventListener('click', togglePlay);
         rewindBtn.addEventListener('click', () => seekToPosition(Math.max(0, progress - 0.05)));
@@ -520,8 +892,42 @@
             seekToPosition(position);
         });
 
+        // Camera mode buttons
+        modeBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                const mode = btn.dataset.mode;
+                if (mode && Object.values(CameraModes).includes(mode)) {
+                    transitionToMode(mode);
+                }
+            });
+        });
+
+        // Shortcuts help toggle
+        if (shortcutsClose) {
+            shortcutsClose.addEventListener('click', () => {
+                shortcutsHelp?.classList.add('hidden');
+            });
+        }
+
+        // Fullscreen button
+        const fullscreenBtn = document.getElementById('btn-fullscreen');
+        if (fullscreenBtn) {
+            fullscreenBtn.addEventListener('click', toggleFullscreen);
+        }
+
+        // Map interaction detection for user override
+        // Use direct DOM events on map canvas for reliable detection
+        const mapCanvas = map.getCanvas();
+        mapCanvas.addEventListener('mousedown', handleUserInteractionStart);
+        mapCanvas.addEventListener('touchstart', handleUserInteractionStart, { passive: true });
+        document.addEventListener('mouseup', handleUserInteractionEnd);
+        document.addEventListener('touchend', handleUserInteractionEnd);
+
         // Keyboard controls
         document.addEventListener('keydown', (e) => {
+            // Ignore if typing in an input
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
             switch (e.key) {
                 case ' ':
                     e.preventDefault();
@@ -533,10 +939,19 @@
                 case 'ArrowRight':
                     seekToPosition(Math.min(1, progress + 0.02));
                     break;
+                case 'ArrowUp':
+                    e.preventDefault();
+                    adjustChasePitch(-PITCH_STEP); // More downward (more negative)
+                    break;
+                case 'ArrowDown':
+                    e.preventDefault();
+                    adjustChasePitch(PITCH_STEP); // More horizontal (less negative)
+                    break;
                 case '1':
                 case '2':
                 case '3':
                 case '4':
+                    // Map 1-4 to the speed options: ½x, 1x, 2x, 4x
                     const speeds = ['0.5', '1', '2', '4'];
                     const speedIdx = parseInt(e.key) - 1;
                     if (speeds[speedIdx]) {
@@ -544,8 +959,100 @@
                         speedBtns.forEach(b => b.classList.toggle('active', b.dataset.speed === speeds[speedIdx]));
                     }
                     break;
+                // Camera mode shortcuts
+                case 'c':
+                case 'C':
+                    transitionToMode(CameraModes.CHASE);
+                    break;
+                case 'b':
+                case 'B':
+                    transitionToMode(CameraModes.BIRDS_EYE);
+                    break;
+                case 's':
+                case 'S':
+                    transitionToMode(CameraModes.SIDE_VIEW);
+                    break;
+                case 'v':
+                case 'V':
+                    transitionToMode(CameraModes.CINEMATIC);
+                    break;
+                // Fullscreen toggle
+                case 'f':
+                case 'F':
+                    toggleFullscreen();
+                    break;
+                // Help toggle
+                case '?':
+                    shortcutsHelp?.classList.toggle('hidden');
+                    break;
             }
         });
+    }
+
+    /**
+     * Adjust chase cam pitch with up/down arrows
+     * Also handles auto-switching between Chase and Bird's Eye
+     */
+    function adjustChasePitch(delta) {
+        // If in Bird's Eye and pressing down (making pitch less negative/more horizontal)
+        if ((currentCameraMode === CameraModes.BIRDS_EYE || targetCameraMode === CameraModes.BIRDS_EYE) && delta > 0) {
+            // Switch to Chase mode with pitch just above the threshold
+            chaseCamPitch = PITCH_BIRDS_EYE_THRESHOLD + PITCH_STEP;
+            savePitchToStorage(chaseCamPitch);
+            transitionToMode(CameraModes.CHASE);
+            // Force immediate update to complete the mode switch
+            currentCameraMode = CameraModes.CHASE;
+            modeTransitionProgress = 1;
+            updateCamera(0.016);
+            return;
+        }
+
+        // Only adjust pitch in Chase mode (check both current and target)
+        if (currentCameraMode !== CameraModes.CHASE && targetCameraMode !== CameraModes.CHASE) {
+            // If pressing up in another mode, switch to chase first
+            if (delta < 0) {
+                transitionToMode(CameraModes.CHASE);
+                currentCameraMode = CameraModes.CHASE;
+                modeTransitionProgress = 1;
+                updateCamera(0.016);
+            }
+            return;
+        }
+
+        // Ensure we're in chase mode
+        if (currentCameraMode !== CameraModes.CHASE) {
+            currentCameraMode = CameraModes.CHASE;
+            modeTransitionProgress = 1;
+        }
+
+        // Adjust pitch
+        const newPitch = Math.max(PITCH_MIN, Math.min(PITCH_MAX, chaseCamPitch + delta));
+
+        // Check if we should switch to Bird's Eye
+        if (newPitch <= PITCH_BIRDS_EYE_THRESHOLD) {
+            transitionToMode(CameraModes.BIRDS_EYE);
+            updateCamera(0.016);
+            return;
+        }
+
+        chaseCamPitch = newPitch;
+        savePitchToStorage(chaseCamPitch);
+
+        // Force camera update to apply the new pitch immediately
+        updateCamera(0.016);
+    }
+
+    /**
+     * Toggle fullscreen mode
+     */
+    function toggleFullscreen() {
+        if (!document.fullscreenElement) {
+            document.documentElement.requestFullscreen().catch(err => {
+                console.warn('Fullscreen not available:', err);
+            });
+        } else {
+            document.exitFullscreen();
+        }
     }
 
     /**
@@ -574,8 +1081,23 @@
     function seekToPosition(newPosition) {
         progress = Math.max(0, Math.min(1, newPosition));
 
-        // Update camera immediately
-        updateCamera();
+        // Cancel user override when seeking
+        if (userOverrideActive) {
+            userOverrideActive = false;
+            clearTimeout(userOverrideTimeout);
+        }
+        returnProgress = 1;
+        lastUserCameraState = null;
+
+        // Complete any in-progress mode transition immediately
+        if (modeTransitionProgress < 1) {
+            modeTransitionProgress = 1;
+            currentCameraMode = targetCameraMode;
+            transitionStartState = null;
+        }
+
+        // Update camera immediately (use small deltaTime for cinematic mode)
+        updateCamera(0.016); // ~60fps frame time
 
         // Update UI
         updateProgress();
@@ -608,8 +1130,8 @@
             }
         }
 
-        // Update camera and dot
-        updateCamera();
+        // Update camera and dot with delta time for smooth transitions
+        updateCamera(deltaTime);
 
         // Update UI
         updateProgress();
@@ -621,10 +1143,10 @@
     }
 
     /**
-     * Update camera position using FreeCamera API
-     * No smoothing - camera and dot move together to prevent relative jitter
+     * Update camera position using FreeCamera API with mode support
+     * Handles mode transitions and user override with smooth return
      */
-    function updateCamera() {
+    function updateCamera(deltaTime = 0) {
         // Dot position from turf.along() - constant speed along the path
         const dotDistance = progress * totalDistance;
         const dotPoint = getPointAlongRoute(dotDistance);
@@ -635,39 +1157,89 @@
 
         if (!dotPoint || !directionPoint) return;
 
-        // Calculate camera altitude
-        const cameraAltitude = CONFIG.cameraAltitude + (dotPoint.alt * 0.3);
+        // Calculate target camera state for the current/target mode
+        const targetState = calculateCameraForMode(targetCameraMode, dotPoint, directionPoint, deltaTime);
+        if (!targetState) return;
 
-        // Get camera position (behind and above the dot)
-        const cameraPos = getCameraPosition(dotPoint, directionPoint, cameraAltitude);
+        let finalState;
 
-        // Use FreeCamera API - no smoothing, direct positioning
+        // Handle user override with smooth return
+        if (userOverrideActive) {
+            // User is interacting - don't move the camera
+            updateDotAndUI(dotPoint);
+            return;
+        }
+
+        // Handle smooth return from user override
+        if (returnProgress < 1 && lastUserCameraState) {
+            returnProgress += deltaTime * 0.5; // ~2 second return
+            returnProgress = Math.min(1, returnProgress);
+            const t = easeOutCubic(returnProgress);
+            finalState = lerpCameraState(lastUserCameraState, targetState, t);
+        }
+        // Handle mode transition
+        else if (modeTransitionProgress < 1 && transitionStartState) {
+            const transitionDuration = CameraModeConfig[targetCameraMode].transitionDuration / 1000;
+            modeTransitionProgress += deltaTime / transitionDuration;
+            modeTransitionProgress = Math.min(1, modeTransitionProgress);
+
+            const t = easeOutCubic(modeTransitionProgress);
+            finalState = lerpCameraState(transitionStartState, targetState, t);
+
+            if (modeTransitionProgress >= 1) {
+                currentCameraMode = targetCameraMode;
+            }
+        }
+        // Normal guided mode
+        else {
+            finalState = targetState;
+            currentCameraMode = targetCameraMode;
+        }
+
+        // Apply camera state
+        applyCameraState(finalState, dotPoint);
+
+        // Update dot and UI
+        updateDotAndUI(dotPoint);
+    }
+
+    /**
+     * Apply a camera state to the map
+     */
+    function applyCameraState(state, lookAtPoint) {
         try {
             const camera = map.getFreeCameraOptions();
 
-            // Set camera position directly
+            // Set camera position
             camera.position = mapboxgl.MercatorCoordinate.fromLngLat(
-                [cameraPos.lng, cameraPos.lat],
-                cameraPos.alt
+                [state.lng, state.lat],
+                state.alt
             );
 
             // Look at the dot position
-            camera.lookAtPoint([dotPoint.lng, dotPoint.lat]);
+            if (lookAtPoint) {
+                camera.lookAtPoint([lookAtPoint.lng, lookAtPoint.lat]);
+            }
 
             // Apply camera settings
             map.setFreeCameraOptions(camera);
         } catch (e) {
             // Fallback to standard camera if FreeCamera fails
             map.easeTo({
-                center: [dotPoint.lng, dotPoint.lat],
+                center: lookAtPoint ? [lookAtPoint.lng, lookAtPoint.lat] : [state.lng, state.lat],
                 zoom: 14,
-                pitch: 70,
-                bearing: calculateBearing(dotPoint, directionPoint),
+                pitch: Math.abs(state.pitch),
+                bearing: state.bearing,
                 duration: 0
             });
         }
+    }
 
-        // Update current position marker - dotPoint is already on the route path
+    /**
+     * Update dot position and UI elements
+     */
+    function updateDotAndUI(dotPoint) {
+        // Update current position marker
         map.getSource('current-position')?.setData({
             type: 'Point',
             coordinates: [dotPoint.lng, dotPoint.lat, dotPoint.alt]

@@ -414,6 +414,187 @@
         .mapboxgl-ctrl-attrib {
             display: none !important;
         }
+
+        /* Camera mode buttons */
+        .camera-modes {
+            display: flex;
+            align-items: center;
+            gap: 0.25rem;
+            padding: 0 var(--space-sm);
+            border-left: 1px solid rgba(255,255,255,0.2);
+            margin-left: var(--space-sm);
+        }
+
+        .mode-btn {
+            width: 40px !important;
+            height: 40px !important;
+            font-size: 1.125rem !important;
+            border-radius: 8px !important;
+            transition: all 0.2s ease !important;
+        }
+
+        .mode-btn.active {
+            background: var(--color-accent) !important;
+            color: var(--color-text) !important;
+            transform: scale(1.05);
+        }
+
+        .mode-btn:hover:not(.active) {
+            background: rgba(255,255,255,0.2) !important;
+        }
+
+        .mode-icon {
+            font-size: 1.125rem;
+        }
+
+        /* Utility buttons */
+        .util-btn {
+            width: 40px !important;
+            height: 40px !important;
+            font-size: 1.25rem !important;
+            border-radius: 8px !important;
+            margin-left: var(--space-sm);
+            border-left: 1px solid rgba(255,255,255,0.2);
+            padding-left: var(--space-md) !important;
+        }
+
+        /* Keyboard Shortcuts Help Panel */
+        .shortcuts-help {
+            position: fixed;
+            bottom: 100px;
+            right: 20px;
+            background: rgba(0, 0, 0, 0.75);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border-radius: 12px;
+            padding: 16px;
+            color: white;
+            font-size: 13px;
+            min-width: 220px;
+            z-index: 1000;
+            transition: opacity 0.3s, transform 0.3s;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .shortcuts-help.hidden {
+            opacity: 0;
+            transform: translateY(10px);
+            pointer-events: none;
+        }
+
+        .shortcuts-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+            font-weight: 600;
+            color: var(--color-accent);
+        }
+
+        .shortcuts-close {
+            background: none;
+            border: none;
+            color: rgba(255,255,255,0.6);
+            cursor: pointer;
+            font-size: 20px;
+            padding: 0;
+            width: 24px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 4px;
+            transition: all 0.2s;
+        }
+
+        .shortcuts-close:hover {
+            color: white;
+            background: rgba(255,255,255,0.1);
+        }
+
+        .shortcuts-grid {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .shortcut-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 4px 0;
+            gap: 16px;
+        }
+
+        .shortcut-keys {
+            display: flex;
+            gap: 4px;
+        }
+
+        kbd {
+            background: rgba(255,255,255,0.15);
+            border-radius: 4px;
+            padding: 3px 8px;
+            font-family: system-ui, monospace;
+            font-size: 11px;
+            min-width: 24px;
+            text-align: center;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .shortcut-divider {
+            height: 1px;
+            background: rgba(255,255,255,0.15);
+            margin: 6px 0;
+        }
+
+        /* Camera mode indicator */
+        .camera-mode-indicator {
+            position: fixed;
+            top: 80px;
+            left: var(--space-lg);
+            background: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 0.8125rem;
+            font-weight: 500;
+            color: white;
+            z-index: 100;
+            transition: all 0.3s ease;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .camera-mode-indicator .mode-label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .camera-mode-indicator.user-control {
+            background: rgba(230, 184, 0, 0.8);
+            color: var(--color-text);
+        }
+
+        .camera-mode-indicator.user-control::before {
+            content: '👆 ';
+        }
+
+        /* Responsive adjustments */
+        @media (max-width: 768px) {
+            .camera-modes {
+                display: none;
+            }
+
+            .shortcuts-help {
+                display: none;
+            }
+
+            .util-btn {
+                display: none;
+            }
+        }
     </style>
 </head>
 <body>
@@ -449,6 +630,11 @@
         🏔️ Mont Ventoux Summit - 1,909m
     </div>
 
+    <!-- Camera mode indicator -->
+    <div class="camera-mode-indicator" id="camera-mode-indicator">
+        <span class="mode-label">Cinematic</span>
+    </div>
+
     <!-- Elevation panel -->
     <div class="elevation-panel" id="elevation-panel">
         <canvas class="elevation-canvas" id="elevation-canvas"></canvas>
@@ -478,13 +664,82 @@
         <button id="btn-rewind" title="Rewind">⏮️</button>
         <button id="btn-play" class="play-btn" title="Play/Pause">▶️</button>
         <button id="btn-forward" title="Forward">⏭️</button>
+
+        <div class="camera-modes">
+            <button class="mode-btn" data-mode="chase" title="Chase Cam (C)">
+                <span class="mode-icon">🎥</span>
+            </button>
+            <button class="mode-btn" data-mode="birds_eye" title="Bird's Eye (B)">
+                <span class="mode-icon">🦅</span>
+            </button>
+            <button class="mode-btn" data-mode="side_view" title="Side View (S)">
+                <span class="mode-icon">📐</span>
+            </button>
+            <button class="mode-btn active" data-mode="cinematic" title="Cinematic (V)">
+                <span class="mode-icon">🎬</span>
+            </button>
+        </div>
+
         <div class="speed-control">
             <span>Speed</span>
-            <button class="speed-btn" data-speed="0.25">¼x</button>
             <button class="speed-btn" data-speed="0.5">½x</button>
             <button class="speed-btn active" data-speed="1">1x</button>
             <button class="speed-btn" data-speed="2">2x</button>
             <button class="speed-btn" data-speed="4">4x</button>
+        </div>
+
+        <button id="btn-fullscreen" class="util-btn" title="Fullscreen (F)">⛶</button>
+    </div>
+
+    <!-- Keyboard Shortcuts Help -->
+    <div class="shortcuts-help" id="shortcuts-help">
+        <div class="shortcuts-header">
+            <span>Keyboard Shortcuts</span>
+            <button class="shortcuts-close" id="shortcuts-close" title="Hide (?)">×</button>
+        </div>
+        <div class="shortcuts-grid">
+            <div class="shortcut-row">
+                <div class="shortcut-keys"><kbd>Space</kbd></div>
+                <span>Play / Pause</span>
+            </div>
+            <div class="shortcut-row">
+                <div class="shortcut-keys"><kbd>←</kbd> <kbd>→</kbd></div>
+                <span>Seek ±2%</span>
+            </div>
+            <div class="shortcut-row">
+                <div class="shortcut-keys"><kbd>1</kbd>-<kbd>4</kbd></div>
+                <span>Speed (½×, 1×, 2×, 4×)</span>
+            </div>
+            <div class="shortcut-divider"></div>
+            <div class="shortcut-row">
+                <div class="shortcut-keys"><kbd>C</kbd></div>
+                <span>Chase Cam</span>
+            </div>
+            <div class="shortcut-row">
+                <div class="shortcut-keys"><kbd>B</kbd></div>
+                <span>Bird's Eye</span>
+            </div>
+            <div class="shortcut-row">
+                <div class="shortcut-keys"><kbd>S</kbd></div>
+                <span>Side View</span>
+            </div>
+            <div class="shortcut-row">
+                <div class="shortcut-keys"><kbd>V</kbd></div>
+                <span>Cinematic</span>
+            </div>
+            <div class="shortcut-row">
+                <div class="shortcut-keys"><kbd>↑</kbd> <kbd>↓</kbd></div>
+                <span>Adjust pitch (Chase)</span>
+            </div>
+            <div class="shortcut-divider"></div>
+            <div class="shortcut-row">
+                <div class="shortcut-keys"><kbd>F</kbd></div>
+                <span>Fullscreen</span>
+            </div>
+            <div class="shortcut-row">
+                <div class="shortcut-keys"><kbd>?</kbd></div>
+                <span>Toggle this Help</span>
+            </div>
         </div>
     </div>
 
