@@ -338,12 +338,12 @@ const ElevationProfile = (function() {
         }
 
         /**
-         * Get grade at index with heavy smoothing for color stability
+         * Get grade at index with moderate smoothing for color stability
          */
         getSmoothedGrade(index) {
-            // Use a large window to eliminate color flickering
-            // This averages over ~500m worth of points for stable color regions
-            const windowSize = Math.min(50, Math.floor(this.grades.length / 20));
+            // Use moderate window - enough to smooth noise but preserve real gradient changes
+            // ~10 points = roughly 100-200m of smoothing
+            const windowSize = 10;
             let sum = 0;
             let count = 0;
 
