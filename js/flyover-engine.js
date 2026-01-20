@@ -491,18 +491,19 @@
 
             case CameraModes.BIRDS_EYE: {
                 // Bird's eye: nearly above, looking down at the dot
-                // Offset slightly behind (south) to avoid gimbal lock with lookAtPoint
+                // Position directly above for maximum smoothness (no bearing-dependent offset)
+                // Small fixed south offset avoids gimbal lock with lookAtPoint
                 const offsetUp = config.offsetUp * zoom;
-                const behindOffset = turf.destination(
+                const southOffset = turf.destination(
                     turf.point([dotPoint.lng, dotPoint.lat]),
-                    0.05 * zoom, // Scale the small behind offset too
-                    (forwardBearing + 180) % 360, // behind the direction of travel
+                    0.03 * zoom, // Small fixed offset south (not bearing-dependent)
+                    180, // Always south - no position jumps when bearing changes
                     { units: 'kilometers' }
                 );
-                cameraLng = behindOffset.geometry.coordinates[0];
-                cameraLat = behindOffset.geometry.coordinates[1];
+                cameraLng = southOffset.geometry.coordinates[0];
+                cameraLat = southOffset.geometry.coordinates[1];
                 cameraAlt = dotPoint.alt + offsetUp;
-                cameraBearing = forwardBearing; // Face direction of travel
+                cameraBearing = forwardBearing; // Will be heavily smoothed (0.08°/frame)
                 cameraPitch = config.pitch;
                 break;
             }
@@ -763,8 +764,8 @@
 
         // Final altitude smoothing - applied AFTER terrain collision to prevent jarring jumps
         // This is critical for cinematic mode on steep terrain where the camera orbits over cliffs
-        // Limit altitude change to 30m per frame (spreads 300m change over ~10 frames)
-        const maxAltChangePerFrame = 30;
+        // Bird's Eye uses lower limit for ultra-smooth flight
+        const maxAltChangePerFrame = (mode === CameraModes.BIRDS_EYE) ? 8 : 30;
         if (window._terrainCache.lastCameraAlt !== null) {
             const altDelta = cameraAlt - window._terrainCache.lastCameraAlt;
             if (Math.abs(altDelta) > maxAltChangePerFrame) {
@@ -774,8 +775,8 @@
         window._terrainCache.lastCameraAlt = cameraAlt;
 
         // Position smoothing - prevent camera from jumping around on hairpin turns
-        // Limit position change to 20m per frame
-        const maxPosChangePerFrame = 20; // meters
+        // Bird's Eye uses much lower limit for ultra-smooth flight
+        const maxPosChangePerFrame = (mode === CameraModes.BIRDS_EYE) ? 5 : 20; // meters
         if (window._terrainCache.lastLng !== undefined && window._terrainCache.lastLng !== null) {
             const dLng = (cameraLng - window._terrainCache.lastLng) * 111000 * Math.cos(cameraLat * Math.PI / 180);
             const dLat = (cameraLat - window._terrainCache.lastLat) * 111000;
@@ -794,9 +795,9 @@
 
         // Bearing smoothing - prevent jarring camera swings on hairpin turns
         // Use different limits per mode:
-        // - Bird's Eye: 0.5°/frame - very stable, bird doesn't twist with every curve
+        // - Bird's Eye: 0.08°/frame (~5°/sec) - ultra smooth, lazy rotation
         // - Other modes: 4°/frame - smooth but responsive
-        const maxBearingChangePerFrame = (mode === CameraModes.BIRDS_EYE) ? 0.5 : 4;
+        const maxBearingChangePerFrame = (mode === CameraModes.BIRDS_EYE) ? 0.08 : 4;
         if (window._terrainCache.lastBearing !== undefined && window._terrainCache.lastBearing !== null) {
             let bearingDelta = cameraBearing - window._terrainCache.lastBearing;
             // Handle wrap-around (e.g., 350° to 10° should be +20°, not -340°)
