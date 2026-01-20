@@ -363,16 +363,16 @@ const PowerCalculator = (function() {
 
     /**
      * Detect significant climbs in route
-     * A climb is sustained grade > 3% for > 500m
+     * A climb is sustained grade > 3% for > 750m with at least 50m elevation gain
      * @param {object} routeData - Route data
      * @returns {array} Array of climb objects
      */
     function detectClimbs(routeData) {
         const coords = routeData.coordinates;
         const climbs = [];
-        const minGrade = 0.02; // 2% to start detecting
-        const minDistance = 500; // meters minimum climb length
-        const minElevGain = 30; // meters minimum elevation gain
+        const minGrade = 0.03; // 3% to start detecting (was 2%)
+        const minDistance = 750; // meters minimum climb length (was 500)
+        const minElevGain = 50; // meters minimum elevation gain (was 30)
         const flatTolerance = 300; // meters of flat/descent allowed within a climb
 
         let inClimb = false;

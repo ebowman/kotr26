@@ -1279,49 +1279,245 @@
     // Climb analysis state
     let detectedClimbs = [];
     let activeClimbIndex = -1;
+    let selectedClimbIndex = -1;
 
     /**
-     * Setup climb analysis panel
+     * Setup climb markers overlay on elevation profile
      */
     function setupClimbAnalysis() {
-        console.log('setupClimbAnalysis called', { routeData: !!routeData, PowerCalculator: typeof PowerCalculator });
         if (!routeData || typeof PowerCalculator === 'undefined') {
-            console.log('setupClimbAnalysis returning early - no routeData or PowerCalculator');
             return;
         }
 
-        const toggleBtn = document.getElementById('climb-toggle-btn');
-        const panel = document.getElementById('climb-analysis-panel');
-        const closeBtn = document.getElementById('climb-panel-close');
-        const content = document.getElementById('climb-panel-content');
-        const badge = document.getElementById('climb-count-badge');
-        const profileNotice = document.getElementById('climb-profile-notice');
+        const markersContainer = document.getElementById('climb-markers');
+        const popup = document.getElementById('climb-popup');
+        const popupClose = document.getElementById('climb-popup-close');
 
-        console.log('Elements found:', { toggleBtn: !!toggleBtn, panel: !!panel, content: !!content });
-        if (!toggleBtn || !panel || !content) {
-            console.log('setupClimbAnalysis returning early - missing elements');
+        if (!markersContainer || !popup) {
             return;
         }
 
         // Detect climbs using PowerCalculator
         detectedClimbs = PowerCalculator.detectClimbs(routeData);
 
-        // Update badge count
-        if (detectedClimbs.length > 0) {
-            toggleBtn.classList.add('has-climbs');
-            badge.textContent = detectedClimbs.length;
-            badge.style.display = 'flex';
-        } else {
-            badge.style.display = 'none';
+        if (detectedClimbs.length === 0) {
+            return;
         }
 
-        // Get rider profile
+        // Use module-level totalDistance (calculated during route load)
+        // or fall back to routeData.distance
+        const climbTotalDistance = totalDistance || routeData.distance || 0;
+
+        if (!climbTotalDistance) return;
+
+        // Create climb markers
+        detectedClimbs.forEach((climb, index) => {
+            const marker = document.createElement('div');
+            marker.className = 'climb-marker';
+            marker.dataset.climbIndex = index;
+
+            // Position marker based on start/end distance
+            const leftPercent = (climb.startDistance / climbTotalDistance) * 100;
+            const widthPercent = ((climb.endDistance - climb.startDistance) / climbTotalDistance) * 100;
+
+            marker.style.left = `${leftPercent}%`;
+            marker.style.width = `${Math.max(widthPercent, 0.5)}%`; // Min width for visibility
+
+            // Set difficulty class based on avg grade
+            if (climb.avgGrade < 5) {
+                marker.classList.add('easy');
+            } else if (climb.avgGrade < 8) {
+                marker.classList.add('moderate');
+            } else {
+                marker.classList.add('hard');
+            }
+
+            // Hover handlers to show/hide popup
+            marker.addEventListener('mouseenter', () => {
+                showClimbPopup(climb, index, marker);
+            });
+
+            marker.addEventListener('mouseleave', (e) => {
+                // Don't hide if moving into the popup
+                const relatedTarget = e.relatedTarget;
+                if (relatedTarget && (relatedTarget.closest('.climb-popup') || relatedTarget.closest('.climb-marker'))) {
+                    return;
+                }
+                hideClimbPopup();
+            });
+
+            markersContainer.appendChild(marker);
+        });
+
+        // Allow popup to stay visible when hovering over it
+        popup.addEventListener('mouseenter', () => {
+            // Keep popup visible
+        });
+
+        popup.addEventListener('mouseleave', (e) => {
+            // Hide when leaving popup (unless going back to marker)
+            const relatedTarget = e.relatedTarget;
+            if (relatedTarget && relatedTarget.closest('.climb-marker')) {
+                return;
+            }
+            hideClimbPopup();
+        });
+
+        // Close popup handler (for manual close)
+        popupClose.addEventListener('click', () => {
+            hideClimbPopup();
+        });
+
+        // Update on profile change
+        if (typeof RiderProfile !== 'undefined') {
+            RiderProfile.setOnChange(() => {
+                // If popup is visible, refresh it
+                if (selectedClimbIndex >= 0 && popup.classList.contains('visible')) {
+                    const marker = markersContainer.querySelector(`[data-climb-index="${selectedClimbIndex}"]`);
+                    if (marker) {
+                        showClimbPopup(detectedClimbs[selectedClimbIndex], selectedClimbIndex, marker);
+                    }
+                }
+            });
+        }
+    }
+
+    /**
+     * Format time in minutes to a readable string (e.g., "46min" or "1h 12min")
+     */
+    function formatClimbTime(minutes) {
+        if (minutes < 60) {
+            return `${Math.round(minutes)}min`;
+        }
+        const hours = Math.floor(minutes / 60);
+        const mins = Math.round(minutes % 60);
+        return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+    }
+
+    /**
+     * Power-duration model: max sustainable %FTP for a given duration
+     * Based on standard cycling physiology
+     */
+    function maxSustainableFtpPercent(durationMinutes) {
+        if (durationMinutes <= 5) return 1.20;      // VO2max efforts
+        if (durationMinutes <= 20) return 1.10;     // Threshold+
+        if (durationMinutes <= 60) return 1.00;     // FTP definition
+        if (durationMinutes <= 120) return 0.90;    // Sub-threshold
+        if (durationMinutes <= 180) return 0.85;    // Tempo
+        if (durationMinutes <= 240) return 0.80;    // Sweet spot
+        return 0.75;                                 // Endurance
+    }
+
+    /**
+     * Calculate speed from power, grade, and rider weight
+     * Inverts the power equation to solve for speed
+     */
+    function speedFromPower(powerWatts, gradePercent, riderWeight) {
+        const bikeWeight = 9;
+        const totalMass = riderWeight + bikeWeight;
+        const g = 9.81;
+        const Crr = 0.005;
+        const CdA = 0.35;
+        const rho = 1.2;
+        const gradeDecimal = gradePercent / 100;
+
+        // P = v * (m*g*grade + m*g*Crr + 0.5*CdA*rho*v^2)
+        // This is cubic in v, so we'll solve numerically
+        // Binary search for speed that matches power
+        let low = 1, high = 50; // km/h range
+        for (let i = 0; i < 20; i++) {
+            const mid = (low + high) / 2;
+            const v = mid / 3.6; // convert to m/s
+            const P = v * (totalMass * g * gradeDecimal + totalMass * g * Crr * Math.cos(Math.atan(gradeDecimal)))
+                    + 0.5 * CdA * rho * Math.pow(v, 3);
+            if (P < powerWatts) {
+                low = mid;
+            } else {
+                high = mid;
+            }
+        }
+        return (low + high) / 2;
+    }
+
+    /**
+     * Calculate realistic effort options for a climb
+     * Returns array of { label, ftpPercent, watts, wkg, speed, time, sustainable }
+     */
+    function calculateRealisticEfforts(climb, riderWeight, riderFTP) {
+        const distanceKm = climb.distance / 1000;
+        const grade = climb.avgGrade;
+
+        // Define effort levels to evaluate
+        const effortLevels = [
+            { label: 'Race', ftpPercent: 0.95 },
+            { label: 'Hard', ftpPercent: 0.88 },
+            { label: 'Tempo', ftpPercent: 0.80 },
+            { label: 'Easy', ftpPercent: 0.70 }
+        ];
+
+        const results = [];
+
+        for (const effort of effortLevels) {
+            const watts = Math.round(riderFTP * effort.ftpPercent);
+            const wkg = (watts / riderWeight).toFixed(2);
+            const speed = speedFromPower(watts, grade, riderWeight);
+            const timeMinutes = (distanceKm / speed) * 60;
+
+            // Check if this effort is sustainable for the duration
+            const maxFtpForDuration = maxSustainableFtpPercent(timeMinutes);
+            const sustainable = effort.ftpPercent <= maxFtpForDuration;
+
+            // Only include if reasonably achievable (within 10% of sustainable)
+            if (effort.ftpPercent <= maxFtpForDuration * 1.1) {
+                results.push({
+                    label: effort.label,
+                    ftpPercent: Math.round(effort.ftpPercent * 100),
+                    watts,
+                    wkg,
+                    speed: speed.toFixed(1),
+                    timeMinutes,
+                    sustainable
+                });
+            }
+        }
+
+        return results;
+    }
+
+    /**
+     * Show climb popup near the marker
+     */
+    function showClimbPopup(climb, index, marker) {
+        const popup = document.getElementById('climb-popup');
+        const markersContainer = document.getElementById('climb-markers');
+
+        if (!popup || !markersContainer) return;
+
+        selectedClimbIndex = index;
+
+        // Update marker active state
+        markersContainer.querySelectorAll('.climb-marker').forEach((m, i) => {
+            m.classList.toggle('active', i === index);
+        });
+
+        // Update popup content
+        const distanceKm = (climb.distance / 1000).toFixed(1);
+        const avgGrade = climb.avgGrade.toFixed(1);
+        const elevGain = Math.round(climb.elevationGain);
+        const startKm = climb.startDistance.toFixed(1);
+
+        document.getElementById('climb-popup-title').textContent = `Climb ${index + 1} @ ${startKm}km`;
+        document.getElementById('climb-popup-distance').textContent = distanceKm;
+        document.getElementById('climb-popup-grade').textContent = `${avgGrade}%`;
+        document.getElementById('climb-popup-gain').textContent = elevGain;
+
+        // Get rider profile for power info
+        const powerContainer = document.getElementById('climb-popup-power');
+        let hasProfile = false;
         let riderWeight = 75;
         let riderFTP = 200;
-        let hasProfile = false;
 
         if (typeof RiderProfile !== 'undefined') {
-            RiderProfile.load();
             const profile = RiderProfile.get();
             if (profile.isConfigured) {
                 riderWeight = profile.weight;
@@ -1330,203 +1526,127 @@
             }
         }
 
-        // Show/hide profile notice
-        if (profileNotice) {
-            profileNotice.style.display = hasProfile ? 'none' : 'flex';
-        }
+        // Show power analysis based on realistic effort levels
+        if (hasProfile) {
+            const efforts = calculateRealisticEfforts(climb, riderWeight, riderFTP);
 
-        // Populate climb cards
-        if (detectedClimbs.length > 0) {
-            content.innerHTML = detectedClimbs.map((climb, index) => {
-                const climbTable = PowerCalculator.calculateClimbTable(climb, riderWeight, riderFTP);
-                return createClimbCardHTML(climb, climbTable, index, hasProfile, riderFTP);
-            }).join('');
+            if (efforts.length > 0) {
+                // Header row
+                const headerRow = `
+                    <div class="climb-popup-power-row header">
+                        <span class="effort-label"></span>
+                        <span class="watts">Watts</span>
+                        <span class="wkg">W/kg</span>
+                        <span class="speed">km/h</span>
+                        <span class="time">Time</span>
+                    </div>
+                `;
 
-            // Add expand/collapse handlers
-            content.querySelectorAll('.climb-card-header').forEach((header, index) => {
-                header.addEventListener('click', () => {
-                    const card = header.closest('.climb-card');
-                    const wasExpanded = card.classList.contains('expanded');
+                // Data rows
+                const dataRows = efforts.map(effort => {
+                    const diffClass = effort.sustainable ? 'sustainable' : 'hard';
+                    const timeStr = formatClimbTime(effort.timeMinutes);
 
-                    // Collapse all cards
-                    content.querySelectorAll('.climb-card').forEach(c => c.classList.remove('expanded'));
+                    return `
+                        <div class="climb-popup-power-row ${diffClass}">
+                            <span class="effort-label">${effort.label}</span>
+                            <span class="watts">${effort.watts}W</span>
+                            <span class="wkg">${effort.wkg}</span>
+                            <span class="speed">${effort.speed}</span>
+                            <span class="time">${timeStr}</span>
+                        </div>
+                    `;
+                }).join('');
 
-                    // Expand clicked card if it wasn't already expanded
-                    if (!wasExpanded) {
-                        card.classList.add('expanded');
-                    }
-                });
-            });
-        }
-
-        // Toggle button handler
-        toggleBtn.addEventListener('click', () => {
-            panel.classList.add('visible');
-            toggleBtn.classList.add('panel-open');
-        });
-
-        // Close button handler
-        closeBtn.addEventListener('click', () => {
-            panel.classList.remove('visible');
-            toggleBtn.classList.remove('panel-open');
-        });
-
-        // Update climb cards on profile change
-        if (typeof RiderProfile !== 'undefined') {
-            RiderProfile.setOnChange((newProfile) => {
-                // Re-render climb cards with new profile
-                if (detectedClimbs.length > 0) {
-                    const w = newProfile.weight;
-                    const ftp = newProfile.ftp;
-                    const configured = newProfile.isConfigured;
-
-                    if (profileNotice) {
-                        profileNotice.style.display = configured ? 'none' : 'flex';
-                    }
-
-                    content.innerHTML = detectedClimbs.map((climb, index) => {
-                        const climbTable = PowerCalculator.calculateClimbTable(climb, w, ftp);
-                        return createClimbCardHTML(climb, climbTable, index, configured, ftp);
-                    }).join('');
-
-                    // Re-add expand handlers
-                    content.querySelectorAll('.climb-card-header').forEach((header) => {
-                        header.addEventListener('click', () => {
-                            const card = header.closest('.climb-card');
-                            const wasExpanded = card.classList.contains('expanded');
-                            content.querySelectorAll('.climb-card').forEach(c => c.classList.remove('expanded'));
-                            if (!wasExpanded) {
-                                card.classList.add('expanded');
-                            }
-                        });
-                    });
-                }
-            });
-        }
-    }
-
-    /**
-     * Create HTML for a climb card
-     */
-    function createClimbCardHTML(climb, climbTable, index, hasProfile, ftp) {
-        const distanceKm = (climb.distance / 1000).toFixed(1); // distance is in meters
-        const avgGrade = climb.avgGrade.toFixed(1);
-        const elevGain = Math.round(climb.elevationGain);
-        const startKm = climb.startDistance.toFixed(1); // startDistance is already in km
-
-        // Create W/kg table rows
-        let tableRows = '';
-        if (climbTable && climbTable.length > 0) {
-            tableRows = climbTable.map(row => {
-                const powerClass = getWkgClass(row.power, ftp);
+                powerContainer.innerHTML = headerRow + dataRows;
+                powerContainer.classList.add('visible');
+            } else {
+                // Climb is too hard for any sustainable effort
+                powerContainer.innerHTML = `
+                    <div class="climb-popup-notice">
+                        This climb requires efforts beyond sustainable power for the duration.
+                    </div>
+                `;
+                powerContainer.classList.add('visible');
+            }
+        } else {
+            // Without profile, just show distance-based time estimates
+            const climbDistanceKm = climb.distance / 1000;
+            const speeds = [8, 12, 16];
+            powerContainer.innerHTML = speeds.map(speed => {
+                const timeMinutes = (climbDistanceKm / speed) * 60;
+                const timeStr = formatClimbTime(timeMinutes);
                 return `
-                    <tr>
-                        <td>${row.speed} km/h</td>
-                        <td>${row.wPerKg} W/kg</td>
-                        <td class="${powerClass}">${row.power}W</td>
-                        <td>${row.time}</td>
-                    </tr>
+                    <div class="climb-popup-power-row">
+                        <span class="effort-label">&nbsp;</span>
+                        <span class="watts">&nbsp;</span>
+                        <span class="wkg">&nbsp;</span>
+                        <span class="speed">${speed} km/h</span>
+                        <span class="time">${timeStr}</span>
+                    </div>
                 `;
             }).join('');
+            powerContainer.classList.add('visible');
         }
 
-        return `
-            <div class="climb-card" data-climb-index="${index}" data-start="${climb.startDistance}" data-end="${climb.endDistance}">
-                <div class="climb-card-header">
-                    <span class="climb-name">Climb ${index + 1} @ ${startKm}km</span>
-                    <div class="climb-quick-stats">
-                        <span class="climb-quick-stat">${distanceKm}km</span>
-                        <span class="climb-quick-stat">${avgGrade}%</span>
-                    </div>
-                </div>
-                <div class="climb-detail">
-                    <div class="climb-stats-row">
-                        <div class="climb-stat">
-                            <div class="climb-stat-value">${distanceKm}</div>
-                            <div class="climb-stat-label">km</div>
-                        </div>
-                        <div class="climb-stat">
-                            <div class="climb-stat-value">${avgGrade}%</div>
-                            <div class="climb-stat-label">avg grade</div>
-                        </div>
-                        <div class="climb-stat">
-                            <div class="climb-stat-value">${elevGain}</div>
-                            <div class="climb-stat-label">m gain</div>
-                        </div>
-                    </div>
-                    ${hasProfile ? `
-                    <table class="climb-wkg-table">
-                        <thead>
-                            <tr>
-                                <th>Speed</th>
-                                <th>W/kg</th>
-                                <th>Your W</th>
-                                <th>Time</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            ${tableRows}
-                        </tbody>
-                    </table>
-                    ` : `
-                    <p style="font-size: 0.75rem; color: rgba(255,255,255,0.5); text-align: center; padding: 12px 0;">
-                        Set rider profile for W/kg analysis
-                    </p>
-                    `}
-                </div>
-            </div>
-        `;
+        // Position popup above the progress widget
+        const widgetRect = document.getElementById('unified-progress-widget').getBoundingClientRect();
+        const markerRect = marker.getBoundingClientRect();
+
+        popup.style.bottom = `${window.innerHeight - widgetRect.top + 16}px`;
+        popup.style.left = `${Math.max(20, Math.min(markerRect.left - 150, window.innerWidth - 360))}px`;
+
+        popup.classList.add('visible');
     }
 
     /**
-     * Get CSS class for power value based on FTP
+     * Hide climb popup
      */
-    function getWkgClass(power, ftp) {
-        const percent = (power / ftp) * 100;
-        if (percent < 90) return 'wkg-sustainable';
-        if (percent < 105) return 'wkg-hard';
-        return 'wkg-unsustainable';
-    }
+    function hideClimbPopup() {
+        const popup = document.getElementById('climb-popup');
+        const markersContainer = document.getElementById('climb-markers');
 
-    /**
-     * Format time in seconds to MM:SS or HH:MM:SS
-     */
-    function formatTime(seconds) {
-        const h = Math.floor(seconds / 3600);
-        const m = Math.floor((seconds % 3600) / 60);
-        const s = Math.round(seconds % 60);
-
-        if (h > 0) {
-            return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+        if (popup) {
+            popup.classList.remove('visible');
         }
-        return `${m}:${s.toString().padStart(2, '0')}`;
+
+        if (markersContainer) {
+            markersContainer.querySelectorAll('.climb-marker').forEach(m => {
+                m.classList.remove('active');
+            });
+        }
+
+        selectedClimbIndex = -1;
     }
 
     /**
      * Update active climb highlight based on current position
      */
     function updateActiveClimb(currentDistance) {
-        const content = document.getElementById('climb-panel-content');
-        if (!content || detectedClimbs.length === 0) return;
+        const markersContainer = document.getElementById('climb-markers');
+        if (!markersContainer || detectedClimbs.length === 0) return;
 
-        // Find current climb
+        // Find current climb (currentDistance is in km)
         let newActiveIndex = -1;
         for (let i = 0; i < detectedClimbs.length; i++) {
             const climb = detectedClimbs[i];
+            // startDistance and endDistance are in km
             if (currentDistance >= climb.startDistance && currentDistance <= climb.endDistance) {
                 newActiveIndex = i;
                 break;
             }
         }
 
-        // Only update if changed
+        // Only update if changed (and not overriding selected state)
         if (newActiveIndex !== activeClimbIndex) {
             activeClimbIndex = newActiveIndex;
 
-            // Update card styling
-            content.querySelectorAll('.climb-card').forEach((card, index) => {
-                card.classList.toggle('active', index === activeClimbIndex);
-            });
+            // Update marker styling (but don't override selected state)
+            if (selectedClimbIndex < 0) {
+                markersContainer.querySelectorAll('.climb-marker').forEach((marker, index) => {
+                    marker.classList.toggle('active', index === activeClimbIndex);
+                });
+            }
         }
     }
 
