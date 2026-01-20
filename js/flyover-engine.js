@@ -135,6 +135,10 @@
     let lastUserCameraState = null;
     let userIsInteracting = false; // True when user has mouse/touch down on map
 
+    // Auto-hide UI state
+    let autoHideTimeout = null;
+    const AUTO_HIDE_DELAY = 3000; // ms before hiding UI during playback
+
     // Mont Ventoux detection
     const VENTOUX_SUMMIT = {
         lat: 44.1739,
@@ -1978,8 +1982,11 @@
         if (profileTrack) {
             profileTrack.addEventListener('click', (e) => {
                 const rect = profileTrack.getBoundingClientRect();
-                const position = (e.clientX - rect.left) / rect.width;
-                seekToPosition(position);
+                // Account for 10px canvas padding on each side
+                const chartPadding = 10;
+                const chartWidth = rect.width - 2 * chartPadding;
+                const position = (e.clientX - rect.left - chartPadding) / chartWidth;
+                seekToPosition(Math.max(0, Math.min(1, position)));
             });
         }
 
@@ -2005,7 +2012,10 @@
 
                 const rect = profileTrack.getBoundingClientRect();
                 const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-                let position = (clientX - rect.left) / rect.width;
+                // Account for 10px canvas padding on each side
+                const chartPadding = 10;
+                const chartWidth = rect.width - 2 * chartPadding;
+                let position = (clientX - rect.left - chartPadding) / chartWidth;
                 position = Math.max(0, Math.min(1, position));
                 seekToPositionDuringDrag(position);
             };
@@ -2182,6 +2192,9 @@
 
         // Effort zone toggle for elevation profile
         setupEffortToggle();
+
+        // Auto-hide UI during playback
+        setupAutoHide();
     }
 
     /**
@@ -2514,6 +2527,62 @@
     }
 
     /**
+     * Show UI elements (progress widget and help panel)
+     */
+    function showUI() {
+        const progressWidget = document.getElementById('unified-progress-widget');
+        const shortcutsHelp = document.getElementById('shortcuts-help');
+
+        if (progressWidget) progressWidget.classList.remove('auto-hidden');
+        if (shortcutsHelp) shortcutsHelp.classList.remove('auto-hidden');
+    }
+
+    /**
+     * Hide UI elements (progress widget and help panel)
+     */
+    function hideUI() {
+        const progressWidget = document.getElementById('unified-progress-widget');
+        const shortcutsHelp = document.getElementById('shortcuts-help');
+
+        if (progressWidget) progressWidget.classList.add('auto-hidden');
+        if (shortcutsHelp) shortcutsHelp.classList.add('auto-hidden');
+    }
+
+    /**
+     * Reset auto-hide timer - call on user interaction
+     */
+    function resetAutoHideTimer() {
+        // Always show UI immediately on interaction
+        showUI();
+
+        // Clear existing timer
+        if (autoHideTimeout) {
+            clearTimeout(autoHideTimeout);
+            autoHideTimeout = null;
+        }
+
+        // Only set new timer if playing
+        if (isPlaying) {
+            autoHideTimeout = setTimeout(() => {
+                hideUI();
+            }, AUTO_HIDE_DELAY);
+        }
+    }
+
+    /**
+     * Setup auto-hide behavior for UI elements
+     */
+    function setupAutoHide() {
+        // Track mouse movement
+        document.addEventListener('mousemove', resetAutoHideTimer);
+        document.addEventListener('touchstart', resetAutoHideTimer, { passive: true });
+
+        // Also reset on any click/interaction
+        document.addEventListener('click', resetAutoHideTimer);
+        document.addEventListener('keydown', resetAutoHideTimer);
+    }
+
+    /**
      * Toggle fullscreen mode
      */
     function toggleFullscreen() {
@@ -2547,6 +2616,9 @@
                 transitionStartState = getCurrentCameraState();
             }
 
+            // Start auto-hide timer
+            resetAutoHideTimer();
+
             lastTimestamp = performance.now();
             animate(lastTimestamp);
         } else {
@@ -2556,6 +2628,13 @@
             if (animationId) {
                 cancelAnimationFrame(animationId);
                 animationId = null;
+            }
+
+            // Show UI and clear auto-hide timer when paused
+            showUI();
+            if (autoHideTimeout) {
+                clearTimeout(autoHideTimeout);
+                autoHideTimeout = null;
             }
         }
     }
@@ -2926,10 +3005,10 @@
         if (elevClimbed) elevClimbed.textContent = '0';
         if (elevLeft) elevLeft.textContent = `${routeData.elevationGain || 0} m to go`;
 
-        // Initialize scrubber position
+        // Initialize scrubber position (accounts for 10px canvas padding)
         const scrubber = document.getElementById('scrubber-handle');
         const overlay = document.getElementById('progress-overlay');
-        if (scrubber) scrubber.style.left = '0%';
+        if (scrubber) scrubber.style.left = 'calc(10px)';  // Align with chart start
         if (overlay) overlay.style.width = '0%';
 
         // Set elevation profile to position 0
@@ -2946,11 +3025,13 @@
         const remainingDistance = totalDistance - currentDistance;
         const progressPercent = progress * 100;
 
-        // Update scrubber position and progress overlay
+        // Update scrubber position - aligned with canvas chart area (10px padding)
+        // Formula: left = 10px + progress * (100% - 20px)
+        // Simplified: calc(10px + X% - X*0.2px) where X = progressPercent
         const scrubber = document.getElementById('scrubber-handle');
         const overlay = document.getElementById('progress-overlay');
         if (scrubber) {
-            scrubber.style.left = `${progressPercent}%`;
+            scrubber.style.left = `calc(10px + ${progressPercent}% - ${progressPercent * 0.2}px)`;
         }
         if (overlay) {
             overlay.style.width = `${progressPercent}%`;

@@ -219,7 +219,14 @@
             z-index: 100;
             border: 1px solid rgba(255,255,255,0.1);
             box-shadow: 0 8px 32px rgba(0,0,0,0.4);
-            transition: right 0.3s ease;
+            transition: right 0.3s ease, opacity 0.4s ease, transform 0.4s ease;
+        }
+
+        /* Auto-hide state for progress widget during playback */
+        .unified-progress-widget.auto-hidden {
+            opacity: 0;
+            transform: translateY(20px);
+            pointer-events: none;
         }
 
         /* When help panel is visible, shorten widget to avoid overlap */
@@ -846,6 +853,13 @@
             pointer-events: none;
         }
 
+        /* Auto-hide state for help panel during playback */
+        .shortcuts-help.auto-hidden {
+            opacity: 0;
+            transform: translateY(20px);
+            pointer-events: none;
+        }
+
         .shortcuts-header {
             display: flex;
             justify-content: space-between;
@@ -971,92 +985,6 @@
             color: var(--color-text);
         }
 
-        /* Elevation profile color mode toggle */
-        .color-mode-toggle {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            position: absolute;
-            top: -28px;
-            right: 0;
-            font-size: 0.75rem;
-            color: rgba(255,255,255,0.7);
-        }
-
-        .color-mode-toggle label {
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            gap: 6px;
-        }
-
-        .toggle-switch {
-            position: relative;
-            width: 36px;
-            height: 20px;
-            background: rgba(255,255,255,0.2);
-            border-radius: 10px;
-            cursor: pointer;
-            transition: background 0.2s;
-        }
-
-        .toggle-switch::after {
-            content: '';
-            position: absolute;
-            top: 2px;
-            left: 2px;
-            width: 16px;
-            height: 16px;
-            background: white;
-            border-radius: 50%;
-            transition: transform 0.2s;
-        }
-
-        .toggle-switch.active {
-            background: var(--color-accent);
-        }
-
-        .toggle-switch.active::after {
-            transform: translateX(16px);
-        }
-
-        .color-mode-toggle.disabled {
-            opacity: 0.4;
-            pointer-events: none;
-        }
-
-        .color-mode-toggle .mode-label {
-            min-width: 40px;
-            text-align: right;
-        }
-
-        /* Effort zone legend */
-        .effort-legend {
-            display: none;
-            position: absolute;
-            top: -28px;
-            left: 0;
-            font-size: 0.625rem;
-            gap: 6px;
-        }
-
-        .effort-legend.visible {
-            display: flex;
-        }
-
-        .effort-legend-item {
-            display: flex;
-            align-items: center;
-            gap: 3px;
-            opacity: 0.8;
-        }
-
-        .effort-legend-color {
-            width: 10px;
-            height: 10px;
-            border-radius: 2px;
-        }
-
         /* Responsive adjustments */
         @media (max-width: 768px) {
             .camera-modes {
@@ -1073,14 +1001,6 @@
 
             .zoom-indicator {
                 display: none;
-            }
-
-            .color-mode-toggle {
-                display: none;
-            }
-
-            .effort-legend {
-                display: none !important;
             }
         }
     </style>
@@ -1119,37 +1039,6 @@
     <!-- Unified Progress Widget -->
     <div class="unified-progress-widget" id="unified-progress-widget">
         <div class="profile-track" id="profile-track">
-            <!-- Effort zone legend (shown when effort mode active) -->
-            <div class="effort-legend" id="effort-legend">
-                <div class="effort-legend-item">
-                    <div class="effort-legend-color" style="background: #22C55E"></div>
-                    <span>&lt;55%</span>
-                </div>
-                <div class="effort-legend-item">
-                    <div class="effort-legend-color" style="background: #3B82F6"></div>
-                    <span>55-75%</span>
-                </div>
-                <div class="effort-legend-item">
-                    <div class="effort-legend-color" style="background: #EAB308"></div>
-                    <span>75-90%</span>
-                </div>
-                <div class="effort-legend-item">
-                    <div class="effort-legend-color" style="background: #F97316"></div>
-                    <span>90-105%</span>
-                </div>
-                <div class="effort-legend-item">
-                    <div class="effort-legend-color" style="background: #EF4444"></div>
-                    <span>&gt;105%</span>
-                </div>
-            </div>
-
-            <!-- Color mode toggle -->
-            <div class="color-mode-toggle disabled" id="color-mode-toggle" title="Set rider profile to enable">
-                <span class="mode-label">Grade</span>
-                <div class="toggle-switch" id="effort-toggle"></div>
-                <span class="mode-label">Effort</span>
-            </div>
-
             <canvas class="elevation-canvas" id="elevation-canvas"></canvas>
             <!-- Climb markers overlay -->
             <div class="climb-markers" id="climb-markers"></div>
