@@ -168,6 +168,7 @@
     let routeLine = null;
     let cameraPath = null;
     let totalDistance = 0;
+    let riderMarker = null; // HTML marker for cyclist icon
 
     /**
      * Load pitch from localStorage
@@ -1082,10 +1083,12 @@
         const indicator = document.getElementById('camera-mode-indicator');
         const label = indicator?.querySelector('.mode-label');
         if (label) {
-            let modeName = CameraModeNames[currentCameraMode] || currentCameraMode;
+            // Use targetCameraMode so indicator updates immediately when user changes mode
+            const displayMode = targetCameraMode || currentCameraMode;
+            let modeName = CameraModeNames[displayMode] || displayMode;
 
             // Add side view direction indicator
-            if (currentCameraMode === CameraModes.SIDE_VIEW || targetCameraMode === CameraModes.SIDE_VIEW) {
+            if (displayMode === CameraModes.SIDE_VIEW) {
                 const directionLabel = sideViewMode === SideViewModes.AUTO ? 'Auto' :
                                        sideViewMode === SideViewModes.LEFT ? 'Left' : 'Right';
                 modeName = `Side View (${directionLabel})`;
@@ -1421,28 +1424,23 @@
             }
         });
 
-        // Current position marker
-        map.addSource('current-position', {
-            type: 'geojson',
-            data: {
-                type: 'Point',
-                coordinates: routeData.coordinates[0]
-            }
-        });
+        // Current position marker - HTML marker for reliable emoji rendering
+        const markerEl = document.createElement('div');
+        markerEl.className = 'rider-marker';
+        markerEl.innerHTML = '🚴';
+        markerEl.style.cssText = `
+            font-size: 32px;
+            filter: drop-shadow(0 0 3px white) drop-shadow(0 0 6px rgba(255,68,68,0.8));
+            cursor: default;
+            transform: translate(-50%, -50%);
+        `;
 
-        map.addLayer({
-            id: 'current-position',
-            type: 'circle',
-            source: 'current-position',
-            paint: {
-                'circle-radius': 12,
-                'circle-color': '#FF4444',
-                'circle-stroke-width': 4,
-                'circle-stroke-color': '#FFFFFF',
-                'circle-pitch-alignment': 'viewport',  // Always face camera
-                'circle-pitch-scale': 'viewport'       // Constant size regardless of zoom
-            }
-        });
+        riderMarker = new mapboxgl.Marker({
+            element: markerEl,
+            anchor: 'center'
+        })
+            .setLngLat(routeData.coordinates[0])
+            .addTo(map);
     }
 
     /**
@@ -2864,11 +2862,10 @@
      * Update dot position and UI elements
      */
     function updateDotAndUI(dotPoint) {
-        // Update current position marker
-        map.getSource('current-position')?.setData({
-            type: 'Point',
-            coordinates: [dotPoint.lng, dotPoint.lat, dotPoint.alt]
-        });
+        // Update current position marker (cyclist icon)
+        if (riderMarker) {
+            riderMarker.setLngLat([dotPoint.lng, dotPoint.lat]);
+        }
 
         // Update route gradient to show progress
         updateRouteGradient(progress);
