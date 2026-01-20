@@ -503,6 +503,7 @@
             case CameraModes.SIDE_VIEW: {
                 // Side view: perpendicular to route direction
                 // Intelligently chooses the lower terrain side (valley) or uses manual override
+                // Uses hysteresis to prevent flip-flopping between sides
                 const offsetSide = config.offsetSide * zoom;
                 const offsetUp = config.offsetUp * zoom;
 
@@ -523,7 +524,12 @@
                     { units: 'kilometers' }
                 );
 
-                let chosenSide = 'left'; // default
+                // Track current side with hysteresis (stored outside this function)
+                if (!window._sideViewCurrentSide) {
+                    window._sideViewCurrentSide = 'left';
+                }
+
+                let chosenSide = window._sideViewCurrentSide; // Start with current side
                 let sideBearing = leftBearing;
                 let offsetPoint = leftPoint;
 
@@ -535,18 +541,109 @@
                     chosenSide = 'right';
                 } else {
                     // Auto mode: query terrain on both sides and pick the lower one
+                    // Only switch sides if the other side is significantly lower (hysteresis)
+                    // AND stays better for at least LOOK_AHEAD_DISTANCE (prevents flip-flop on hairpins)
+                    const SIDE_SWITCH_THRESHOLD = 100; // meters - must be this much lower to switch
+                    const LOOK_AHEAD_DISTANCE = 300; // meters - check terrain this far ahead
+                    const LOOK_AHEAD_SAMPLES = 3; // number of points to check ahead
+
                     try {
                         const leftTerrain = map.queryTerrainElevation(leftPoint.geometry.coordinates);
                         const rightTerrain = map.queryTerrainElevation(rightPoint.geometry.coordinates);
 
                         if (leftTerrain !== null && rightTerrain !== null) {
-                            // Pick the side with lower terrain (valley side)
-                            chosenSide = leftTerrain <= rightTerrain ? 'left' : 'right';
+                            const currentSide = window._sideViewCurrentSide;
+                            let shouldSwitch = false;
+                            let newSide = currentSide;
+
+                            // Check if we should consider switching
+                            if (currentSide === 'left' && rightTerrain < leftTerrain - SIDE_SWITCH_THRESHOLD) {
+                                newSide = 'right';
+                                shouldSwitch = true;
+                            } else if (currentSide === 'right' && leftTerrain < rightTerrain - SIDE_SWITCH_THRESHOLD) {
+                                newSide = 'left';
+                                shouldSwitch = true;
+                            }
+
+                            // If considering a switch, look ahead to see if it stays better
+                            if (shouldSwitch && routeLine) {
+                                const currentDistance = progress * totalDistance;
+                                let switchStaysGood = true;
+
+                                for (let i = 1; i <= LOOK_AHEAD_SAMPLES; i++) {
+                                    const aheadDist = currentDistance + (LOOK_AHEAD_DISTANCE / 1000) * (i / LOOK_AHEAD_SAMPLES);
+                                    if (aheadDist > totalDistance) break;
+
+                                    const aheadPoint = getPointAlongRoute(aheadDist);
+                                    if (!aheadPoint) continue;
+
+                                    // Get bearing at ahead point
+                                    const aheadNextDist = Math.min(aheadDist + 0.05, totalDistance);
+                                    const aheadNextPoint = getPointAlongRoute(aheadNextDist);
+                                    if (!aheadNextPoint) continue;
+
+                                    const aheadBearing = calculateBearing(aheadPoint, aheadNextPoint);
+                                    const aheadLeftBearing = (aheadBearing + 90) % 360;
+                                    const aheadRightBearing = (aheadBearing - 90 + 360) % 360;
+
+                                    // Calculate side points at ahead position
+                                    const aheadLeftPoint = turf.destination(
+                                        turf.point([aheadPoint.lng, aheadPoint.lat]),
+                                        offsetAside / 1000,
+                                        aheadLeftBearing,
+                                        { units: 'kilometers' }
+                                    );
+                                    const aheadRightPoint = turf.destination(
+                                        turf.point([aheadPoint.lng, aheadPoint.lat]),
+                                        offsetAside / 1000,
+                                        aheadRightBearing,
+                                        { units: 'kilometers' }
+                                    );
+
+                                    const aheadLeftTerrain = map.queryTerrainElevation(aheadLeftPoint.geometry.coordinates);
+                                    const aheadRightTerrain = map.queryTerrainElevation(aheadRightPoint.geometry.coordinates);
+
+                                    if (aheadLeftTerrain !== null && aheadRightTerrain !== null) {
+                                        // Check if the new side is still better ahead
+                                        if (newSide === 'right' && aheadLeftTerrain < aheadRightTerrain - SIDE_SWITCH_THRESHOLD / 2) {
+                                            // Left would be better ahead - don't switch, we'd flip back
+                                            switchStaysGood = false;
+                                            break;
+                                        } else if (newSide === 'left' && aheadRightTerrain < aheadLeftTerrain - SIDE_SWITCH_THRESHOLD / 2) {
+                                            // Right would be better ahead - don't switch, we'd flip back
+                                            switchStaysGood = false;
+                                            break;
+                                        }
+                                    }
+                                }
+
+                                // Only switch if it stays good for the look-ahead distance
+                                if (switchStaysGood) {
+                                    chosenSide = newSide;
+                                }
+                            }
+                            // Otherwise stay on current side
                         }
                     } catch (e) {
-                        // Terrain query failed, stick with default
+                        // Terrain query failed, stay on current side
                     }
                 }
+
+                // Check if side changed - if so, reset smoothing state to avoid false jitter warnings
+                const previousSide = window._sideViewCurrentSide;
+                if (chosenSide !== previousSide) {
+                    // Side switch - reset smoothing state as camera will jump to other side
+                    window._lastCameraState = null;
+                    if (window._terrainCache) {
+                        window._terrainCache.lastCameraAlt = null;
+                        window._terrainCache.lastBearing = null;
+                        window._terrainCache.lastLng = null;
+                        window._terrainCache.lastLat = null;
+                    }
+                }
+
+                // Remember chosen side for next frame
+                window._sideViewCurrentSide = chosenSide;
 
                 // Apply chosen side
                 if (chosenSide === 'right') {
@@ -581,9 +678,12 @@
                 );
                 cameraLng = offsetPoint.geometry.coordinates[0];
                 cameraLat = offsetPoint.geometry.coordinates[1];
-                // Vary height sinusoidally
+
+                // Vary height sinusoidally above the rider
+                // Terrain collision and altitude smoothing are applied after all modes
                 const heightT = (Math.sin(cinematicAngle * 0.5) + 1) / 2;
                 cameraAlt = dotPoint.alt + lerp(heightMin, heightMax, heightT);
+
                 // Look at the dot
                 cameraBearing = (orbitBearing + 180) % 360;
                 // Vary pitch
@@ -597,18 +697,165 @@
         }
 
         // Terrain collision detection: ensure camera is above terrain at its position
-        // This prevents the camera from being placed inside mountains on steep terrain
-        const minTerrainClearance = 50; // meters above terrain
+        // AND above the rider - this prevents the camera from going below the rider
+        // when orbiting over valleys on steep mountainsides
+        // Use higher clearance to avoid camera looking into cliff faces on steep terrain
+        const minTerrainClearance = 100; // meters above terrain at camera position
+        const minRiderClearance = 100;   // meters above rider - camera should never be below rider
+        let terrainElevation = null;
+        let terrainAdjusted = false;
+        let originalCameraAlt = cameraAlt;
+
+        // Initialize terrain cache if needed
+        if (!window._terrainCache) {
+            window._terrainCache = {
+                lastElevation: null,
+                lastCameraAlt: null,
+                lastPosition: null
+            };
+        }
+
         try {
-            const terrainElevation = map.queryTerrainElevation([cameraLng, cameraLat]);
+            terrainElevation = map.queryTerrainElevation([cameraLng, cameraLat]);
+
             if (terrainElevation !== null && terrainElevation !== undefined) {
-                const minAltitude = terrainElevation + minTerrainClearance;
-                if (cameraAlt < minAltitude) {
-                    cameraAlt = minAltitude;
-                }
+                // Valid terrain data - use it and cache it
+                window._terrainCache.lastElevation = terrainElevation;
+                window._terrainCache.lastPosition = { lng: cameraLng, lat: cameraLat };
+            } else if (window._terrainCache.lastElevation !== null) {
+                // Terrain query returned null - use cached value
+                terrainElevation = window._terrainCache.lastElevation;
             }
         } catch (e) {
-            // Terrain query not available, continue with calculated altitude
+            // Terrain query not available, try to use cached value
+            if (window._terrainCache.lastElevation !== null) {
+                terrainElevation = window._terrainCache.lastElevation;
+            }
+        }
+
+        // Calculate minimum altitude from two constraints:
+        // 1. Must be above terrain at camera position
+        // 2. Must be above rider (prevents camera going into valley below rider on steep slopes)
+        // 3. On steep uphill terrain, add extra clearance proportional to elevation difference
+        //    to help camera see OVER cliff faces between camera and rider
+        let dynamicClearance = minTerrainClearance;
+        if (terrainElevation !== null && terrainElevation > dotPoint.alt) {
+            // Camera terrain is higher than rider - add extra clearance to see over slope
+            // Add 50% of the elevation difference as extra clearance
+            const elevationDiff = terrainElevation - dotPoint.alt;
+            dynamicClearance = minTerrainClearance + elevationDiff * 0.5;
+        }
+        const minFromTerrain = terrainElevation !== null ? terrainElevation + dynamicClearance : 0;
+        const minFromRider = dotPoint.alt + minRiderClearance;
+        const minAltitude = Math.max(minFromTerrain, minFromRider);
+
+        if (cameraAlt < minAltitude) {
+            cameraAlt = minAltitude;
+            terrainAdjusted = true;
+        }
+
+        // Final altitude smoothing - applied AFTER terrain collision to prevent jarring jumps
+        // This is critical for cinematic mode on steep terrain where the camera orbits over cliffs
+        // Limit altitude change to 30m per frame (spreads 300m change over ~10 frames)
+        const maxAltChangePerFrame = 30;
+        if (window._terrainCache.lastCameraAlt !== null) {
+            const altDelta = cameraAlt - window._terrainCache.lastCameraAlt;
+            if (Math.abs(altDelta) > maxAltChangePerFrame) {
+                cameraAlt = window._terrainCache.lastCameraAlt + Math.sign(altDelta) * maxAltChangePerFrame;
+            }
+        }
+        window._terrainCache.lastCameraAlt = cameraAlt;
+
+        // Position smoothing - prevent camera from jumping around on hairpin turns
+        // Limit position change to 20m per frame
+        const maxPosChangePerFrame = 20; // meters
+        if (window._terrainCache.lastLng !== undefined && window._terrainCache.lastLng !== null) {
+            const dLng = (cameraLng - window._terrainCache.lastLng) * 111000 * Math.cos(cameraLat * Math.PI / 180);
+            const dLat = (cameraLat - window._terrainCache.lastLat) * 111000;
+            const posDist = Math.sqrt(dLng * dLng + dLat * dLat);
+            if (posDist > maxPosChangePerFrame) {
+                // Scale down the movement to the max allowed
+                const scale = maxPosChangePerFrame / posDist;
+                const metersPerDegLng = 111000 * Math.cos(cameraLat * Math.PI / 180);
+                const metersPerDegLat = 111000;
+                cameraLng = window._terrainCache.lastLng + (cameraLng - window._terrainCache.lastLng) * scale;
+                cameraLat = window._terrainCache.lastLat + (cameraLat - window._terrainCache.lastLat) * scale;
+            }
+        }
+        window._terrainCache.lastLng = cameraLng;
+        window._terrainCache.lastLat = cameraLat;
+
+        // Bearing smoothing - prevent jarring camera swings on hairpin turns
+        // Use different limits per mode:
+        // - Bird's Eye: 0.5°/frame - very stable, bird doesn't twist with every curve
+        // - Other modes: 4°/frame - smooth but responsive
+        const maxBearingChangePerFrame = (mode === CameraModes.BIRDS_EYE) ? 0.5 : 4;
+        if (window._terrainCache.lastBearing !== undefined && window._terrainCache.lastBearing !== null) {
+            let bearingDelta = cameraBearing - window._terrainCache.lastBearing;
+            // Handle wrap-around (e.g., 350° to 10° should be +20°, not -340°)
+            if (bearingDelta > 180) bearingDelta -= 360;
+            if (bearingDelta < -180) bearingDelta += 360;
+            if (Math.abs(bearingDelta) > maxBearingChangePerFrame) {
+                cameraBearing = window._terrainCache.lastBearing + Math.sign(bearingDelta) * maxBearingChangePerFrame;
+                // Normalize to 0-360
+                if (cameraBearing < 0) cameraBearing += 360;
+                if (cameraBearing >= 360) cameraBearing -= 360;
+            }
+        }
+        window._terrainCache.lastBearing = cameraBearing;
+
+        // Debug logging for camera terrain issues with jitter detection
+        if (window.FLYOVER_DEBUG) {
+            // Calculate deltas from previous frame
+            let bearingDelta = 0;
+            let altDelta = 0;
+            let posDelta = 0;
+            if (window._lastCameraState) {
+                const last = window._lastCameraState;
+                bearingDelta = cameraBearing - last.bearing;
+                // Handle bearing wrap-around
+                if (bearingDelta > 180) bearingDelta -= 360;
+                if (bearingDelta < -180) bearingDelta += 360;
+                altDelta = cameraAlt - last.alt;
+                // Position delta in meters (approximate)
+                const dLng = (cameraLng - last.lng) * 111000 * Math.cos(cameraLat * Math.PI / 180);
+                const dLat = (cameraLat - last.lat) * 111000;
+                posDelta = Math.sqrt(dLng * dLng + dLat * dLat);
+            }
+            window._lastCameraState = { lng: cameraLng, lat: cameraLat, alt: cameraAlt, bearing: cameraBearing };
+
+            // Flag significant jitter
+            const isJittery = Math.abs(bearingDelta) > 10 || Math.abs(altDelta) > 50 || posDelta > 100;
+
+            const debugInfo = {
+                mode: mode,
+                dotAlt: dotPoint.alt.toFixed(1),
+                cameraPos: { lng: cameraLng.toFixed(5), lat: cameraLat.toFixed(5) },
+                terrainAtCamera: terrainElevation !== null ? terrainElevation.toFixed(1) : 'null',
+                originalCameraAlt: originalCameraAlt.toFixed(1),
+                finalCameraAlt: cameraAlt.toFixed(1),
+                terrainAdjusted: terrainAdjusted,
+                clearance: terrainElevation !== null ? (cameraAlt - terrainElevation).toFixed(1) : 'n/a',
+                bearing: cameraBearing.toFixed(1),
+                pitch: cameraPitch.toFixed(1),
+                delta: {
+                    bearing: bearingDelta.toFixed(1),
+                    alt: altDelta.toFixed(1),
+                    pos: posDelta.toFixed(1)
+                },
+                JITTER: isJittery
+            };
+
+            // Only log if jittery or every 30th frame to reduce noise
+            if (isJittery) {
+                console.warn('[CAMERA JITTER]', JSON.stringify(debugInfo));
+            } else if (!window._cameraLogCount) {
+                window._cameraLogCount = 0;
+            }
+            window._cameraLogCount++;
+            if (window._cameraLogCount % 30 === 0) {
+                console.log('[CAMERA]', JSON.stringify(debugInfo));
+            }
         }
 
         return createCameraState(cameraLng, cameraLat, cameraAlt, cameraBearing, cameraPitch);
@@ -720,49 +967,12 @@
     }
 
     /**
-     * Handle stability fallback - switch to bird's eye when camera is chaotic
-     * Returns the camera state to use (possibly overridden to bird's eye)
+     * Handle stability fallback - DISABLED
+     * Previously switched to bird's eye when camera was chaotic, but now we rely on
+     * proper terrain collision detection instead of this workaround.
      */
     function handleStabilityFallback(originalState, dotPoint, nextPoint, deltaTime) {
-        // Check for instability
-        const isUnstable = detectCameraInstability(originalState);
-        const riderVisible = isRiderVisible(dotPoint);
-
-        // Track frames with rider out of view
-        if (!riderVisible) {
-            framesWithRiderOutOfView++;
-        } else {
-            framesWithRiderOutOfView = 0;
-        }
-
-        const riderLostTooLong = framesWithRiderOutOfView >= VISIBILITY_LOST_FRAMES;
-
-        // Trigger fallback if camera is unstable or rider is lost
-        if ((isUnstable || riderLostTooLong) && !stabilityFallbackActive) {
-            // Remember the mode we were in
-            previousCameraMode = currentCameraMode;
-            stabilityFallbackActive = true;
-
-            // Switch to bird's eye
-            console.log('Camera stability fallback: switching to bird\'s eye',
-                        isUnstable ? '(jitter detected)' : '(rider out of view)');
-            transitionToMode(CameraModes.BIRDS_EYE);
-
-            // Clear history to start fresh when we return
-            cameraHistory = [];
-        }
-
-        // Check if we can return from fallback
-        if (stabilityFallbackActive && currentCameraMode === CameraModes.BIRDS_EYE) {
-            // Stay in bird's eye - the user can manually switch back when ready
-            // We don't auto-return because the terrain might still be chaotic
-        }
-
-        // Return bird's eye state if fallback is active
-        if (stabilityFallbackActive) {
-            return calculateCameraForMode(CameraModes.BIRDS_EYE, dotPoint, nextPoint, deltaTime);
-        }
-
+        // Stability fallback disabled - terrain collision detection handles camera placement
         return originalState;
     }
 
@@ -784,6 +994,14 @@
      */
     function transitionToMode(newMode) {
         if (newMode === currentCameraMode && modeTransitionProgress >= 1) return;
+
+        // Reset jitter detection state to prevent false positives from mode transitions
+        window._lastCameraState = null;
+        window._cinematicState = null; // Reset cinematic smoothing
+        if (window._terrainCache) {
+            window._terrainCache.lastCameraAlt = null;
+            window._terrainCache.lastBearing = null;
+        }
 
         // Reset stability fallback when user manually changes mode
         // This allows them to try other modes after an auto-fallback
@@ -1083,9 +1301,88 @@
             // Setup climb analysis panel
             setupClimbAnalysis();
 
+            // Handle URL parameters for position and mode (for debugging)
+            applyUrlParameters(params);
+
         } catch (error) {
             console.error('Failed to load route:', error);
             showError(`Failed to load route: ${error.message}`);
+        }
+    }
+
+    /**
+     * Apply URL parameters for debugging (position, mode, debug)
+     * Supported parameters:
+     *   pos=0.6      - Position as fraction (0-1)
+     *   km=78.5      - Position in kilometers
+     *   mode=chase   - Camera mode (chase, birds_eye, side_view, cinematic)
+     *   debug=1      - Enable debug logging
+     *   play=1       - Auto-start playback
+     */
+    function applyUrlParameters(params) {
+        // Enable debug mode if requested
+        if (params.get('debug') === '1') {
+            window.FLYOVER_DEBUG = true;
+            console.log('Debug mode enabled via URL parameter');
+        }
+
+        // Set position from km parameter
+        const kmParam = params.get('km');
+        if (kmParam !== null) {
+            const km = parseFloat(kmParam);
+            if (!isNaN(km) && km >= 0 && km <= totalDistance) {
+                progress = km / totalDistance;
+                console.log(`Position set to ${km.toFixed(2)} km (${(progress * 100).toFixed(1)}%) via URL parameter`);
+            }
+        }
+
+        // Set position from pos parameter (overrides km if both specified)
+        const posParam = params.get('pos');
+        if (posParam !== null) {
+            const pos = parseFloat(posParam);
+            if (!isNaN(pos) && pos >= 0 && pos <= 1) {
+                progress = pos;
+                console.log(`Position set to ${(progress * 100).toFixed(1)}% (${(progress * totalDistance).toFixed(2)} km) via URL parameter`);
+            }
+        }
+
+        // Set camera mode
+        const modeParam = params.get('mode');
+        if (modeParam !== null) {
+            const modes = {
+                'chase': CameraModes.CHASE,
+                'birds_eye': CameraModes.BIRDS_EYE,
+                'birdseye': CameraModes.BIRDS_EYE,
+                'side_view': CameraModes.SIDE_VIEW,
+                'sideview': CameraModes.SIDE_VIEW,
+                'side': CameraModes.SIDE_VIEW,
+                'cinematic': CameraModes.CINEMATIC
+            };
+            const targetMode = modes[modeParam.toLowerCase()];
+            if (targetMode) {
+                // Directly set mode without transition for instant positioning
+                currentCameraMode = targetMode;
+                targetCameraMode = targetMode;
+                modeTransitionProgress = 1;
+                updateCameraModeUI(targetMode);
+                console.log(`Camera mode set to ${modeParam} via URL parameter`);
+            }
+        }
+
+        // Update camera to reflect new position/mode
+        if (posParam !== null || kmParam !== null || modeParam !== null) {
+            // Small delay to ensure map is ready
+            setTimeout(() => {
+                updateCamera(0);
+                updateProgress();
+            }, 100);
+        }
+
+        // Auto-start playback if requested
+        if (params.get('play') === '1') {
+            setTimeout(() => {
+                if (!isPlaying) togglePlayPause();
+            }, 500);
         }
     }
 
@@ -2093,6 +2390,14 @@
     function seekToPositionDuringDrag(newPosition) {
         progress = Math.max(0, Math.min(1, newPosition));
 
+        // Reset jitter detection state to prevent false positives from seeking
+        window._lastCameraState = null;
+        window._cinematicState = null; // Reset cinematic smoothing
+        if (window._terrainCache) {
+            window._terrainCache.lastCameraAlt = null;
+            window._terrainCache.lastBearing = null;
+        }
+
         // Get dot position and update UI
         const dotDistance = progress * totalDistance;
         const dotPoint = getPointAlongRoute(dotDistance);
@@ -2169,6 +2474,14 @@
      */
     function seekToPosition(newPosition) {
         progress = Math.max(0, Math.min(1, newPosition));
+
+        // Reset jitter detection state to prevent false positives from seeking
+        window._lastCameraState = null;
+        window._cinematicState = null; // Reset cinematic smoothing
+        if (window._terrainCache) {
+            window._terrainCache.lastCameraAlt = null;
+            window._terrainCache.lastBearing = null;
+        }
 
         // Cancel user override when seeking
         if (userOverrideActive) {
@@ -2626,4 +2939,75 @@
     } else {
         init();
     }
+
+    // Debug API exposed to window for development
+    window.flyoverDebug = {
+        // Enable/disable debug logging
+        enable: () => { window.FLYOVER_DEBUG = true; console.log('Flyover debug enabled'); },
+        disable: () => { window.FLYOVER_DEBUG = false; console.log('Flyover debug disabled'); },
+
+        // Get current state
+        getState: () => ({
+            progress: progress,
+            isPlaying: isPlaying,
+            currentMode: currentCameraMode,
+            targetMode: targetCameraMode,
+            zoomLevel: zoomLevel,
+            cinematicAngle: cinematicAngle,
+            totalDistance: totalDistance,
+            distanceKm: progress * totalDistance
+        }),
+
+        // Seek to a specific position (0-1)
+        seekTo: (pos) => {
+            window._lastCameraState = null;
+        window._cinematicState = null; // Reset cinematic smoothing
+        if (window._terrainCache) {
+            window._terrainCache.lastCameraAlt = null;
+            window._terrainCache.lastBearing = null;
+        } // Reset jitter detection
+            progress = Math.max(0, Math.min(1, pos));
+            updateCamera(0);
+            console.log(`Seeked to ${(progress * 100).toFixed(1)}% (${(progress * totalDistance).toFixed(2)} km)`);
+        },
+
+        // Seek to a specific distance in km
+        seekToKm: (km) => {
+            window._lastCameraState = null;
+        window._cinematicState = null; // Reset cinematic smoothing
+        if (window._terrainCache) {
+            window._terrainCache.lastCameraAlt = null;
+            window._terrainCache.lastBearing = null;
+        } // Reset jitter detection
+            progress = Math.max(0, Math.min(1, km / totalDistance));
+            updateCamera(0);
+            console.log(`Seeked to ${km.toFixed(2)} km (${(progress * 100).toFixed(1)}%)`);
+        },
+
+        // Set camera mode
+        setMode: (mode) => {
+            const modes = { chase: CameraModes.CHASE, birds_eye: CameraModes.BIRDS_EYE, side_view: CameraModes.SIDE_VIEW, cinematic: CameraModes.CINEMATIC };
+            if (modes[mode]) {
+                switchCameraMode(modes[mode]);
+                console.log(`Switched to ${mode} mode`);
+            } else {
+                console.log('Available modes: chase, birds_eye, side_view, cinematic');
+            }
+        },
+
+        // Query terrain at a point
+        queryTerrain: (lng, lat) => {
+            const elev = map.queryTerrainElevation([lng, lat]);
+            console.log(`Terrain at [${lng}, ${lat}]: ${elev !== null ? elev.toFixed(1) + 'm' : 'null'}`);
+            return elev;
+        },
+
+        // Get map instance for direct inspection
+        getMap: () => map,
+
+        // Pause/play
+        pause: () => { if (isPlaying) togglePlayPause(); },
+        play: () => { if (!isPlaying) togglePlayPause(); }
+    };
+    console.log('Flyover debug API available: window.flyoverDebug (try .enable() for logging)');
 })();
