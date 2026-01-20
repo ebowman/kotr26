@@ -168,7 +168,6 @@
     let routeLine = null;
     let cameraPath = null;
     let totalDistance = 0;
-    let riderMarker = null; // HTML marker for cyclist icon
 
     /**
      * Load pitch from localStorage
@@ -1424,23 +1423,28 @@
             }
         });
 
-        // Current position marker - HTML marker for reliable emoji rendering
-        const markerEl = document.createElement('div');
-        markerEl.className = 'rider-marker';
-        markerEl.innerHTML = '🚴';
-        markerEl.style.cssText = `
-            font-size: 32px;
-            filter: drop-shadow(0 0 3px white) drop-shadow(0 0 6px rgba(255,68,68,0.8));
-            cursor: default;
-            transform: translate(-50%, -50%);
-        `;
+        // Current position marker
+        map.addSource('current-position', {
+            type: 'geojson',
+            data: {
+                type: 'Point',
+                coordinates: routeData.coordinates[0]
+            }
+        });
 
-        riderMarker = new mapboxgl.Marker({
-            element: markerEl,
-            anchor: 'center'
-        })
-            .setLngLat(routeData.coordinates[0])
-            .addTo(map);
+        map.addLayer({
+            id: 'current-position',
+            type: 'circle',
+            source: 'current-position',
+            paint: {
+                'circle-radius': 12,
+                'circle-color': '#FF4444',
+                'circle-stroke-width': 4,
+                'circle-stroke-color': '#FFFFFF',
+                'circle-pitch-alignment': 'viewport',  // Always face camera
+                'circle-pitch-scale': 'viewport'       // Constant size regardless of zoom
+            }
+        });
     }
 
     /**
@@ -2862,10 +2866,11 @@
      * Update dot position and UI elements
      */
     function updateDotAndUI(dotPoint) {
-        // Update current position marker (cyclist icon)
-        if (riderMarker) {
-            riderMarker.setLngLat([dotPoint.lng, dotPoint.lat]);
-        }
+        // Update current position marker
+        map.getSource('current-position')?.setData({
+            type: 'Point',
+            coordinates: [dotPoint.lng, dotPoint.lat, dotPoint.alt]
+        });
 
         // Update route gradient to show progress
         updateRouteGradient(progress);
