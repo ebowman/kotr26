@@ -364,16 +364,123 @@ const PowerCalculator = (function() {
     /**
      * Detect significant climbs in route
      * A climb is sustained grade > 3% for > 750m with at least 50m elevation gain
+     * Falls back to looser constraints if no climbs found
      * @param {object} routeData - Route data
      * @returns {array} Array of climb objects
      */
     function detectClimbs(routeData) {
+        // Try with standard constraints first
+        let climbs = detectClimbsWithParams(routeData, {
+            minGrade: 0.03,      // 3%
+            minDistance: 750,    // meters
+            minElevGain: 50,     // meters
+            flatTolerance: 300   // meters
+        });
+
+        // If no climbs found, try with looser constraints
+        if (climbs.length === 0) {
+            climbs = detectClimbsWithParams(routeData, {
+                minGrade: 0.02,      // 2%
+                minDistance: 400,    // meters
+                minElevGain: 25,     // meters
+                flatTolerance: 200   // meters
+            });
+        }
+
+        // If still no significant climbs, find major elevation peaks
+        if (climbs.length === 0) {
+            climbs = detectMajorPeaks(routeData);
+        }
+
+        return climbs;
+    }
+
+    /**
+     * Find major elevation peaks for routes without sustained climbs
+     * Uses a different approach: find local maxima with significant prominence
+     */
+    function detectMajorPeaks(routeData) {
         const coords = routeData.coordinates;
         const climbs = [];
-        const minGrade = 0.03; // 3% to start detecting (was 2%)
-        const minDistance = 750; // meters minimum climb length (was 500)
-        const minElevGain = 50; // meters minimum elevation gain (was 30)
-        const flatTolerance = 300; // meters of flat/descent allowed within a climb
+
+        // Calculate cumulative distances
+        const distances = [0];
+        for (let i = 1; i < coords.length; i++) {
+            const dist = haversineDistance(
+                coords[i-1][1], coords[i-1][0],
+                coords[i][1], coords[i][0]
+            ) * 1000;
+            distances.push(distances[i-1] + dist);
+        }
+
+        // Smooth elevation to find trends (simple moving average)
+        const windowSize = Math.max(5, Math.floor(coords.length / 20));
+        const smoothed = [];
+        for (let i = 0; i < coords.length; i++) {
+            let sum = 0, count = 0;
+            for (let j = Math.max(0, i - windowSize); j <= Math.min(coords.length - 1, i + windowSize); j++) {
+                sum += coords[j][2] || 0;
+                count++;
+            }
+            smoothed.push(sum / count);
+        }
+
+        // Find local maxima (peaks)
+        const peaks = [];
+        for (let i = 1; i < smoothed.length - 1; i++) {
+            if (smoothed[i] > smoothed[i-1] && smoothed[i] > smoothed[i+1]) {
+                peaks.push({
+                    index: i,
+                    elevation: smoothed[i],
+                    distance: distances[i]
+                });
+            }
+        }
+
+        // For each peak, find the start of the climb (last local minimum before it)
+        for (const peak of peaks) {
+            let startIndex = peak.index;
+            let minElev = smoothed[peak.index];
+
+            // Walk backwards to find the start
+            for (let i = peak.index - 1; i >= 0; i--) {
+                if (smoothed[i] < minElev) {
+                    minElev = smoothed[i];
+                    startIndex = i;
+                }
+                // Stop if we start going up again (found a valley)
+                if (smoothed[i] > minElev + 5) break;
+            }
+
+            const elevGain = peak.elevation - minElev;
+            const climbDist = distances[peak.index] - distances[startIndex];
+
+            // Only include if elevation gain is significant (>20m)
+            if (elevGain >= 20 && climbDist > 200) {
+                climbs.push({
+                    startDistance: distances[startIndex] / 1000,
+                    endDistance: distances[peak.index] / 1000,
+                    distance: climbDist,
+                    elevationGain: elevGain,
+                    avgGrade: (elevGain / climbDist) * 100,
+                    startElevation: minElev,
+                    endElevation: peak.elevation
+                });
+            }
+        }
+
+        // Sort by elevation gain and take top 3
+        climbs.sort((a, b) => b.elevationGain - a.elevationGain);
+        return climbs.slice(0, 3);
+    }
+
+    /**
+     * Detect climbs with configurable parameters
+     */
+    function detectClimbsWithParams(routeData, params) {
+        const coords = routeData.coordinates;
+        const climbs = [];
+        const { minGrade, minDistance, minElevGain, flatTolerance } = params;
 
         let inClimb = false;
         let climbStart = null;

@@ -205,7 +205,7 @@ const WeatherWidget = (function() {
             notice.className = 'weather-notice';
             notice.innerHTML = `
                 <p><strong>Historical Averages</strong></p>
-                <p>Forecast not yet available for event dates. Showing typical conditions for late May in Avignon.</p>
+                <p>Forecast not yet available for event dates. Showing typical conditions for late May in Avignon. Forecast will become live closer to the event.</p>
             `;
             container.appendChild(notice);
         }

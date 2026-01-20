@@ -234,6 +234,11 @@ const RiderProfile = (function() {
                     <button type="button" class="btn-reset" id="reset-profile">Clear Profile</button>
                 </div>
                 ` : ''}
+
+                <div class="rider-profile-privacy">
+                    <span class="privacy-icon">🔒</span>
+                    <span class="privacy-text">Your data never leaves your browser. All settings are stored locally on your device.</span>
+                </div>
             </div>
         `;
 
@@ -353,29 +358,15 @@ const RiderProfile = (function() {
     }
 
     /**
-     * Initialize - add settings button to page
+     * Initialize - attach click handler to settings button
      */
     function init() {
         load();
 
-        // Add settings button as fixed position bottom left
-        if (!document.getElementById('rider-settings-btn')) {
-            const settingsBtn = document.createElement('button');
-            settingsBtn.id = 'rider-settings-btn';
-            settingsBtn.className = 'rider-settings-btn';
-            // Force positioning with inline styles - explicit pixels
-            settingsBtn.style.position = 'fixed';
-            settingsBtn.style.bottom = '24px';
-            settingsBtn.style.left = '24px';
-            settingsBtn.style.top = 'auto';
-            settingsBtn.style.right = 'auto';
-            settingsBtn.innerHTML = `
-                <span class="settings-icon">&#9881;</span>
-                <span class="settings-label">Rider Profile</span>
-                <span class="profile-status" id="profile-status"></span>
-            `;
+        // Attach click handler to existing settings button in trip summary bar
+        const settingsBtn = document.getElementById('rider-settings-btn');
+        if (settingsBtn) {
             settingsBtn.addEventListener('click', showModal);
-            document.body.appendChild(settingsBtn);
         }
 
         updateSettingsIndicator();

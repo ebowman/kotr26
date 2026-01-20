@@ -160,6 +160,111 @@ body {
     font-size: 1rem;
 }
 
+/* ==============================================
+   Profile Setup Prompt
+   ============================================== */
+
+.profile-setup-prompt {
+    padding: var(--space-xl) 0;
+    background: linear-gradient(135deg, rgba(123,63,0,0.03) 0%, rgba(230,184,0,0.06) 100%);
+}
+
+.profile-setup-prompt[hidden] {
+    display: none;
+}
+
+.profile-prompt-card {
+    background: var(--color-surface);
+    border-radius: var(--radius-xl);
+    padding: var(--space-xl) var(--space-2xl);
+    box-shadow: var(--shadow-md);
+    border: 2px solid var(--color-accent);
+    max-width: 700px;
+    margin: 0 auto;
+    text-align: center;
+}
+
+.profile-prompt-card h3 {
+    font-family: var(--font-display);
+    font-size: 1.5rem;
+    color: var(--color-primary);
+    margin-bottom: var(--space-md);
+}
+
+.profile-prompt-intro {
+    color: var(--color-text-muted);
+    margin-bottom: var(--space-md);
+    font-size: 1rem;
+}
+
+.profile-prompt-benefits {
+    list-style: none;
+    padding: 0;
+    margin: 0 0 var(--space-xl);
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: var(--space-sm);
+    text-align: left;
+}
+
+.profile-prompt-benefits li {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    font-size: 0.9375rem;
+    color: var(--color-text);
+    padding: var(--space-sm) var(--space-md);
+    background: var(--color-bg);
+    border-radius: var(--radius-md);
+}
+
+.profile-prompt-benefits li::before {
+    content: "\2713";
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    background: var(--color-primary);
+    color: white;
+    border-radius: 50%;
+    font-size: 0.75rem;
+    font-weight: 700;
+    flex-shrink: 0;
+}
+
+.profile-prompt-actions {
+    display: flex;
+    gap: var(--space-md);
+    justify-content: center;
+    flex-wrap: wrap;
+}
+
+.profile-prompt-actions .btn {
+    padding: var(--space-md) var(--space-xl);
+    font-size: 1rem;
+    min-width: 160px;
+}
+
+/* Responsive adjustments for profile prompt */
+@media (max-width: 600px) {
+    .profile-prompt-card {
+        padding: var(--space-lg);
+    }
+
+    .profile-prompt-benefits {
+        grid-template-columns: 1fr;
+    }
+
+    .profile-prompt-actions {
+        flex-direction: column;
+    }
+
+    .profile-prompt-actions .btn {
+        width: 100%;
+    }
+}
+
 /* Buttons */
 .btn {
     display: inline-flex;
@@ -247,6 +352,19 @@ body {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
     gap: var(--space-lg);
+}
+
+.route-cards > * {
+    min-width: 0;
+}
+
+/* Loading placeholder for dynamically rendered cards */
+.route-cards-loading {
+    grid-column: 1 / -1;
+    text-align: center;
+    padding: var(--space-2xl);
+    color: var(--color-text-muted);
+    font-style: italic;
 }
 
 /* Day 1 warmup spans full width as intro banner */
@@ -658,6 +776,12 @@ footer a:hover {
     grid-template-columns: 1fr 1fr;
     gap: var(--space-md);
     margin-bottom: var(--space-lg);
+    align-items: stretch;
+}
+
+.route-comparison > .route-option {
+    height: 100%;
+    min-width: 0;
 }
 
 .route-option {
@@ -666,6 +790,8 @@ footer a:hover {
     padding: var(--space-md);
     text-align: center;
     border: 2px solid transparent;
+    display: flex;
+    flex-direction: column;
     transition: border-color 0.2s, transform 0.2s, box-shadow 0.2s;
     cursor: pointer;
 }
@@ -677,12 +803,55 @@ footer a:hover {
 
 .route-option.active {
     border-color: var(--color-primary);
+    border-width: 3px;
     background: rgba(123, 63, 0, 0.08);
-    box-shadow: 0 2px 8px rgba(123, 63, 0, 0.15);
+    box-shadow: 0 2px 12px rgba(123, 63, 0, 0.25);
+    position: relative;
+}
+
+.route-option.active::before {
+    content: '✓';
+    position: absolute;
+    top: -10px;
+    right: -10px;
+    width: 24px;
+    height: 24px;
+    background: var(--color-primary);
+    color: white;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    font-weight: bold;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
 }
 
 .route-option.active .option-header {
     color: var(--color-primary);
+}
+
+/* Ventoux active state */
+.route-option.ventoux.active {
+    border-color: var(--color-ventoux);
+    border-width: 3px;
+    background: linear-gradient(180deg, rgba(74,144,164,0.2) 0%, rgba(74,144,164,0.08) 100%);
+    box-shadow: 0 2px 12px rgba(74,144,164,0.3);
+}
+
+.route-option.ventoux.active::before {
+    background: var(--color-ventoux);
+}
+
+/* Dim unselected option when sibling is selected */
+.route-comparison:has(.route-option.active) .route-option:not(.active) {
+    opacity: 0.6;
+    border-style: dashed;
+}
+
+.route-comparison:has(.route-option.active) .route-option:not(.active):hover {
+    opacity: 0.9;
+    border-style: solid;
 }
 
 .option-header {
@@ -696,6 +865,45 @@ footer a:hover {
 
 .option-stats {
     margin-bottom: var(--space-sm);
+}
+
+/* Individual route action buttons */
+.option-actions {
+    display: flex;
+    gap: 0.375rem;
+    margin-top: auto;
+    padding-top: var(--space-sm);
+    border-top: 1px solid var(--color-border);
+    justify-content: center;
+}
+
+.option-actions .btn {
+    flex: 1;
+    padding: 0.375rem 0.25rem;
+    font-size: 0.625rem;
+    line-height: 1;
+    border-radius: 4px;
+    white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.2rem;
+    background: var(--color-bg);
+    border: 1px solid var(--color-border);
+    color: var(--color-text);
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.option-actions .btn .icon {
+    font-size: 0.75rem;
+    line-height: 1;
+}
+
+.option-actions .btn:hover {
+    background: var(--color-primary);
+    border-color: var(--color-primary);
+    color: white;
 }
 
 .stat-row {
@@ -917,37 +1125,36 @@ footer a:hover {
    Rider Profile Settings
    ============================================== */
 
-/* Settings button - fixed position bottom left */
+/* Settings button - inline in trip summary bar */
 .rider-settings-btn {
-    position: fixed !important;
-    bottom: var(--space-lg) !important;
-    left: var(--space-lg) !important;
-    top: auto !important;
-    right: auto !important;
-    z-index: 100;
     display: inline-flex;
     align-items: center;
-    gap: var(--space-sm);
-    background: rgba(0,0,0,0.7);
-    backdrop-filter: blur(10px);
-    border: 1px solid rgba(255,255,255,0.2);
-    color: white;
-    padding: var(--space-sm) var(--space-md);
-    border-radius: var(--radius-md);
+    gap: var(--space-xs);
+    background: rgba(123, 63, 0, 0.15);
+    border: 1px solid var(--color-primary);
+    color: var(--color-primary);
+    padding: var(--space-xs) var(--space-sm);
+    border-radius: var(--radius-sm);
     font-family: inherit;
-    font-size: 0.875rem;
+    font-size: 0.8rem;
+    font-weight: 500;
     cursor: pointer;
     transition: all 0.2s ease;
-    box-shadow: 0 2px 12px rgba(0,0,0,0.3);
+    margin-right: var(--space-sm);
+    flex-shrink: 0;
 }
 
 .rider-settings-btn:hover {
-    background: rgba(0,0,0,0.85);
-    transform: translateY(-1px);
+    background: var(--color-primary);
+    color: white;
 }
 
 .settings-icon {
-    font-size: 1.125rem;
+    font-size: 1rem;
+}
+
+.settings-label {
+    font-size: 0.8rem;
 }
 
 .profile-status {
@@ -1252,6 +1459,29 @@ footer a:hover {
     text-decoration: underline;
 }
 
+/* Privacy notice in modal */
+.rider-profile-privacy {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-sm);
+    margin-top: var(--space-lg);
+    padding: var(--space-sm) var(--space-md);
+    background: rgba(34, 197, 94, 0.08);
+    border: 1px solid rgba(34, 197, 94, 0.2);
+    border-radius: var(--radius-sm);
+    font-size: 0.75rem;
+    color: var(--color-text-muted);
+}
+
+.rider-profile-privacy .privacy-icon {
+    flex-shrink: 0;
+    font-size: 0.875rem;
+}
+
+.rider-profile-privacy .privacy-text {
+    line-height: 1.4;
+}
+
 /* ==============================================
    Route Power Analysis Display
    ============================================== */
@@ -1346,11 +1576,939 @@ footer a:hover {
     }
 }
 
+/* ==============================================
+   Trip Summary Bar
+   ============================================== */
+
+.trip-summary-bar {
+    background: var(--color-surface);
+    border-bottom: 1px solid var(--color-border);
+    padding: var(--space-md) 0;
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    transition: box-shadow 0.2s ease;
+}
+
+.trip-summary-bar.is-stuck {
+    box-shadow: var(--shadow-lg);
+}
+
+.trip-summary-content {
+    display: flex;
+    align-items: center;
+    gap: var(--space-lg);
+    flex-wrap: wrap;
+}
+
+.trip-summary-title {
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--color-text-muted);
+    margin: 0;
+    white-space: nowrap;
+}
+
+.trip-summary-stats {
+    display: flex;
+    align-items: stretch;
+    gap: var(--space-sm);
+    flex: 1;
+}
+
+.summary-stat-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: var(--color-bg);
+    border-radius: var(--radius-md);
+    padding: var(--space-sm) var(--space-md);
+    min-width: 80px;
+    transition: transform 0.15s ease, background 0.15s ease;
+}
+
+.summary-stat-item:hover {
+    background: rgba(123, 63, 0, 0.05);
+}
+
+.summary-stat-value {
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: var(--color-primary);
+    line-height: 1.2;
+}
+
+.summary-stat-label {
+    font-size: 0.6875rem;
+    color: var(--color-text-muted);
+    text-transform: lowercase;
+    white-space: nowrap;
+}
+
+/* Time estimate has special styling */
+.summary-time-estimate {
+    background: linear-gradient(135deg, rgba(123,63,0,0.08) 0%, rgba(230,184,0,0.08) 100%);
+    border: 1px solid rgba(123,63,0,0.15);
+    min-width: 120px;
+}
+
+.summary-time-estimate .summary-stat-value {
+    font-size: 1rem;
+}
+
+/* Download All button */
+.btn-download-all {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-sm);
+    padding: var(--space-sm) var(--space-md);
+    background: var(--color-primary);
+    color: white;
+    border: none;
+    border-radius: var(--radius-md);
+    font-family: inherit;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+    margin-left: auto;
+}
+
+.btn-download-all:hover {
+    background: var(--color-primary-dark);
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-md);
+}
+
+.btn-download-all:active {
+    transform: translateY(0);
+}
+
+.btn-download-all .icon {
+    font-size: 1rem;
+}
+
+/* Trip summary header (button + title wrapper) */
+.trip-summary-header {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+}
+
+/* Responsive trip summary */
+@media (max-width: 768px) {
+    .trip-summary-content {
+        flex-direction: column;
+        align-items: stretch;
+        gap: var(--space-md);
+    }
+
+    .trip-summary-header {
+        justify-content: center;
+    }
+
+    .trip-summary-title {
+        text-align: center;
+    }
+
+    .trip-summary-stats {
+        justify-content: center;
+        flex-wrap: wrap;
+    }
+
+    .summary-stat-item {
+        flex: 1;
+        min-width: 70px;
+    }
+
+    .btn-download-all {
+        margin-left: 0;
+        justify-content: center;
+    }
+}
+
+@media (max-width: 480px) {
+    .trip-summary-bar {
+        padding: var(--space-sm) 0;
+    }
+
+    .trip-summary-stats {
+        gap: var(--space-xs);
+    }
+
+    .summary-stat-item {
+        padding: var(--space-xs) var(--space-sm);
+        min-width: 60px;
+    }
+
+    .summary-stat-value {
+        font-size: 1rem;
+    }
+
+    .summary-stat-label {
+        font-size: 0.625rem;
+    }
+
+    .summary-time-estimate {
+        min-width: 90px;
+    }
+
+    .summary-time-estimate .summary-stat-value {
+        font-size: 0.875rem;
+    }
+}
+
+/* ==============================================
+   Mini Elevation Profiles
+   ============================================== */
+
+.mini-elevation-profile {
+    width: 100%;
+    height: 40px;
+    margin-top: var(--space-sm);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    cursor: pointer;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+    background: var(--color-bg);
+}
+
+.mini-elevation-profile:hover {
+    transform: scale(1.02);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.mini-elevation-profile svg {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+/* Elevation profile in route options (comparison cards) */
+.route-option .mini-elevation-profile {
+    height: 32px;
+    margin-top: var(--space-xs);
+}
+
+/* Elevation profile colors based on difficulty */
+.mini-elevation-profile[data-difficulty="1"] .elevation-fill {
+    fill: url(#elevGradientEasy);
+}
+
+.mini-elevation-profile[data-difficulty="2"] .elevation-fill {
+    fill: url(#elevGradientModerate);
+}
+
+.mini-elevation-profile[data-difficulty="3"] .elevation-fill {
+    fill: url(#elevGradientHard);
+}
+
+.mini-elevation-profile[data-difficulty="4"] .elevation-fill {
+    fill: url(#elevGradientEpic);
+}
+
+/* Line stroke colors */
+.mini-elevation-profile[data-difficulty="1"] .elevation-line {
+    stroke: var(--elev-easy);
+}
+
+.mini-elevation-profile[data-difficulty="2"] .elevation-line {
+    stroke: var(--elev-moderate);
+}
+
+.mini-elevation-profile[data-difficulty="3"] .elevation-line {
+    stroke: var(--elev-hard);
+}
+
+.mini-elevation-profile[data-difficulty="4"] .elevation-line {
+    stroke: var(--elev-extreme);
+}
+
+/* Warmup card profile - wider */
+.route-card.warmup .mini-elevation-profile {
+    max-width: 300px;
+    grid-column: 1;
+}
+
+/* ==============================================
+   Route Comparison Table
+   ============================================== */
+
+.route-comparison-section {
+    margin-top: var(--space-2xl);
+    padding: var(--space-xl);
+    background: var(--color-surface);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-md);
+    border: 1px solid var(--color-border);
+}
+
+.comparison-title {
+    font-family: var(--font-display);
+    font-size: 1.5rem;
+    color: var(--color-primary);
+    text-align: center;
+    margin: 0 0 var(--space-sm);
+}
+
+.comparison-subtitle {
+    text-align: center;
+    color: var(--color-text-muted);
+    font-size: 0.9375rem;
+    margin: 0 0 var(--space-lg);
+}
+
+.comparison-table-wrapper {
+    overflow-x: auto;
+    margin: 0 calc(-1 * var(--space-md));
+    padding: 0 var(--space-md);
+}
+
+.comparison-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9375rem;
+}
+
+.comparison-table th,
+.comparison-table td {
+    padding: var(--space-md) var(--space-lg);
+    text-align: center;
+    border-bottom: 1px solid var(--color-border);
+}
+
+.comparison-table th {
+    font-weight: 600;
+    color: var(--color-text);
+    background: var(--color-bg);
+    white-space: nowrap;
+}
+
+.comparison-table th.metric-col {
+    text-align: left;
+    width: 30%;
+}
+
+.comparison-table th.option-col {
+    width: 25%;
+    position: relative;
+}
+
+.comparison-table th.delta-col {
+    width: 20%;
+    color: var(--color-text-muted);
+}
+
+.comparison-table th .col-label {
+    display: block;
+    font-size: 1rem;
+}
+
+/* Easier/Harder badges */
+.easier-badge,
+.harder-badge {
+    display: inline-block;
+    margin-top: var(--space-xs);
+    padding: 2px var(--space-sm);
+    border-radius: var(--radius-sm);
+    font-size: 0.6875rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.easier-badge {
+    background: var(--elev-easy);
+    color: white;
+}
+
+.harder-badge {
+    background: var(--color-ventoux);
+    color: white;
+}
+
+/* Standard column styling (easier option) */
+.comparison-table th.standard-col {
+    background: linear-gradient(180deg, rgba(34, 197, 94, 0.1) 0%, var(--color-bg) 100%);
+    border-left: 3px solid var(--elev-easy);
+}
+
+.comparison-table td.standard-col {
+    background: rgba(34, 197, 94, 0.03);
+    border-left: 3px solid var(--elev-easy);
+}
+
+/* Long column styling */
+.comparison-table th.long-col {
+    background: linear-gradient(180deg, rgba(74, 144, 164, 0.1) 0%, var(--color-bg) 100%);
+}
+
+.comparison-table td.long-col {
+    background: rgba(74, 144, 164, 0.03);
+}
+
+/* Table body cells */
+.comparison-table td {
+    color: var(--color-text);
+}
+
+.comparison-table td.metric-col {
+    text-align: left;
+    font-weight: 500;
+    color: var(--color-text-muted);
+}
+
+.comparison-table td .value {
+    font-size: 1.125rem;
+    font-weight: 700;
+    color: var(--color-primary);
+    display: block;
+}
+
+.comparison-table td.standard-col .value {
+    color: var(--elev-easy);
+}
+
+.comparison-table td.long-col .value {
+    color: var(--color-ventoux);
+}
+
+.comparison-table td .unit {
+    font-size: 0.75rem;
+    color: var(--color-text-muted);
+    font-weight: 400;
+}
+
+/* Delta column styling */
+.comparison-table td.delta-col {
+    color: var(--color-text-muted);
+    font-size: 0.875rem;
+}
+
+.comparison-table td.delta-col .delta-value {
+    color: var(--color-warning);
+    font-weight: 600;
+}
+
+/* Personalized rows (time/energy) - visual distinction */
+.comparison-table tr.personalized-row td {
+    background: linear-gradient(90deg, rgba(123, 63, 0, 0.02) 0%, transparent 50%, rgba(123, 63, 0, 0.02) 100%);
+    border-top: 1px dashed var(--color-border);
+}
+
+.comparison-table tr.personalized-row td.metric-col {
+    position: relative;
+}
+
+.comparison-table tr.personalized-row td.metric-col::before {
+    content: '\1F464'; /* Person silhouette emoji */
+    margin-right: var(--space-xs);
+    font-size: 0.875rem;
+}
+
+/* Hidden row state */
+.comparison-table tr.hidden-row {
+    display: none;
+}
+
+/* Comparison note */
+.comparison-note {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-sm);
+    margin: var(--space-lg) 0 0;
+    padding: var(--space-md);
+    background: var(--color-bg);
+    border-radius: var(--radius-md);
+    font-size: 0.8125rem;
+    color: var(--color-text-muted);
+    line-height: 1.5;
+}
+
+.comparison-note .note-icon {
+    font-size: 1rem;
+    color: var(--color-ventoux);
+    flex-shrink: 0;
+}
+
+.comparison-note.has-profile {
+    background: linear-gradient(135deg, rgba(34, 197, 94, 0.08) 0%, rgba(34, 197, 94, 0.03) 100%);
+    border-left: 3px solid var(--elev-easy);
+}
+
+.comparison-note.has-profile .note-icon {
+    color: var(--elev-easy);
+}
+
+/* Last row no bottom border */
+.comparison-table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .route-comparison-section {
+        padding: var(--space-lg);
+        margin-top: var(--space-xl);
+    }
+
+    .comparison-title {
+        font-size: 1.25rem;
+    }
+
+    .comparison-table th,
+    .comparison-table td {
+        padding: var(--space-sm) var(--space-md);
+    }
+
+    .comparison-table td .value {
+        font-size: 1rem;
+    }
+
+    .comparison-table th .col-label {
+        font-size: 0.875rem;
+    }
+}
+
+@media (max-width: 480px) {
+    .route-comparison-section {
+        padding: var(--space-md);
+    }
+
+    .comparison-table th,
+    .comparison-table td {
+        padding: var(--space-sm);
+    }
+
+    .comparison-table th.metric-col,
+    .comparison-table td.metric-col {
+        width: auto;
+        min-width: 80px;
+    }
+
+    .comparison-table td .value {
+        font-size: 0.9375rem;
+    }
+
+    .comparison-table td .unit {
+        display: block;
+        font-size: 0.6875rem;
+    }
+
+    .easier-badge,
+    .harder-badge {
+        font-size: 0.5625rem;
+        padding: 1px var(--space-xs);
+    }
+}
+
+/* ==============================================
+   Training Countdown Section
+   ============================================== */
+
+.training-countdown-section {
+    margin-top: var(--space-2xl);
+    padding: var(--space-xl);
+    background: var(--color-surface);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-md);
+    border: 1px solid var(--color-border);
+}
+
+.training-countdown-title {
+    font-family: var(--font-display);
+    font-size: 1.5rem;
+    color: var(--color-primary);
+    text-align: center;
+    margin: 0 0 var(--space-lg);
+}
+
+.training-loading {
+    text-align: center;
+    padding: var(--space-xl);
+    color: var(--color-text-muted);
+    font-style: italic;
+}
+
+/* Countdown header with weeks display */
+.training-countdown-header {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-xl);
+    margin-bottom: var(--space-xl);
+    flex-wrap: wrap;
+}
+
+.countdown-weeks {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-dark) 100%);
+    color: white;
+    padding: var(--space-lg) var(--space-2xl);
+    border-radius: var(--radius-lg);
+    min-width: 160px;
+}
+
+.countdown-weeks .weeks-value {
+    font-size: 3rem;
+    font-weight: 700;
+    line-height: 1;
+}
+
+.countdown-weeks .weeks-label {
+    font-size: 0.875rem;
+    opacity: 0.9;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.countdown-event-date {
+    text-align: center;
+}
+
+.countdown-event-date .event-label {
+    font-size: 0.75rem;
+    color: var(--color-text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: var(--space-xs);
+}
+
+.countdown-event-date .event-date {
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: var(--color-text);
+}
+
+/* Training phase card */
+.training-phase-card {
+    background: var(--color-bg);
+    border-radius: var(--radius-lg);
+    padding: var(--space-lg);
+    margin-bottom: var(--space-lg);
+    border-left: 4px solid var(--color-primary);
+}
+
+.training-phase-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: var(--space-md);
+    flex-wrap: wrap;
+    gap: var(--space-sm);
+}
+
+.training-phase-name {
+    font-size: 1.125rem;
+    font-weight: 600;
+    color: var(--color-text);
+    margin: 0;
+}
+
+.training-phase-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-xs);
+    padding: var(--space-xs) var(--space-md);
+    border-radius: var(--radius-sm);
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.training-phase-badge.base {
+    background: var(--elev-easy);
+    color: white;
+}
+
+.training-phase-badge.build {
+    background: var(--elev-moderate);
+    color: var(--color-text);
+}
+
+.training-phase-badge.peak {
+    background: var(--elev-hard);
+    color: white;
+}
+
+.training-phase-badge.taper {
+    background: var(--color-ventoux);
+    color: white;
+}
+
+.training-phase-badge.event {
+    background: var(--color-primary);
+    color: white;
+}
+
+.training-phase-description {
+    color: var(--color-text-muted);
+    font-size: 0.9375rem;
+    margin: 0 0 var(--space-md);
+    line-height: 1.6;
+}
+
+/* Volume recommendation */
+.training-volume {
+    display: flex;
+    align-items: center;
+    gap: var(--space-lg);
+    padding: var(--space-md);
+    background: var(--color-surface);
+    border-radius: var(--radius-md);
+    margin-bottom: var(--space-md);
+}
+
+.volume-icon {
+    font-size: 1.5rem;
+}
+
+.volume-details {
+    flex: 1;
+}
+
+.volume-label {
+    font-size: 0.75rem;
+    color: var(--color-text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.volume-value {
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: var(--color-primary);
+}
+
+/* Key workouts grid */
+.key-workouts {
+    margin-top: var(--space-md);
+}
+
+.key-workouts-title {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--color-text);
+    margin: 0 0 var(--space-md);
+}
+
+.workouts-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: var(--space-md);
+}
+
+.workout-card {
+    background: var(--color-surface);
+    border-radius: var(--radius-md);
+    padding: var(--space-md);
+    border: 1px solid var(--color-border);
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.workout-card:hover {
+    border-color: var(--color-primary);
+    box-shadow: var(--shadow-sm);
+}
+
+.workout-header {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    margin-bottom: var(--space-sm);
+}
+
+.workout-icon {
+    font-size: 1.25rem;
+}
+
+.workout-name {
+    font-weight: 600;
+    font-size: 0.9375rem;
+    color: var(--color-text);
+}
+
+.workout-description {
+    font-size: 0.8125rem;
+    color: var(--color-text-muted);
+    margin: 0;
+    line-height: 1.5;
+}
+
+.workout-target {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-xs);
+    margin-top: var(--space-sm);
+    padding: var(--space-xs) var(--space-sm);
+    background: var(--color-bg);
+    border-radius: var(--radius-sm);
+    font-size: 0.75rem;
+    color: var(--color-text-muted);
+}
+
+/* Ventoux preparation callout */
+.ventoux-prep-callout {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-md);
+    margin-top: var(--space-lg);
+    padding: var(--space-md);
+    background: linear-gradient(135deg, rgba(74, 144, 164, 0.1) 0%, rgba(74, 144, 164, 0.05) 100%);
+    border-radius: var(--radius-md);
+    border-left: 3px solid var(--color-ventoux);
+}
+
+.ventoux-prep-callout .callout-icon {
+    font-size: 1.5rem;
+    flex-shrink: 0;
+}
+
+.ventoux-prep-callout .callout-content h4 {
+    font-size: 0.9375rem;
+    font-weight: 600;
+    color: var(--color-ventoux);
+    margin: 0 0 var(--space-xs);
+}
+
+.ventoux-prep-callout .callout-content p {
+    font-size: 0.8125rem;
+    color: var(--color-text-muted);
+    margin: 0;
+    line-height: 1.5;
+}
+
+/* Personalized training note */
+.personalized-training-note {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-sm);
+    margin-top: var(--space-lg);
+    padding: var(--space-md);
+    background: linear-gradient(135deg, rgba(123, 63, 0, 0.05) 0%, rgba(230, 184, 0, 0.05) 100%);
+    border-radius: var(--radius-md);
+    border-left: 3px solid var(--color-primary);
+}
+
+.personalized-training-note .note-icon {
+    font-size: 1rem;
+    flex-shrink: 0;
+}
+
+.personalized-training-note .note-content {
+    font-size: 0.8125rem;
+    color: var(--color-text-muted);
+    line-height: 1.5;
+}
+
+.personalized-training-note .ftp-value {
+    font-weight: 600;
+    color: var(--color-primary);
+}
+
+/* Event complete / past event state */
+.training-event-complete {
+    text-align: center;
+    padding: var(--space-2xl);
+}
+
+.training-event-complete .complete-icon {
+    font-size: 4rem;
+    margin-bottom: var(--space-md);
+}
+
+.training-event-complete h4 {
+    font-size: 1.5rem;
+    font-weight: 600;
+    color: var(--color-primary);
+    margin: 0 0 var(--space-sm);
+}
+
+.training-event-complete p {
+    font-size: 1rem;
+    color: var(--color-text-muted);
+    margin: 0;
+}
+
+/* Taper week special styling */
+.training-phase-card.taper-week {
+    border-left-color: var(--color-ventoux);
+    background: linear-gradient(135deg, rgba(74, 144, 164, 0.08) 0%, var(--color-bg) 100%);
+}
+
+.training-phase-card.event-week {
+    border-left-color: var(--color-accent);
+    background: linear-gradient(135deg, rgba(230, 184, 0, 0.08) 0%, var(--color-bg) 100%);
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .training-countdown-section {
+        padding: var(--space-lg);
+    }
+
+    .training-countdown-header {
+        flex-direction: column;
+        gap: var(--space-md);
+    }
+
+    .countdown-weeks {
+        padding: var(--space-md) var(--space-xl);
+        min-width: auto;
+    }
+
+    .countdown-weeks .weeks-value {
+        font-size: 2.5rem;
+    }
+
+    .training-volume {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: var(--space-sm);
+    }
+
+    .workouts-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 480px) {
+    .training-countdown-section {
+        padding: var(--space-md);
+        margin-top: var(--space-xl);
+    }
+
+    .training-countdown-title {
+        font-size: 1.25rem;
+    }
+
+    .countdown-weeks .weeks-value {
+        font-size: 2rem;
+    }
+
+    .training-phase-header {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .training-phase-card {
+        padding: var(--space-md);
+    }
+}
+
 /* Print styles */
 @media print {
     .hero-map,
     .btn-flyover,
-    .weather-widget {
+    .weather-widget,
+    .trip-summary-bar {
         display: none;
     }
 
@@ -1366,5 +2524,10 @@ footer a:hover {
 
     .dropdown {
         display: none;
+    }
+
+    .route-comparison-section {
+        box-shadow: none;
+        border: 1px solid var(--color-border);
     }
 }

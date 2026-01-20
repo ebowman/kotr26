@@ -1,6 +1,59 @@
-/* KOTR 2026 - Mobile Responsive Styles */
+/* ==============================================
+   KOTR 2026 - Mobile Responsive Styles
+   Comprehensive mobile optimization pass
 
-/* Tablet and below */
+   Breakpoints:
+   - Mobile: max-width 480px
+   - Tablet: max-width 768px
+   - Small desktop: max-width 1024px
+   ============================================== */
+
+/* ==============================================
+   BASE MOBILE OPTIMIZATIONS
+   Prevent iOS zoom on form inputs (16px minimum)
+   ============================================== */
+
+/* Ensure minimum 16px font size on inputs to prevent iOS zoom */
+input, select, textarea {
+    font-size: 16px;
+}
+
+/* ==============================================
+   SMALL DESKTOP (max-width: 1024px)
+   ============================================== */
+
+@media (max-width: 1024px) {
+    :root {
+        --space-xl: 1.75rem;
+        --space-2xl: 2.5rem;
+    }
+
+    /* Route cards grid - 2 columns on small desktop */
+    .route-cards {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    /* Day 1 warmup spans full width */
+    .route-card.warmup {
+        grid-column: 1 / -1;
+    }
+
+    /* Day 4 spans full width on its own row */
+    .route-card[data-day="4"] {
+        grid-column: 1 / -1;
+    }
+
+    .route-card[data-day="4"] .route-comparison {
+        max-width: 600px;
+        margin-left: auto;
+        margin-right: auto;
+    }
+}
+
+/* ==============================================
+   TABLET (max-width: 768px)
+   ============================================== */
+
 @media (max-width: 768px) {
     :root {
         --space-lg: 1.25rem;
@@ -8,6 +61,7 @@
         --space-2xl: 2rem;
     }
 
+    /* --- HERO SECTION --- */
     .hero {
         min-height: 50vh;
     }
@@ -25,6 +79,37 @@
         text-align: center;
     }
 
+    /* --- TRIP SUMMARY BAR --- */
+    /* Stack content vertically for better mobile readability */
+    .trip-summary-content {
+        flex-direction: column;
+        align-items: stretch;
+        gap: var(--space-md);
+    }
+
+    .trip-summary-title {
+        text-align: center;
+    }
+
+    .trip-summary-stats {
+        justify-content: center;
+        flex-wrap: wrap;
+    }
+
+    .summary-stat-item {
+        flex: 1;
+        min-width: 70px;
+    }
+
+    .btn-download-all {
+        margin-left: 0;
+        justify-content: center;
+        /* Ensure 44px touch target */
+        min-height: 44px;
+        padding: var(--space-sm) var(--space-lg);
+    }
+
+    /* --- ROUTE CARDS --- */
     .route-cards {
         grid-template-columns: 1fr;
         gap: var(--space-md);
@@ -32,7 +117,7 @@
 
     /* Reset warmup banner to stack on tablet/mobile */
     .route-card.warmup {
-        display: block; /* Reset grid to normal block */
+        display: block;
     }
 
     .route-card.warmup h3 {
@@ -45,6 +130,11 @@
 
     .route-card.warmup .route-description {
         margin-bottom: var(--space-md);
+    }
+
+    .route-card.warmup .card-actions {
+        flex-direction: row;
+        flex-wrap: wrap;
     }
 
     /* Route comparison stays side-by-side on tablet */
@@ -60,7 +150,24 @@
         font-size: 1.25rem;
     }
 
-    /* Action groups stack on mobile */
+    /* --- ROUTE OPTION TOUCH TARGETS --- */
+    /* Ensure route options are easily tappable (min 44px) */
+    .route-option {
+        min-height: 120px;
+        padding: var(--space-md);
+    }
+
+    /* Selection checkmarks - ensure visibility */
+    .route-option.active::before {
+        width: 28px;
+        height: 28px;
+        font-size: 16px;
+        top: -12px;
+        right: -12px;
+    }
+
+    /* --- CARD ACTIONS --- */
+    /* Action groups stack on tablet */
     .card-actions {
         flex-direction: column;
     }
@@ -73,19 +180,154 @@
     .card-actions .btn {
         width: 100%;
         justify-content: center;
+        /* Ensure 44px minimum touch target */
+        min-height: 44px;
     }
 
+    /* --- MINI ELEVATION PROFILES --- */
+    /* Scale profiles appropriately on tablet */
+    .mini-elevation-profile {
+        height: 36px;
+    }
+
+    .route-option .mini-elevation-profile {
+        height: 28px;
+    }
+
+    /* --- ROUTE COMPARISON TABLE --- */
+    .route-comparison-section {
+        padding: var(--space-lg);
+        margin-top: var(--space-xl);
+    }
+
+    .comparison-title {
+        font-size: 1.25rem;
+    }
+
+    .comparison-table th,
+    .comparison-table td {
+        padding: var(--space-sm) var(--space-md);
+    }
+
+    .comparison-table td .value {
+        font-size: 1rem;
+    }
+
+    .comparison-table th .col-label {
+        font-size: 0.875rem;
+    }
+
+    /* Make table horizontally scrollable */
+    .comparison-table-wrapper {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        margin: 0 calc(-1 * var(--space-lg));
+        padding: 0 var(--space-lg);
+    }
+
+    .comparison-table {
+        min-width: 500px;
+    }
+
+    /* --- TRAINING COUNTDOWN --- */
+    .training-countdown-section {
+        padding: var(--space-lg);
+    }
+
+    .training-countdown-header {
+        flex-direction: column;
+        gap: var(--space-md);
+    }
+
+    .countdown-weeks {
+        padding: var(--space-md) var(--space-xl);
+        min-width: auto;
+    }
+
+    .countdown-weeks .weeks-value {
+        font-size: 2.5rem;
+    }
+
+    .training-volume {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: var(--space-sm);
+    }
+
+    /* Workout cards - stack vertically */
+    .workouts-grid {
+        grid-template-columns: 1fr;
+    }
+
+    /* Workout cards - ensure touch targets */
+    .workout-card {
+        padding: var(--space-md);
+        min-height: 100px;
+    }
+
+    /* --- VENTOUX CALLOUT --- */
+    /* Prevent overflow on narrow screens */
+    .ventoux-prep-callout {
+        flex-direction: column;
+        gap: var(--space-sm);
+    }
+
+    .ventoux-prep-callout .callout-content p {
+        word-wrap: break-word;
+        overflow-wrap: break-word;
+    }
+
+    /* --- PROFILE SETUP PROMPT --- */
+    .profile-prompt-card {
+        padding: var(--space-lg);
+    }
+
+    .profile-prompt-benefits {
+        grid-template-columns: 1fr;
+    }
+
+    .profile-prompt-actions {
+        flex-direction: column;
+    }
+
+    /* Full-width buttons on mobile */
+    .profile-prompt-actions .btn {
+        width: 100%;
+        min-height: 44px;
+    }
+
+    /* --- WEATHER WIDGET --- */
     .weather-widget {
         grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
     }
 
+    /* --- INFO SECTION --- */
     .info-grid {
         grid-template-columns: 1fr;
     }
+
+    /* --- RIDER SETTINGS BUTTON --- */
+    /* Adjust position for mobile */
+    .rider-settings-btn {
+        bottom: var(--space-md) !important;
+        left: var(--space-md) !important;
+        padding: var(--space-sm) var(--space-md);
+        min-height: 44px;
+    }
+
+    /* --- ROUTE ANALYSIS --- */
+    .route-analysis-stats {
+        grid-template-columns: repeat(3, 1fr);
+        gap: var(--space-sm);
+    }
 }
 
-/* Mobile phones */
+/* ==============================================
+   MOBILE PHONES (max-width: 480px)
+   ============================================== */
+
 @media (max-width: 480px) {
+    /* --- HERO SECTION --- */
     .hero {
         min-height: 45vh;
     }
@@ -102,6 +344,47 @@
         padding: var(--space-sm) var(--space-md);
     }
 
+    /* --- TRIP SUMMARY BAR --- */
+    /* Compact layout for narrow screens */
+    .trip-summary-bar {
+        padding: var(--space-sm) 0;
+    }
+
+    .trip-summary-stats {
+        gap: var(--space-xs);
+        /* Allow stats to wrap to multiple rows */
+        flex-wrap: wrap;
+    }
+
+    .summary-stat-item {
+        padding: var(--space-xs) var(--space-sm);
+        min-width: 60px;
+        flex: 1 1 auto;
+    }
+
+    .summary-stat-value {
+        font-size: 1rem;
+    }
+
+    .summary-stat-label {
+        font-size: 0.625rem;
+    }
+
+    .summary-time-estimate {
+        min-width: 90px;
+    }
+
+    .summary-time-estimate .summary-stat-value {
+        font-size: 0.875rem;
+    }
+
+    /* Download button - full width on mobile */
+    .btn-download-all {
+        width: 100%;
+        margin-top: var(--space-xs);
+    }
+
+    /* --- ROUTE CARDS --- */
     .route-card {
         padding: var(--space-md);
     }
@@ -110,40 +393,48 @@
         font-size: 1.125rem;
     }
 
-    .ventoux-callout {
-        flex-direction: column;
-        gap: var(--space-sm);
-    }
-
-    .route-options {
-        flex-wrap: wrap;
-    }
-
-    .btn-option {
-        flex: 1;
-        min-width: 80px;
-        justify-content: center;
-    }
-
-    /* Route comparison mobile layout */
+    /* --- ROUTE COMPARISON (Short/Long toggle) --- */
+    /* Stack vertically on narrow screens */
     .route-comparison {
         grid-template-columns: 1fr;
         gap: var(--space-sm);
     }
 
     .route-option {
-        padding: var(--space-sm) var(--space-md);
+        padding: var(--space-md);
+        /* Ensure easy tapping - minimum 44px touch target */
+        min-height: 80px;
     }
 
     .option-header {
-        font-size: 0.6875rem;
+        font-size: 0.75rem;
     }
 
     .stat-row .stat-value {
         font-size: 1.125rem;
     }
 
-    /* Single stats row mobile */
+    /* Selection checkmarks - stay visible when stacked */
+    .route-option.active::before {
+        top: 8px;
+        right: 8px;
+        width: 24px;
+        height: 24px;
+        font-size: 14px;
+    }
+
+    /* --- MINI ELEVATION PROFILES --- */
+    /* Scale down for mobile */
+    .mini-elevation-profile {
+        height: 32px;
+    }
+
+    .route-option .mini-elevation-profile {
+        height: 24px;
+        margin-top: var(--space-xs);
+    }
+
+    /* --- ROUTE STATS SINGLE (Day 1) --- */
     .route-stats-single {
         flex-direction: column;
         align-items: flex-start;
@@ -154,7 +445,17 @@
         margin-left: 0;
     }
 
-    /* Action groups mobile */
+    .route-stats-single .stat {
+        display: flex;
+        align-items: baseline;
+        gap: var(--space-xs);
+    }
+
+    .route-stats-single .difficulty {
+        justify-content: flex-start;
+    }
+
+    /* --- CARD ACTIONS --- */
     .card-actions {
         flex-direction: column;
     }
@@ -166,12 +467,178 @@
     .action-group .btn {
         width: 100%;
         justify-content: center;
+        min-height: 48px; /* Slightly larger for easy tapping */
     }
 
     .dropdown {
         min-width: 100%;
     }
 
+    .dropdown-item {
+        min-height: 48px;
+        display: flex;
+        align-items: center;
+        padding: var(--space-md);
+    }
+
+    /* --- ROUTE COMPARISON TABLE --- */
+    .route-comparison-section {
+        padding: var(--space-md);
+    }
+
+    .comparison-table-wrapper {
+        margin: 0 calc(-1 * var(--space-md));
+        padding: 0 var(--space-md);
+    }
+
+    .comparison-table {
+        min-width: 440px;
+    }
+
+    .comparison-table th,
+    .comparison-table td {
+        padding: var(--space-sm);
+    }
+
+    .comparison-table th.metric-col,
+    .comparison-table td.metric-col {
+        width: auto;
+        min-width: 80px;
+    }
+
+    .comparison-table td .value {
+        font-size: 0.9375rem;
+    }
+
+    .comparison-table td .unit {
+        display: block;
+        font-size: 0.6875rem;
+    }
+
+    .easier-badge,
+    .harder-badge {
+        font-size: 0.5625rem;
+        padding: 1px var(--space-xs);
+    }
+
+    /* Comparison note - readable text */
+    .comparison-note {
+        padding: var(--space-sm);
+        font-size: 0.75rem;
+    }
+
+    /* --- TRAINING COUNTDOWN --- */
+    .training-countdown-section {
+        padding: var(--space-md);
+        margin-top: var(--space-xl);
+    }
+
+    .training-countdown-title {
+        font-size: 1.25rem;
+    }
+
+    /* Countdown number - scale down but stay prominent */
+    .countdown-weeks {
+        padding: var(--space-md) var(--space-lg);
+    }
+
+    .countdown-weeks .weeks-value {
+        font-size: 2rem;
+    }
+
+    .countdown-weeks .weeks-label {
+        font-size: 0.75rem;
+    }
+
+    .countdown-event-date .event-date {
+        font-size: 1rem;
+    }
+
+    /* Training phase card */
+    .training-phase-header {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .training-phase-card {
+        padding: var(--space-md);
+    }
+
+    .training-phase-name {
+        font-size: 1rem;
+    }
+
+    .training-phase-description {
+        font-size: 0.875rem;
+    }
+
+    /* Volume recommendation */
+    .volume-value {
+        font-size: 1rem;
+    }
+
+    /* Workout cards - full width, stack vertically */
+    .workouts-grid {
+        grid-template-columns: 1fr;
+        gap: var(--space-sm);
+    }
+
+    .workout-card {
+        padding: var(--space-md);
+    }
+
+    .workout-name {
+        font-size: 0.875rem;
+    }
+
+    .workout-description {
+        font-size: 0.75rem;
+    }
+
+    /* --- VENTOUX CALLOUT --- */
+    /* Ensure no overflow */
+    .ventoux-prep-callout {
+        padding: var(--space-md);
+    }
+
+    .ventoux-prep-callout .callout-icon {
+        font-size: 1.25rem;
+    }
+
+    .ventoux-prep-callout .callout-content h4 {
+        font-size: 0.875rem;
+    }
+
+    .ventoux-prep-callout .callout-content p {
+        font-size: 0.75rem;
+    }
+
+    /* --- PROFILE SETUP PROMPT --- */
+    .profile-prompt-card h3 {
+        font-size: 1.25rem;
+    }
+
+    .profile-prompt-intro {
+        font-size: 0.875rem;
+    }
+
+    .profile-prompt-benefits li {
+        font-size: 0.8125rem;
+        padding: var(--space-xs) var(--space-sm);
+    }
+
+    .profile-prompt-benefits li::before {
+        width: 18px;
+        height: 18px;
+        font-size: 0.625rem;
+    }
+
+    .profile-prompt-actions .btn {
+        padding: var(--space-md);
+        font-size: 1rem;
+    }
+
+    /* --- WEATHER WIDGET --- */
     .weather-widget {
         grid-template-columns: repeat(3, 1fr);
     }
@@ -188,6 +655,11 @@
         font-size: 1rem;
     }
 
+    .weather-temp-range {
+        font-size: 0.625rem;
+    }
+
+    /* --- SECTION HEADERS --- */
     .routes-section h2,
     .weather-section h2 {
         font-size: 1.5rem;
@@ -197,26 +669,150 @@
         font-size: 0.875rem;
         padding: 0 var(--space-sm);
     }
+
+    /* --- ROUTE ANALYSIS (FOR YOU section) --- */
+    /* Stack analysis stats vertically to prevent overflow */
+    .route-analysis-stats {
+        grid-template-columns: 1fr;
+        gap: var(--space-sm);
+    }
+
+    .analysis-stat {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        text-align: left;
+    }
+
+    .route-analysis-header {
+        font-size: 0.6875rem;
+    }
+
+    .analysis-stat-value {
+        font-size: 1rem;
+    }
+
+    .analysis-stat-label {
+        font-size: 0.625rem;
+    }
+
+    /* --- RIDER PROFILE MODAL --- */
+    .rider-profile-content {
+        padding: var(--space-lg);
+    }
+
+    .rider-profile-header h2 {
+        font-size: 1.25rem;
+    }
+
+    .rider-profile-actions {
+        flex-direction: column;
+    }
+
+    .rider-profile-actions .btn {
+        min-height: 48px;
+    }
+
+    /* --- PERSONALIZED TRAINING NOTE --- */
+    .personalized-training-note {
+        padding: var(--space-sm);
+    }
+
+    .personalized-training-note .note-content {
+        font-size: 0.75rem;
+    }
 }
 
-/* Landscape mobile */
+/* ==============================================
+   EXTRA SMALL SCREENS (max-width: 320px)
+   For very narrow devices like iPhone SE
+   ============================================== */
+
+@media (max-width: 320px) {
+    /* Trip summary - extra compact */
+    .trip-summary-stats {
+        /* Stack into 2x2 grid */
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: var(--space-xs);
+    }
+
+    .summary-stat-item {
+        min-width: auto;
+    }
+
+    .summary-time-estimate {
+        grid-column: 1 / -1;
+    }
+
+    /* Route comparison table - allow horizontal scroll */
+    .comparison-table {
+        min-width: 400px;
+    }
+
+    /* Countdown weeks number */
+    .countdown-weeks .weeks-value {
+        font-size: 1.75rem;
+    }
+
+    /* Weather widget - 2 columns */
+    .weather-widget {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+/* ==============================================
+   LANDSCAPE MOBILE
+   ============================================== */
+
 @media (max-width: 768px) and (orientation: landscape) {
     .hero {
         min-height: 70vh;
     }
+
+    /* Trip summary - horizontal on landscape */
+    .trip-summary-content {
+        flex-direction: row;
+        flex-wrap: wrap;
+    }
+
+    .trip-summary-stats {
+        flex: 1;
+    }
+
+    /* Route comparison - side by side in landscape */
+    .route-comparison {
+        grid-template-columns: 1fr 1fr;
+    }
+
+    /* Training countdown header - horizontal */
+    .training-countdown-header {
+        flex-direction: row;
+    }
 }
 
-/* Touch device optimizations */
+/* ==============================================
+   TOUCH DEVICE OPTIMIZATIONS
+   Ensures 44x44px minimum touch targets
+   ============================================== */
+
 @media (hover: none) and (pointer: coarse) {
+    /* All buttons - minimum 44px touch target */
     .btn {
         min-height: 44px;
         padding: var(--space-sm) var(--space-lg);
     }
 
     .btn-option {
-        min-height: 40px;
+        min-height: 44px;
     }
 
+    /* Route options - larger touch target */
+    .route-option {
+        min-height: 100px;
+    }
+
+    /* Disable hover effects on touch devices */
     .route-card:hover {
         transform: none;
     }
@@ -230,21 +826,155 @@
         border-color: var(--color-ventoux);
     }
 
+    .route-option.active:hover {
+        transform: none;
+    }
+
     .weather-day:hover {
         transform: none;
     }
 
-    /* Touch-friendly dropdowns - require tap instead of hover */
-    .action-group .dropdown {
-        /* Start hidden, JS will toggle */
+    .mini-elevation-profile:hover {
+        transform: none;
+        box-shadow: none;
     }
 
+    .workout-card:hover {
+        border-color: var(--color-border);
+        box-shadow: none;
+    }
+
+    /* Dropdown items - larger touch targets */
     .dropdown-item {
+        min-height: 48px;
+        display: flex;
+        align-items: center;
+        padding: var(--space-md);
+    }
+
+    /* Rider settings button - ensure touch target */
+    .rider-settings-btn {
+        min-height: 44px;
+        min-width: 44px;
+    }
+
+    /* Close button on modal */
+    .rider-profile-close {
+        min-width: 44px;
         min-height: 44px;
         display: flex;
         align-items: center;
+        justify-content: center;
+    }
+
+    /* Range sliders - larger thumb for touch */
+    .rider-profile-field input[type="range"]::-webkit-slider-thumb {
+        width: 28px;
+        height: 28px;
+    }
+
+    .rider-profile-field input[type="range"]::-moz-range-thumb {
+        width: 28px;
+        height: 28px;
+    }
+
+    /* FTP help toggle - larger touch target */
+    .ftp-help-toggle {
+        min-height: 44px;
+        padding: var(--space-sm);
     }
 }
+
+/* ==============================================
+   PREVENT HORIZONTAL SCROLLING
+   Ensure no accidental horizontal overflow
+   ============================================== */
+
+html, body {
+    overflow-x: hidden;
+    max-width: 100vw;
+}
+
+.container {
+    overflow-x: hidden;
+}
+
+/* Elements that might cause overflow */
+.ventoux-prep-callout,
+.personalized-training-note,
+.comparison-note,
+.profile-prompt-card,
+.training-phase-card,
+.route-analysis {
+    max-width: 100%;
+    overflow-wrap: break-word;
+    word-wrap: break-word;
+}
+
+/* Long text handling */
+.special-note,
+.workout-description,
+.training-phase-description,
+.callout-content p {
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    hyphens: auto;
+}
+
+/* ==============================================
+   STICKY ELEMENTS
+   Ensure proper behavior on mobile
+   ============================================== */
+
+/* Trip summary bar sticky positioning */
+.trip-summary-bar {
+    position: sticky;
+    position: -webkit-sticky;
+    top: 0;
+    z-index: 50;
+}
+
+/* On mobile, ensure sticky works with safe areas */
+@supports (padding: env(safe-area-inset-top)) {
+    .trip-summary-bar.is-stuck {
+        padding-top: calc(var(--space-md) + env(safe-area-inset-top));
+    }
+
+    @media (max-width: 480px) {
+        .trip-summary-bar.is-stuck {
+            padding-top: calc(var(--space-sm) + env(safe-area-inset-top));
+        }
+    }
+}
+
+/* ==============================================
+   SAFE AREA INSETS (Notched devices)
+   ============================================== */
+
+@supports (padding: env(safe-area-inset-bottom)) {
+    .hero-content {
+        padding-top: calc(var(--space-2xl) + env(safe-area-inset-top));
+    }
+
+    footer {
+        padding-bottom: calc(var(--space-xl) + env(safe-area-inset-bottom));
+    }
+
+    /* Rider settings button - avoid home indicator */
+    .rider-settings-btn {
+        bottom: calc(var(--space-lg) + env(safe-area-inset-bottom)) !important;
+    }
+
+    @media (max-width: 768px) {
+        .rider-settings-btn {
+            bottom: calc(var(--space-md) + env(safe-area-inset-bottom)) !important;
+        }
+    }
+}
+
+/* ==============================================
+   ACCESSIBILITY PREFERENCES
+   ============================================== */
 
 /* High contrast mode */
 @media (prefers-contrast: high) {
@@ -256,9 +986,22 @@
     .btn-option {
         border-width: 2px;
     }
+
+    .route-option {
+        border-width: 2px;
+    }
+
+    .route-option.active {
+        border-width: 3px;
+    }
+
+    .comparison-table th,
+    .comparison-table td {
+        border-width: 2px;
+    }
 }
 
-/* Reduced motion */
+/* Reduced motion - disable animations */
 @media (prefers-reduced-motion: reduce) {
     *,
     *::before,
@@ -271,9 +1014,25 @@
     html {
         scroll-behavior: auto;
     }
+
+    .route-card {
+        animation: none;
+    }
+
+    .dropdown {
+        transition: none;
+    }
+
+    .rider-profile-modal,
+    .rider-profile-content {
+        transition: none;
+    }
 }
 
-/* Dark mode (optional support) */
+/* ==============================================
+   DARK MODE SUPPORT
+   ============================================== */
+
 @media (prefers-color-scheme: dark) {
     :root {
         --color-bg: #1A1A1A;
@@ -307,6 +1066,10 @@
         background: linear-gradient(180deg, rgba(74, 144, 164, 0.2) 0%, var(--color-bg) 100%);
     }
 
+    .route-option.active {
+        background: rgba(123, 63, 0, 0.15);
+    }
+
     .dropdown {
         background: var(--color-surface);
         border-color: var(--color-border);
@@ -324,27 +1087,83 @@
         background: linear-gradient(180deg, rgba(123, 63, 0, 0.2) 0%, var(--color-surface) 100%);
     }
 
-    .ventoux-callout {
+    .ventoux-callout,
+    .ventoux-prep-callout {
         background: linear-gradient(135deg, rgba(74, 144, 164, 0.2) 0%, rgba(74, 144, 164, 0.1) 100%);
+    }
+
+    .profile-prompt-card {
+        background: var(--color-surface);
+    }
+
+    .profile-prompt-benefits li {
+        background: var(--color-bg);
+    }
+
+    .training-phase-card {
+        background: var(--color-bg);
+    }
+
+    .workout-card {
+        background: var(--color-surface);
+    }
+
+    .comparison-table th {
+        background: var(--color-bg);
+    }
+
+    .comparison-table td.short-col {
+        background: rgba(34, 197, 94, 0.08);
+    }
+
+    .comparison-table td.long-col {
+        background: rgba(74, 144, 164, 0.08);
+    }
+
+    .route-comparison-section {
+        background: var(--color-surface);
+    }
+
+    .training-countdown-section {
+        background: var(--color-surface);
+    }
+
+    .rider-profile-content {
+        background: var(--color-surface);
+    }
+
+    .rider-profile-overlay {
+        background: rgba(0,0,0,0.8);
     }
 
     footer {
         background: #0A0A0A;
     }
-}
 
-/* Safe area insets for notched devices */
-@supports (padding: env(safe-area-inset-bottom)) {
-    .hero-content {
-        padding-top: calc(var(--space-2xl) + env(safe-area-inset-top));
+    /* Mini elevation profile background */
+    .mini-elevation-profile {
+        background: rgba(255,255,255,0.05);
     }
 
-    footer {
-        padding-bottom: calc(var(--space-xl) + env(safe-area-inset-bottom));
+    /* Summary stat items */
+    .summary-stat-item {
+        background: var(--color-bg);
+    }
+
+    .summary-time-estimate {
+        background: linear-gradient(135deg, rgba(123,63,0,0.15) 0%, rgba(230,184,0,0.15) 100%);
+    }
+
+    /* Route analysis */
+    .route-analysis {
+        background: linear-gradient(135deg, rgba(123,63,0,0.1) 0%, rgba(230,184,0,0.1) 100%);
     }
 }
 
-/* Flyover page specific mobile styles */
+/* ==============================================
+   FLYOVER PAGE MOBILE STYLES
+   ============================================== */
+
 .flyover-mobile-controls {
     display: none;
 }
@@ -388,5 +1207,40 @@
 
     .mapboxgl-ctrl-attrib {
         font-size: 10px;
+    }
+}
+
+/* ==============================================
+   PRINT STYLES
+   ============================================== */
+
+@media print {
+    .hero-map,
+    .btn-flyover,
+    .weather-widget,
+    .trip-summary-bar,
+    .rider-settings-btn,
+    .dropdown {
+        display: none;
+    }
+
+    .hero {
+        min-height: auto;
+        padding: var(--space-lg);
+    }
+
+    .route-comparison {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .route-comparison-section {
+        box-shadow: none;
+        border: 1px solid var(--color-border);
+    }
+
+    .training-countdown-section {
+        box-shadow: none;
+        border: 1px solid var(--color-border);
     }
 }
