@@ -121,12 +121,14 @@
     let stabilityFallbackActive = false;        // Whether we auto-switched to bird's eye
     let previousCameraMode = null;              // Mode to return to after stabilization
 
-    // Scrubber drag state for overview mode
+    // Scrubber drag state for Google Earth-style transitions
     let isScrubberDragging = false;
     let overviewTransitionProgress = 0; // 0 = normal view, 1 = full overview
     let overviewTargetState = null; // Cached overview camera state
     let shouldReturnFromOverview = false; // Whether to zoom back after drag
-    let scrubStartPoint = null; // Position where scrubbing began (for local overview)
+    let scrubStartPoint = null; // Position where scrubbing began
+    let scrubBearing = 0; // Consistent bearing during scrub
+    let scrubAnimationId = null; // Animation frame ID for scrub transitions
 
     // User override state
     let userOverrideActive = false;
@@ -2325,194 +2327,193 @@
      * Calculate camera state that frames the scrub start and current positions.
      * Creates a local overview showing just the segment being scrubbed through.
      */
-    function calculateScrubCameraState(startPoint, currentPoint) {
-        if (!startPoint || !currentPoint) return calculateOverviewCameraState();
+    // Fixed scrub altitude for Google Earth-style transitions
+    const SCRUB_ALTITUDE = 2500; // meters above terrain
 
-        // Calculate bounding box of the two points
-        const minLng = Math.min(startPoint.lng, currentPoint.lng);
-        const maxLng = Math.max(startPoint.lng, currentPoint.lng);
-        const minLat = Math.min(startPoint.lat, currentPoint.lat);
-        const maxLat = Math.max(startPoint.lat, currentPoint.lat);
+    /**
+     * Calculate camera state for scrubbing - simple fixed altitude, centered on point
+     */
+    function calculateScrubCameraState(point) {
+        if (!point) return calculateOverviewCameraState();
 
-        // Add padding (20% on each side)
-        const lngPadding = (maxLng - minLng) * 0.2 || 0.001; // Minimum padding for same point
-        const latPadding = (maxLat - minLat) * 0.2 || 0.001;
-
-        const paddedMinLng = minLng - lngPadding;
-        const paddedMaxLng = maxLng + lngPadding;
-        const paddedMinLat = minLat - latPadding;
-        const paddedMaxLat = maxLat + latPadding;
-
-        // Calculate center of bounding box
-        const centerLng = (paddedMinLng + paddedMaxLng) / 2;
-        const centerLat = (paddedMinLat + paddedMaxLat) / 2;
-
-        // Calculate span in meters
-        const lngSpan = Math.abs(paddedMaxLng - paddedMinLng);
-        const latSpan = Math.abs(paddedMaxLat - paddedMinLat);
-        const latMeters = latSpan * 111000;
-        const lngMeters = lngSpan * 111000 * Math.cos(centerLat * Math.PI / 180);
-        const maxSpan = Math.max(latMeters, lngMeters);
-
-        // Calculate altitude to see the bounding box
-        // Minimum altitude of 500m for close scrubs, scale up for larger spans
-        const minAltitude = 500;
-        const calculatedAltitude = maxSpan * 0.8;
-        const altitude = Math.max(minAltitude, calculatedAltitude);
-
-        // Get average elevation of the two points
-        const avgElevation = (startPoint.alt + currentPoint.alt) / 2;
-
-        // Calculate bearing from start to current point for camera orientation
-        const bearing = turf.bearing(
-            turf.point([startPoint.lng, startPoint.lat]),
-            turf.point([currentPoint.lng, currentPoint.lat])
-        );
-        // Normalize to 0-360
-        const normalizedBearing = (bearing + 360) % 360;
-
+        // Simple: fixed altitude above the current point, looking straight down
         return createCameraState(
-            centerLng,
-            centerLat,
-            altitude + avgElevation,
-            normalizedBearing,
-            -60 // Looking down at a good angle
+            point.lng,
+            point.lat,
+            SCRUB_ALTITUDE + (point.alt || 0),
+            scrubBearing, // Maintain consistent bearing during scrub
+            -70 // Looking down at steep angle
         );
     }
 
     /**
      * Start transition to overview mode when scrubber drag begins
+     * Google Earth style: fast zoom UP to fixed altitude
      */
     function startOverviewTransition() {
         overviewTransitionProgress = 0;
-        shouldReturnFromOverview = isPlaying; // Remember if we should return after drag
+        shouldReturnFromOverview = isPlaying;
 
-        // Capture the current dot position as the scrub start point
+        // Cancel any existing animation
+        if (scrubAnimationId) {
+            cancelAnimationFrame(scrubAnimationId);
+            scrubAnimationId = null;
+        }
+
+        // Capture current state
         const dotDistance = progress * totalDistance;
         const dotPoint = getPointAlongRoute(dotDistance);
         scrubStartPoint = dotPoint ? { lng: dotPoint.lng, lat: dotPoint.lat, alt: dotPoint.alt } : null;
 
-        // Initial target is the current position (will expand as user scrubs)
-        overviewTargetState = scrubStartPoint ? calculateScrubCameraState(scrubStartPoint, scrubStartPoint) : calculateOverviewCameraState();
-
-        // Store the current camera state as the starting point for the transition
+        // Store current camera state and bearing for smooth transition
         transitionStartState = getCurrentCameraState();
+        scrubBearing = transitionStartState ? transitionStartState.bearing : 0;
 
-        // Start the overview animation
-        if (!isPlaying) {
-            // When paused, need to manually animate the transition
-            animateOverviewTransition();
-        }
+        // Target is scrub camera at current point
+        overviewTargetState = scrubStartPoint ? calculateScrubCameraState(scrubStartPoint) : calculateOverviewCameraState();
+
+        // Start fast zoom-up animation
+        animateScrubZoomUp();
     }
 
     /**
-     * Animate the overview transition (used when paused)
+     * Fast zoom-up animation for Google Earth-style scrubbing
      */
-    function animateOverviewTransition() {
-        if (!isScrubberDragging && overviewTransitionProgress >= 1) return;
+    function animateScrubZoomUp() {
+        const ZOOM_UP_SPEED = 8; // Fast! Complete in ~0.125 seconds
 
-        const targetProgress = isScrubberDragging ? 1 : 0;
-        const speed = 3; // transitions per second
+        overviewTransitionProgress = Math.min(1, overviewTransitionProgress + ZOOM_UP_SPEED * 0.016);
 
-        // Move towards target
-        if (overviewTransitionProgress < targetProgress) {
-            overviewTransitionProgress = Math.min(1, overviewTransitionProgress + speed * 0.016);
-        } else if (overviewTransitionProgress > targetProgress) {
-            overviewTransitionProgress = Math.max(0, overviewTransitionProgress - speed * 0.016);
-        }
-
-        // Get current dot position for UI updates
         const dotDistance = progress * totalDistance;
         const dotPoint = getPointAlongRoute(dotDistance);
 
         if (dotPoint && transitionStartState) {
-            // Calculate dynamic target based on current position
             const currentPoint = { lng: dotPoint.lng, lat: dotPoint.lat, alt: dotPoint.alt };
-            const dynamicTargetState = scrubStartPoint
-                ? calculateScrubCameraState(scrubStartPoint, currentPoint)
-                : overviewTargetState || calculateOverviewCameraState();
+            const targetState = calculateScrubCameraState(currentPoint);
 
-            const t = easeInOutCubic(overviewTransitionProgress);
-            const currentState = lerpCameraState(transitionStartState, dynamicTargetState, t);
+            // Use easeOutCubic for fast start, gentle finish (like shooting up)
+            const t = easeOutCubic(overviewTransitionProgress);
+            const currentState = lerpCameraState(transitionStartState, targetState, t);
 
             applyCameraState(currentState, dotPoint);
             updateDotAndUI(dotPoint);
 
-            // Update the target state for smooth subsequent transitions
             if (overviewTransitionProgress >= 1) {
-                overviewTargetState = dynamicTargetState;
+                overviewTargetState = targetState;
             }
         }
 
-        // Continue animation if not at target
-        if (Math.abs(overviewTransitionProgress - targetProgress) > 0.001) {
-            requestAnimationFrame(animateOverviewTransition);
-        } else if (!isScrubberDragging && overviewTransitionProgress <= 0.001) {
-            // Transition back complete - clean up
+        // Continue if not done and still dragging
+        if (overviewTransitionProgress < 1 && isScrubberDragging) {
+            scrubAnimationId = requestAnimationFrame(animateScrubZoomUp);
+        } else {
+            scrubAnimationId = null;
+        }
+    }
+
+    /**
+     * Fast zoom-down animation when scrubbing ends
+     */
+    function animateScrubZoomDown() {
+        const ZOOM_DOWN_SPEED = 6; // Fast swoop down
+
+        overviewTransitionProgress = Math.max(0, overviewTransitionProgress - ZOOM_DOWN_SPEED * 0.016);
+
+        const dotDistance = progress * totalDistance;
+        const dotPoint = getPointAlongRoute(dotDistance);
+
+        if (dotPoint && transitionStartState && overviewTargetState) {
+            // Interpolate from overview back to normal camera
+            // Use easeInOutCubic for smooth swoop
+            const t = easeInOutCubic(1 - overviewTransitionProgress);
+
+            // Calculate what the normal camera would be at this position
+            const directionDistance = Math.min(dotDistance + CONFIG.lookAheadDistance / 1000, totalDistance);
+            const directionPoint = getPointAlongRoute(directionDistance);
+            const normalCameraState = directionPoint
+                ? calculateCameraForMode(currentCameraMode, dotPoint, directionPoint, 0)
+                : transitionStartState;
+
+            if (normalCameraState) {
+                const currentState = lerpCameraState(overviewTargetState, normalCameraState, t);
+                applyCameraState(currentState, dotPoint);
+            }
+            updateDotAndUI(dotPoint);
+        }
+
+        // Continue if not done
+        if (overviewTransitionProgress > 0) {
+            scrubAnimationId = requestAnimationFrame(animateScrubZoomDown);
+        } else {
+            // Clean up
+            scrubAnimationId = null;
             overviewTransitionProgress = 0;
             transitionStartState = null;
             overviewTargetState = null;
+            shouldReturnFromOverview = false;
         }
     }
 
     /**
      * End overview transition when scrubber drag ends
+     * Google Earth style: fast swoop DOWN to normal camera
      */
     function endOverviewTransition() {
-        // Clear the scrub start point
         scrubStartPoint = null;
 
+        // Cancel any in-progress zoom-up animation
+        if (scrubAnimationId) {
+            cancelAnimationFrame(scrubAnimationId);
+            scrubAnimationId = null;
+        }
+
+        // Store current overview state for the swoop-down
+        overviewTargetState = getCurrentCameraState();
+
         if (!isPlaying) {
-            // When paused, stay at the current scrub overview position
-            overviewTransitionProgress = 1; // Stay at overview
+            // When paused, swoop down to normal camera at current position
+            overviewTransitionProgress = 1;
+            shouldReturnFromOverview = false;
+            animateScrubZoomDown();
         } else {
-            // When playing, smoothly transition back to normal camera
+            // When playing, animation loop handles return
             shouldReturnFromOverview = true;
-            // Store current overview state as start point for return transition
-            transitionStartState = getCurrentCameraState();
-            // Animation loop will handle the return transition
+            transitionStartState = overviewTargetState;
         }
     }
 
     /**
-     * Seek to position during scrubber drag (updates dot and dynamically adjusts camera to frame start and current positions)
+     * Seek to position during scrubber drag
+     * Google Earth style: camera tracks dot at fixed altitude, fast and smooth
      */
     function seekToPositionDuringDrag(newPosition) {
         progress = Math.max(0, Math.min(1, newPosition));
 
-        // Reset jitter detection state to prevent false positives from seeking
+        // Reset jitter detection state
         window._lastCameraState = null;
-        window._cinematicState = null; // Reset cinematic smoothing
+        window._cinematicState = null;
         if (window._terrainCache) {
             window._terrainCache.lastCameraAlt = null;
             window._terrainCache.lastBearing = null;
         }
 
-        // Get dot position and update UI
         const dotDistance = progress * totalDistance;
         const dotPoint = getPointAlongRoute(dotDistance);
 
         if (dotPoint) {
-            // Update dot and UI
             updateDotAndUI(dotPoint);
 
-            // Dynamically update the overview target to frame start position and current position
             const currentPoint = { lng: dotPoint.lng, lat: dotPoint.lat, alt: dotPoint.alt };
-            const newTargetState = scrubStartPoint
-                ? calculateScrubCameraState(scrubStartPoint, currentPoint)
-                : calculateOverviewCameraState();
+            const newTargetState = calculateScrubCameraState(currentPoint);
 
-            // If we're still transitioning to overview, interpolate from start to dynamically updated target
-            if (overviewTransitionProgress < 1 && transitionStartState) {
-                overviewTransitionProgress = Math.min(1, overviewTransitionProgress + 0.1);
-                const t = easeInOutCubic(overviewTransitionProgress);
-                const currentState = lerpCameraState(transitionStartState, newTargetState, t);
-                applyCameraState(currentState, dotPoint);
+            // If still zooming up, let the animation handle camera
+            if (overviewTransitionProgress < 1 && scrubAnimationId) {
+                // Animation is handling it
             } else {
-                // Fully in scrub overview mode - smoothly update camera to frame start and current positions
-                // Use lerp for smooth camera movement as bounding box changes
+                // At scrub altitude: fast, smooth tracking of the dot
+                // Use higher lerp factor for responsive movement
                 if (overviewTargetState) {
-                    const smoothedState = lerpCameraState(overviewTargetState, newTargetState, 0.15);
+                    const smoothedState = lerpCameraState(overviewTargetState, newTargetState, 0.4);
                     applyCameraState(smoothedState, dotPoint);
                     overviewTargetState = smoothedState;
                 } else {
@@ -2522,7 +2523,6 @@
             }
         }
 
-        // Update UI
         updateProgress();
     }
 
@@ -2765,8 +2765,8 @@
 
         // Handle return from overview mode (after scrubber drag ends during playback)
         if (shouldReturnFromOverview && overviewTransitionProgress > 0) {
-            // Smoothly transition from overview back to normal camera
-            overviewTransitionProgress -= deltaTime * 2; // ~0.5 second return
+            // Fast swoop down - Google Earth style
+            overviewTransitionProgress -= deltaTime * 6; // ~0.17 second return
             overviewTransitionProgress = Math.max(0, overviewTransitionProgress);
 
             if (overviewTransitionProgress > 0 && transitionStartState) {
