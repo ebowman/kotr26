@@ -153,6 +153,10 @@
     const SETTLING_DURATION = 60;        // frames to skip terrain collision after transition
     let settlingFramesRemaining = 0;     // countdown for settling period
 
+    // Terrain collision constants
+    const TERRAIN_MIN_CLEARANCE = 100;   // meters above terrain at camera position
+    const RIDER_MIN_CLEARANCE = 100;     // meters above rider - camera should never be below rider
+
     // Mont Ventoux detection
     const VENTOUX_SUMMIT = {
         lat: 44.1739,
@@ -342,22 +346,118 @@
     }
 
     /**
-     * Interpolate between two camera states
+     * Query terrain elevation at a position, with cache fallback.
+     * Returns null if terrain data is unavailable.
+     */
+    function queryTerrainElevationWithCache(lng, lat) {
+        let elevation = null;
+
+        try {
+            elevation = map.queryTerrainElevation([lng, lat]);
+            if (elevation !== null && elevation !== undefined) {
+                // Valid terrain data - cache it
+                if (window._terrainCache) {
+                    window._terrainCache.lastElevation = elevation;
+                    window._terrainCache.lastPosition = { lng, lat };
+                }
+            } else if (window._terrainCache && window._terrainCache.lastElevation !== null) {
+                // Terrain query returned null - use cached value
+                elevation = window._terrainCache.lastElevation;
+            }
+        } catch (e) {
+            // Terrain query not available - use cached value
+            if (window._terrainCache && window._terrainCache.lastElevation !== null) {
+                elevation = window._terrainCache.lastElevation;
+            }
+        }
+
+        return elevation;
+    }
+
+    /**
+     * Calculate minimum safe altitude above terrain and rider.
+     * Applies dynamic clearance when terrain is higher than rider (steep slopes).
+     */
+    function calculateMinimumAltitude(terrainElevation, riderAltitude) {
+        // Calculate dynamic clearance - add extra for steep terrain
+        // where terrain at camera position is higher than the rider
+        let dynamicClearance = TERRAIN_MIN_CLEARANCE;
+        if (terrainElevation !== null && terrainElevation > riderAltitude) {
+            const elevationDiff = terrainElevation - riderAltitude;
+            dynamicClearance = TERRAIN_MIN_CLEARANCE + elevationDiff * 0.5;
+        }
+
+        const minFromTerrain = terrainElevation !== null ? terrainElevation + dynamicClearance : 0;
+        const minFromRider = riderAltitude + RIDER_MIN_CLEARANCE;
+
+        return Math.max(minFromTerrain, minFromRider);
+    }
+
+    /**
+     * Apply terrain collision to an altitude, ensuring it stays above terrain and rider.
+     * Returns the adjusted altitude and whether adjustment was made.
+     */
+    function applyTerrainCollision(cameraLng, cameraLat, cameraAlt, riderAltitude) {
+        const terrainElevation = queryTerrainElevationWithCache(cameraLng, cameraLat);
+        const minAltitude = calculateMinimumAltitude(terrainElevation, riderAltitude);
+
+        if (cameraAlt < minAltitude) {
+            return { altitude: minAltitude, adjusted: true };
+        }
+        return { altitude: cameraAlt, adjusted: false };
+    }
+
+    /**
+     * Interpolate between two camera states with smooth altitude handling
+     * Uses an "arc" approach when there's a significant altitude difference
+     * to avoid the jarring zoom-in/zoom-out effect during camera mode transitions
      */
     function lerpCameraState(start, end, t) {
-        // Handle bearing wrap-around (e.g., 350 to 10 degrees)
-        let startBearing = start.bearing;
-        let endBearing = end.bearing;
-        let bearingDiff = endBearing - startBearing;
+        // Normalize bearings to 0-360 range first
+        let startBearing = ((start.bearing % 360) + 360) % 360;
+        let endBearing = ((end.bearing % 360) + 360) % 360;
 
-        if (bearingDiff > 180) startBearing += 360;
-        else if (bearingDiff < -180) endBearing += 360;
+        // Handle bearing wrap-around - take the shorter path
+        let bearingDiff = endBearing - startBearing;
+        if (bearingDiff > 180) {
+            startBearing += 360;
+        } else if (bearingDiff < -180) {
+            endBearing += 360;
+        }
+
+        // Calculate altitude difference
+        const altDiff = Math.abs(end.alt - start.alt);
+
+        // For large altitude differences (>200m), use arc interpolation
+        // This creates a smooth "rise up, move, descend" motion instead of diving
+        let finalAlt;
+        if (altDiff > 200) {
+            // Use higher of the two altitudes as the peak, plus a boost based on altitude difference
+            const peakAlt = Math.max(start.alt, end.alt) + altDiff * 0.3;
+
+            // Create arc using sine curve - peaks at t=0.5
+            const arcFactor = Math.sin(t * Math.PI);
+            const linearAlt = lerp(start.alt, end.alt, t);
+            const arcBoost = (peakAlt - linearAlt) * arcFactor;
+            finalAlt = linearAlt + arcBoost * 0.5; // Blend 50% arc for subtle effect
+        } else {
+            finalAlt = lerp(start.alt, end.alt, t);
+        }
+
+        // For large bearing differences (>90 degrees), use eased bearing interpolation
+        // This prevents the camera from feeling like it's "spinning wildly"
+        const normalizedBearingDiff = Math.abs(bearingDiff > 180 ? bearingDiff - 360 : bearingDiff);
+        let bearingT = t;
+        if (normalizedBearingDiff > 90) {
+            // Use ease-in-out for large rotations - slower at start/end, faster in middle
+            bearingT = easeInOutCubic(t);
+        }
 
         return {
             lng: lerp(start.lng, end.lng, t),
             lat: lerp(start.lat, end.lat, t),
-            alt: lerp(start.alt, end.alt, t),
-            bearing: (lerp(startBearing, endBearing, t) + 360) % 360,
+            alt: finalAlt,
+            bearing: (lerp(startBearing, endBearing, bearingT) + 360) % 360,
             pitch: lerp(start.pitch, end.pitch, t)
         };
     }
@@ -373,11 +473,19 @@
             const center = map.getCenter();
             const bearing = map.getBearing();
             const pitch = map.getPitch();
+            let altitude = pos.toAltitude();
+
+            // Sanity check: altitude should be positive and reasonable
+            // Mapbox FreeCamera can return invalid values during transitions
+            if (!altitude || altitude < 0 || altitude > 50000) {
+                // Use a sensible fallback based on current zoom level
+                altitude = Math.max(500, 10000 / Math.pow(2, map.getZoom() - 10));
+            }
 
             return createCameraState(
                 lngLat.lng,
                 lngLat.lat,
-                pos.toAltitude(),
+                altitude,
                 bearing,
                 pitch
             );
@@ -561,6 +669,7 @@
                 // Side view: perpendicular to route direction
                 // Intelligently chooses the lower terrain side (valley) or uses manual override
                 // Uses hysteresis to prevent flip-flopping between sides
+                // Falls back to bird's eye if both sides are blocked by terrain
                 const offsetSide = config.offsetSide * zoom;
                 const offsetUp = config.offsetUp * zoom;
 
@@ -581,6 +690,47 @@
                     { units: 'kilometers' }
                 );
 
+                // Check if either side position would put camera inside terrain
+                // Camera would be at dotPoint.alt + offsetUp - check against terrain at each side
+                const targetCameraAlt = dotPoint.alt + offsetUp;
+                const MIN_SIDE_CLEARANCE = 100; // meters - minimum clearance needed for side view to work
+                let leftBlocked = false;
+                let rightBlocked = false;
+                let leftTerrainElevation = null;
+                let rightTerrainElevation = null;
+
+                try {
+                    leftTerrainElevation = map.queryTerrainElevation(leftPoint.geometry.coordinates);
+                    rightTerrainElevation = map.queryTerrainElevation(rightPoint.geometry.coordinates);
+
+                    if (leftTerrainElevation !== null) {
+                        leftBlocked = targetCameraAlt < leftTerrainElevation + MIN_SIDE_CLEARANCE;
+                    }
+                    if (rightTerrainElevation !== null) {
+                        rightBlocked = targetCameraAlt < rightTerrainElevation + MIN_SIDE_CLEARANCE;
+                    }
+                } catch (e) {
+                    // Terrain query failed - continue without blocking info
+                }
+
+                // If both sides are blocked, choose the less-blocked side and let terrain
+                // collision handling raise the camera appropriately. Don't jump to bird's eye
+                // as that creates jarring pitch and position changes.
+                // Pick the side with lower terrain (more clearance potential)
+                if (leftBlocked && rightBlocked) {
+                    if (leftTerrainElevation !== null && rightTerrainElevation !== null) {
+                        // Pick the side with lower terrain
+                        if (leftTerrainElevation <= rightTerrainElevation) {
+                            leftBlocked = false; // Force left side
+                        } else {
+                            rightBlocked = false; // Force right side
+                        }
+                    } else {
+                        // No terrain data - default to left
+                        leftBlocked = false;
+                    }
+                }
+
                 // Track current side with hysteresis (stored outside this function)
                 if (!window._sideViewCurrentSide) {
                     window._sideViewCurrentSide = 'left';
@@ -595,105 +745,110 @@
                 let offsetPoint = leftPoint;
 
                 if (sideViewMode === SideViewModes.LEFT) {
-                    // Force left side (+90°)
-                    chosenSide = 'left';
+                    // Force left side (+90°) - but if blocked, use right
+                    chosenSide = leftBlocked ? 'right' : 'left';
                 } else if (sideViewMode === SideViewModes.RIGHT) {
-                    // Force right side (-90°)
-                    chosenSide = 'right';
+                    // Force right side (-90°) - but if blocked, use left
+                    chosenSide = rightBlocked ? 'left' : 'right';
                 } else {
                     // Auto mode: query terrain on both sides and pick the lower one
                     // Only switch sides if the other side is significantly lower (hysteresis)
                     // AND stays better for at least LOOK_AHEAD_DISTANCE (prevents flip-flop on hairpins)
                     // AND enough time has passed since last switch (cooldown)
+                    // EXCEPTION: immediately switch if current side is blocked and other isn't
                     const SIDE_SWITCH_THRESHOLD = 200; // meters - must be this much lower to switch (increased for stability)
                     const LOOK_AHEAD_DISTANCE = 500; // meters - check terrain this far ahead (increased)
                     const LOOK_AHEAD_SAMPLES = 5; // number of points to check ahead (increased)
                     const SIDE_SWITCH_COOLDOWN = 3000; // ms - minimum time between side switches
 
-                    try {
-                        const leftTerrain = map.queryTerrainElevation(leftPoint.geometry.coordinates);
-                        const rightTerrain = map.queryTerrainElevation(rightPoint.geometry.coordinates);
-                        const now = performance.now();
-                        const timeSinceLastSwitch = now - window._sideViewLastSwitchTime;
+                    // Use the terrain elevations we already queried above
+                    const leftTerrain = leftTerrainElevation;
+                    const rightTerrain = rightTerrainElevation;
+                    const now = performance.now();
+                    const timeSinceLastSwitch = now - window._sideViewLastSwitchTime;
 
-                        if (leftTerrain !== null && rightTerrain !== null) {
-                            const currentSide = window._sideViewCurrentSide;
-                            let shouldSwitch = false;
-                            let newSide = currentSide;
+                    // First priority: if current side is blocked and other isn't, switch immediately
+                    const currentSide = window._sideViewCurrentSide;
+                    const currentBlocked = currentSide === 'left' ? leftBlocked : rightBlocked;
+                    const otherBlocked = currentSide === 'left' ? rightBlocked : leftBlocked;
 
-                            // Only consider switching if cooldown has passed
-                            if (timeSinceLastSwitch >= SIDE_SWITCH_COOLDOWN) {
-                                // Check if we should consider switching
-                                if (currentSide === 'left' && rightTerrain < leftTerrain - SIDE_SWITCH_THRESHOLD) {
-                                    newSide = 'right';
-                                    shouldSwitch = true;
-                                } else if (currentSide === 'right' && leftTerrain < rightTerrain - SIDE_SWITCH_THRESHOLD) {
-                                    newSide = 'left';
-                                    shouldSwitch = true;
-                                }
+                    if (currentBlocked && !otherBlocked) {
+                        // Current side is blocked, other is clear - switch immediately (ignore cooldown)
+                        chosenSide = currentSide === 'left' ? 'right' : 'left';
+                    } else if (leftTerrain !== null && rightTerrain !== null) {
+                        let shouldSwitch = false;
+                        let newSide = currentSide;
+
+                        // Only consider switching if cooldown has passed
+                        if (timeSinceLastSwitch >= SIDE_SWITCH_COOLDOWN) {
+                            // Check if we should consider switching
+                            if (currentSide === 'left' && rightTerrain < leftTerrain - SIDE_SWITCH_THRESHOLD) {
+                                newSide = 'right';
+                                shouldSwitch = true;
+                            } else if (currentSide === 'right' && leftTerrain < rightTerrain - SIDE_SWITCH_THRESHOLD) {
+                                newSide = 'left';
+                                shouldSwitch = true;
                             }
+                        }
 
-                            // If considering a switch, look ahead to see if it stays better
-                            if (shouldSwitch && routeLine) {
-                                const currentDistance = progress * totalDistance;
-                                let switchStaysGood = true;
+                        // If considering a switch, look ahead to see if it stays better
+                        if (shouldSwitch && routeLine) {
+                            const currentDistance = progress * totalDistance;
+                            let switchStaysGood = true;
 
-                                for (let i = 1; i <= LOOK_AHEAD_SAMPLES; i++) {
-                                    const aheadDist = currentDistance + (LOOK_AHEAD_DISTANCE / 1000) * (i / LOOK_AHEAD_SAMPLES);
-                                    if (aheadDist > totalDistance) break;
+                            for (let i = 1; i <= LOOK_AHEAD_SAMPLES; i++) {
+                                const aheadDist = currentDistance + (LOOK_AHEAD_DISTANCE / 1000) * (i / LOOK_AHEAD_SAMPLES);
+                                if (aheadDist > totalDistance) break;
 
-                                    const aheadPoint = getPointAlongRoute(aheadDist);
-                                    if (!aheadPoint) continue;
+                                const aheadPoint = getPointAlongRoute(aheadDist);
+                                if (!aheadPoint) continue;
 
-                                    // Get bearing at ahead point
-                                    const aheadNextDist = Math.min(aheadDist + 0.05, totalDistance);
-                                    const aheadNextPoint = getPointAlongRoute(aheadNextDist);
-                                    if (!aheadNextPoint) continue;
+                                // Get bearing at ahead point
+                                const aheadNextDist = Math.min(aheadDist + 0.05, totalDistance);
+                                const aheadNextPoint = getPointAlongRoute(aheadNextDist);
+                                if (!aheadNextPoint) continue;
 
-                                    const aheadBearing = calculateBearing(aheadPoint, aheadNextPoint);
-                                    const aheadLeftBearing = (aheadBearing + 90) % 360;
-                                    const aheadRightBearing = (aheadBearing - 90 + 360) % 360;
+                                const aheadBearing = calculateBearing(aheadPoint, aheadNextPoint);
+                                const aheadLeftBearing = (aheadBearing + 90) % 360;
+                                const aheadRightBearing = (aheadBearing - 90 + 360) % 360;
 
-                                    // Calculate side points at ahead position
-                                    const aheadLeftPoint = turf.destination(
-                                        turf.point([aheadPoint.lng, aheadPoint.lat]),
-                                        offsetAside / 1000,
-                                        aheadLeftBearing,
-                                        { units: 'kilometers' }
-                                    );
-                                    const aheadRightPoint = turf.destination(
-                                        turf.point([aheadPoint.lng, aheadPoint.lat]),
-                                        offsetAside / 1000,
-                                        aheadRightBearing,
-                                        { units: 'kilometers' }
-                                    );
+                                // Calculate side points at ahead position
+                                const aheadLeftPoint = turf.destination(
+                                    turf.point([aheadPoint.lng, aheadPoint.lat]),
+                                    offsetSide / 1000,
+                                    aheadLeftBearing,
+                                    { units: 'kilometers' }
+                                );
+                                const aheadRightPoint = turf.destination(
+                                    turf.point([aheadPoint.lng, aheadPoint.lat]),
+                                    offsetSide / 1000,
+                                    aheadRightBearing,
+                                    { units: 'kilometers' }
+                                );
 
-                                    const aheadLeftTerrain = map.queryTerrainElevation(aheadLeftPoint.geometry.coordinates);
-                                    const aheadRightTerrain = map.queryTerrainElevation(aheadRightPoint.geometry.coordinates);
+                                const aheadLeftTerrain = map.queryTerrainElevation(aheadLeftPoint.geometry.coordinates);
+                                const aheadRightTerrain = map.queryTerrainElevation(aheadRightPoint.geometry.coordinates);
 
-                                    if (aheadLeftTerrain !== null && aheadRightTerrain !== null) {
-                                        // Check if the new side is still better ahead
-                                        if (newSide === 'right' && aheadLeftTerrain < aheadRightTerrain - SIDE_SWITCH_THRESHOLD / 2) {
-                                            // Left would be better ahead - don't switch, we'd flip back
-                                            switchStaysGood = false;
-                                            break;
-                                        } else if (newSide === 'left' && aheadRightTerrain < aheadLeftTerrain - SIDE_SWITCH_THRESHOLD / 2) {
-                                            // Right would be better ahead - don't switch, we'd flip back
-                                            switchStaysGood = false;
-                                            break;
-                                        }
+                                if (aheadLeftTerrain !== null && aheadRightTerrain !== null) {
+                                    // Check if the new side is still better ahead
+                                    if (newSide === 'right' && aheadLeftTerrain < aheadRightTerrain - SIDE_SWITCH_THRESHOLD / 2) {
+                                        // Left would be better ahead - don't switch, we'd flip back
+                                        switchStaysGood = false;
+                                        break;
+                                    } else if (newSide === 'left' && aheadRightTerrain < aheadLeftTerrain - SIDE_SWITCH_THRESHOLD / 2) {
+                                        // Right would be better ahead - don't switch, we'd flip back
+                                        switchStaysGood = false;
+                                        break;
                                     }
                                 }
-
-                                // Only switch if it stays good for the look-ahead distance
-                                if (switchStaysGood) {
-                                    chosenSide = newSide;
-                                }
                             }
-                            // Otherwise stay on current side
+
+                            // Only switch if it stays good for the look-ahead distance
+                            if (switchStaysGood) {
+                                chosenSide = newSide;
+                            }
                         }
-                    } catch (e) {
-                        // Terrain query failed, stay on current side
+                        // Otherwise stay on current side
                     }
                 }
 
@@ -760,15 +915,8 @@
                 return null;
         }
 
-        // Terrain collision detection: ensure camera is above terrain at its position
-        // AND above the rider - this prevents the camera from going below the rider
-        // when orbiting over valleys on steep mountainsides
-        // Use higher clearance to avoid camera looking into cliff faces on steep terrain
-        const minTerrainClearance = 100; // meters above terrain at camera position
-        const minRiderClearance = 100;   // meters above rider - camera should never be below rider
-        let terrainElevation = null;
+        // Terrain collision detection: ensure camera is above terrain and rider
         let terrainAdjusted = false;
-        let originalCameraAlt = cameraAlt;
 
         // Initialize terrain cache if needed
         if (!window._terrainCache) {
@@ -783,71 +931,65 @@
         // Only ensure camera is above the rider - skip terrain queries which cause jitter
         // on steep terrain where the terrain elevation changes rapidly
         const useSimplifiedCollision = skipSmoothing || settlingFramesRemaining > 0;
+
+        // Track if we recently exited a transition (for faster terrain correction)
+        if (!window._terrainCache.transitionExitFrames) {
+            window._terrainCache.transitionExitFrames = 0;
+        }
+
+        if (useSimplifiedCollision) {
+            window._terrainCache.wasInTransition = true;
+            window._terrainCache.transitionExitFrames = 0;
+        } else if (window._terrainCache.wasInTransition) {
+            // Just exited transition - start faster smoothing period
+            window._terrainCache.wasInTransition = false;
+            window._terrainCache.transitionExitFrames = 30; // ~0.5 sec at 60fps
+        } else if (window._terrainCache.transitionExitFrames > 0) {
+            window._terrainCache.transitionExitFrames--;
+        }
+
+        const justExitedTransition = window._terrainCache.transitionExitFrames > 0;
+
         if (settlingFramesRemaining > 0) {
             settlingFramesRemaining--;
         }
 
+        // Query terrain elevation (used for both collision and logging)
+        let terrainElevation = null;
+        if (!useSimplifiedCollision) {
+            terrainElevation = queryTerrainElevationWithCache(cameraLng, cameraLat);
+        }
+
+        // Store original altitude for logging before terrain collision adjustment
+        const originalCameraAlt = cameraAlt;
+
         if (useSimplifiedCollision) {
-            const minFromRider = dotPoint.alt + minRiderClearance;
+            // Simplified: only ensure camera is above rider
+            const minFromRider = dotPoint.alt + RIDER_MIN_CLEARANCE;
             if (cameraAlt < minFromRider) {
                 cameraAlt = minFromRider;
                 terrainAdjusted = true;
             }
         } else {
-            // Normal mode: full terrain collision detection
-            try {
-                terrainElevation = map.queryTerrainElevation([cameraLng, cameraLat]);
-
-                if (terrainElevation !== null && terrainElevation !== undefined) {
-                    // Valid terrain data - use it and cache it
-                    window._terrainCache.lastElevation = terrainElevation;
-                    window._terrainCache.lastPosition = { lng: cameraLng, lat: cameraLat };
-                } else if (window._terrainCache.lastElevation !== null) {
-                    // Terrain query returned null - use cached value
-                    terrainElevation = window._terrainCache.lastElevation;
-                }
-            } catch (e) {
-                // Terrain query not available, try to use cached value
-                if (window._terrainCache.lastElevation !== null) {
-                    terrainElevation = window._terrainCache.lastElevation;
-                }
-            }
-
-            // Calculate minimum altitude from two constraints:
-            // 1. Must be above terrain at camera position
-            // 2. Must be above rider (prevents camera going into valley below rider on steep slopes)
-            // 3. On steep uphill terrain, add extra clearance proportional to elevation difference
-            //    to help camera see OVER cliff faces between camera and rider
-            let dynamicClearance = minTerrainClearance;
-            if (terrainElevation !== null && terrainElevation > dotPoint.alt) {
-                // Camera terrain is higher than rider - add extra clearance to see over slope
-                // Add 50% of the elevation difference as extra clearance
-                const elevationDiff = terrainElevation - dotPoint.alt;
-                dynamicClearance = minTerrainClearance + elevationDiff * 0.5;
-            }
-            const minFromTerrain = terrainElevation !== null ? terrainElevation + dynamicClearance : 0;
-            const minFromRider = dotPoint.alt + minRiderClearance;
-            const minAltitude = Math.max(minFromTerrain, minFromRider);
-
+            // Full terrain collision using helper
+            const minAltitude = calculateMinimumAltitude(terrainElevation, dotPoint.alt);
             if (cameraAlt < minAltitude) {
                 cameraAlt = minAltitude;
                 terrainAdjusted = true;
             }
         }
 
-        // Skip smoothing during lerp transitions or settling period
-        // Lerp transitions provide their own smoothing; cache-based smoothing fights them
+        const isBirdsEye = mode === CameraModes.BIRDS_EYE;
+        const isSideView = mode === CameraModes.SIDE_VIEW;
+
+        // Skip ALL smoothing during lerp transitions or settling period
+        // Lerp transitions provide their own smoothing - applying our smoothing
+        // on top causes oscillation/jitter as the two fight each other
         if (!useSimplifiedCollision) {
-            const isBirdsEye = mode === CameraModes.BIRDS_EYE;
-
-            // Altitude smoothing - applied AFTER terrain collision to prevent jarring jumps
-            // Bird's Eye uses lower limit for ultra-smooth flight
-            const maxAltChange = isBirdsEye ? 8 : 30;
-            cameraAlt = smoothValue(cameraAlt, window._terrainCache.lastCameraAlt, maxAltChange);
-            window._terrainCache.lastCameraAlt = cameraAlt;
-
-            // Position smoothing - prevent camera from jumping around on hairpin turns
-            const maxPosChange = isBirdsEye ? 5 : 20; // meters
+            // Position smoothing - prevent jarring camera jumps during normal playback
+            // Bird's Eye: 3m (slow, serene flight), Side View: 2m (reduced to prevent terrain jitter)
+            // Chase/Cinematic: 5m (follows route, needs more movement)
+            const maxPosChange = isBirdsEye ? 3 : (isSideView ? 2 : 5);
             if (window._terrainCache.lastLng != null && window._terrainCache.lastLat != null) {
                 const cosLat = Math.cos(cameraLat * Math.PI / 180);
                 const dLng = (cameraLng - window._terrainCache.lastLng) * 111000 * cosLat;
@@ -861,17 +1003,42 @@
             }
             window._terrainCache.lastLng = cameraLng;
             window._terrainCache.lastLat = cameraLat;
+            // Altitude smoothing - applied AFTER terrain collision to prevent jarring jumps
+            // Use very low limits for smooth motion - camera should glide, not jump
+            // Bird's Eye: 4m/frame, Side View: 3m/frame (reduced to prevent terrain jitter on hairpins)
+            // Chase/Cinematic: 8m/frame (needs responsive terrain following)
+            //
+            // EXCEPTION: If we just exited a transition AND terrain adjusted our altitude,
+            // use faster smoothing (50m/frame) to quickly correct bad positions from LERP.
+            // This prevents both:
+            // 1. The slow "climbing out of terrain" jitter (if we used normal 3-8m limits)
+            // 2. The jarring instant jump (if we skipped smoothing entirely)
+            // At 60fps, 50m/frame corrects a 500m difference in ~167ms - fast but smooth.
+            const maxAltChange = (justExitedTransition && terrainAdjusted) ? 50
+                : (isBirdsEye ? 4 : (isSideView ? 3 : 8));
+            cameraAlt = smoothValue(cameraAlt, window._terrainCache.lastCameraAlt, maxAltChange);
+            window._terrainCache.lastCameraAlt = cameraAlt;
 
             // Bearing smoothing - prevent jarring camera swings on hairpin turns
-            // Bird's Eye: 0.08 deg/frame (~5 deg/sec), others: 4 deg/frame
-            const maxBearingChange = isBirdsEye ? 0.08 : 4;
+            // Bird's Eye: 0.08 deg/frame (~5 deg/sec at 60fps) - ultra slow for serene flight
+            // Side View: 0.15 deg/frame (~9 deg/sec) - very slow because perpendicular direction
+            //   oscillates rapidly on hairpins, causing hunting behavior if too responsive
+            // Others: 1.5 deg/frame (~90 deg/sec) - chase/cinematic need to follow turns
+            const maxBearingChange = isBirdsEye ? 0.08 : (isSideView ? 0.15 : 1.5);
             cameraBearing = smoothBearing(cameraBearing, window._terrainCache.lastBearing, maxBearingChange);
             window._terrainCache.lastBearing = cameraBearing;
 
             // Pitch smoothing - prevent jarring pitch changes on terrain transitions
-            // Bird's Eye: 0.1 deg/frame, others: 2 deg/frame
-            const maxPitchChange = isBirdsEye ? 0.1 : 2;
+            // Bird's Eye: 0.1 deg/frame, Side View: 0.3 deg/frame, others: 0.5 deg/frame
+            const maxPitchChange = isBirdsEye ? 0.1 : (isSideView ? 0.3 : 0.5);
             cameraPitch = smoothValue(cameraPitch, window._terrainCache.lastPitch, maxPitchChange);
+            window._terrainCache.lastPitch = cameraPitch;
+        } else {
+            // During transitions, still update the cache so we don't get a jump when transition ends
+            window._terrainCache.lastLng = cameraLng;
+            window._terrainCache.lastLat = cameraLat;
+            window._terrainCache.lastCameraAlt = cameraAlt;
+            window._terrainCache.lastBearing = cameraBearing;
             window._terrainCache.lastPitch = cameraPitch;
         }
 
@@ -1194,6 +1361,14 @@
         targetCameraMode = newMode;
         modeTransitionProgress = 0;
         transitionStartState = getCurrentCameraState();
+
+        // Log transition start
+        if (window.FLYOVER_DEBUG) {
+            const distKm = (progress * totalDistance).toFixed(1);
+            console.log(`[MODE_SWITCH] Starting transition at km=${distKm} from=${currentCameraMode} to=${newMode} ` +
+                `startState: alt=${transitionStartState.alt.toFixed(0)} bearing=${transitionStartState.bearing.toFixed(0)} ` +
+                `pitch=${transitionStartState.pitch.toFixed(1)} zoom=${zoomLevel.toFixed(2)}`);
+        }
 
         // Update UI
         updateCameraModeUI(newMode);
@@ -2960,6 +3135,20 @@
         let targetState = calculateCameraForMode(targetCameraMode, dotPoint, directionPoint, deltaTime, isInAnyTransition);
         if (!targetState) return;
 
+        // During transitions, apply terrain collision to the TARGET state.
+        // This prevents the LERP from interpolating to positions below terrain,
+        // which causes visible camera drops during transitions and jarring jumps when they end.
+        // (calculateCameraForMode uses simplified rider-only collision during transitions)
+        if (isInAnyTransition) {
+            const collision = applyTerrainCollision(
+                targetState.lng,
+                targetState.lat,
+                targetState.alt,
+                dotPoint.alt
+            );
+            targetState.alt = collision.altitude;
+        }
+
         // Check for camera stability and apply fallback if needed
         // This detects jitter/chaos and rider visibility issues
         targetState = handleStabilityFallback(targetState, dotPoint, directionPoint, deltaTime);
@@ -3026,6 +3215,15 @@
             finalState = lerpCameraState(transitionStartState, targetState, t);
             isInTransition = true;
 
+            // Detailed transition logging
+            if (window.FLYOVER_DEBUG) {
+                const distKm = (progress * totalDistance).toFixed(1);
+                console.log(`[TRANSITION] km=${distKm} t=${t.toFixed(3)} progress=${modeTransitionProgress.toFixed(3)} ` +
+                    `from=${currentCameraMode} to=${targetCameraMode} ` +
+                    `startAlt=${transitionStartState.alt.toFixed(0)} targetAlt=${targetState.alt.toFixed(0)} finalAlt=${finalState.alt.toFixed(0)} ` +
+                    `startBearing=${transitionStartState.bearing.toFixed(0)} targetBearing=${targetState.bearing.toFixed(0)} finalBearing=${finalState.bearing.toFixed(0)}`);
+            }
+
             if (modeTransitionProgress >= 1) {
                 currentCameraMode = targetCameraMode;
             }
@@ -3064,8 +3262,8 @@
                 const latDelta = Math.abs(state.lat - _lastAppliedState.lat) * 111000;
                 const posDelta = Math.sqrt(lngDelta * lngDelta + latDelta * latDelta);
 
-                // Log if any significant change
-                if (altDelta > 20 || bearingDelta > 5 || posDelta > 50) {
+                // Log if any significant change (but not during transitions - those are expected)
+                if (!isTransitioning && (altDelta > 20 || bearingDelta > 5 || posDelta > 50)) {
                     _jitterLogCount++;
                     if (_jitterLogCount % 5 === 1) { // Log every 5th to reduce spam
                         console.log('[JITTER]', {
@@ -3073,7 +3271,6 @@
                             bearingDelta: bearingDelta.toFixed(1),
                             posDelta: posDelta.toFixed(0),
                             settling: settlingFramesRemaining,
-                            transitioning: isTransitioning,
                             mode: currentCameraMode
                         });
                     }
