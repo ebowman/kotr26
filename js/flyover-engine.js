@@ -142,14 +142,12 @@
     const AUTO_HIDE_DELAY = 3000; // ms before hiding UI during playback
 
     // Camera watchdog state - detects and fixes stuck/jittering camera
-    const WATCHDOG_CHECK_INTERVAL = 500; // ms between checks
-    const WATCHDOG_MAX_ALT_DIFF = 500;   // Alert if actual vs expected altitude differs by this much
-    const WATCHDOG_STUCK_FRAMES = 30;    // Frames before considering camera "stuck"
-    const WATCHDOG_JITTER_THRESHOLD = 100; // m/frame altitude change threshold
-    let watchdogLastCheck = 0;
+    const WATCHDOG_MAX_ALT_DIFF = 500;      // Alert if actual vs expected altitude differs by this much
+    const WATCHDOG_STUCK_FRAMES = 30;       // Frames before considering camera "stuck"
+    const WATCHDOG_JITTER_THRESHOLD = 100;  // m/frame altitude change threshold
     let watchdogStuckFrames = 0;
-    let watchdogLastAppliedAlt = null;
-    let watchdogAltitudeHistory = [];    // Track actual altitude changes
+    let watchdogLastAppliedAlt = null;      // For debug API
+    let watchdogAltitudeHistory = [];
 
     // Post-transition settling period - skip terrain collision to prevent jitter
     const SETTLING_DURATION = 60;        // frames to skip terrain collision after transition
@@ -278,6 +276,35 @@
      */
     function lerp(start, end, t) {
         return start + (end - start) * t;
+    }
+
+    /**
+     * Smooth a value by clamping change per frame
+     * Returns the smoothed value, or current if no previous value exists
+     */
+    function smoothValue(current, previous, maxChange) {
+        if (previous == null) return current;
+        const delta = current - previous;
+        if (Math.abs(delta) <= maxChange) return current;
+        return previous + Math.sign(delta) * maxChange;
+    }
+
+    /**
+     * Smooth bearing with wrap-around handling (0-360 degrees)
+     * Returns the smoothed bearing, or current if no previous value exists
+     */
+    function smoothBearing(current, previous, maxChange) {
+        if (previous == null) return current;
+        let delta = current - previous;
+        // Handle wrap-around (e.g., 350 to 10 should be +20, not -340)
+        if (delta > 180) delta -= 360;
+        if (delta < -180) delta += 360;
+        if (Math.abs(delta) <= maxChange) return current;
+        let smoothed = previous + Math.sign(delta) * maxChange;
+        // Normalize to 0-360
+        if (smoothed < 0) smoothed += 360;
+        if (smoothed >= 360) smoothed -= 360;
+        return smoothed;
     }
 
     /**
@@ -558,6 +585,10 @@
                 if (!window._sideViewCurrentSide) {
                     window._sideViewCurrentSide = 'left';
                 }
+                // Track last side switch time for cooldown
+                if (!window._sideViewLastSwitchTime) {
+                    window._sideViewLastSwitchTime = 0;
+                }
 
                 let chosenSide = window._sideViewCurrentSide; // Start with current side
                 let sideBearing = leftBearing;
@@ -573,26 +604,33 @@
                     // Auto mode: query terrain on both sides and pick the lower one
                     // Only switch sides if the other side is significantly lower (hysteresis)
                     // AND stays better for at least LOOK_AHEAD_DISTANCE (prevents flip-flop on hairpins)
-                    const SIDE_SWITCH_THRESHOLD = 100; // meters - must be this much lower to switch
-                    const LOOK_AHEAD_DISTANCE = 300; // meters - check terrain this far ahead
-                    const LOOK_AHEAD_SAMPLES = 3; // number of points to check ahead
+                    // AND enough time has passed since last switch (cooldown)
+                    const SIDE_SWITCH_THRESHOLD = 200; // meters - must be this much lower to switch (increased for stability)
+                    const LOOK_AHEAD_DISTANCE = 500; // meters - check terrain this far ahead (increased)
+                    const LOOK_AHEAD_SAMPLES = 5; // number of points to check ahead (increased)
+                    const SIDE_SWITCH_COOLDOWN = 3000; // ms - minimum time between side switches
 
                     try {
                         const leftTerrain = map.queryTerrainElevation(leftPoint.geometry.coordinates);
                         const rightTerrain = map.queryTerrainElevation(rightPoint.geometry.coordinates);
+                        const now = performance.now();
+                        const timeSinceLastSwitch = now - window._sideViewLastSwitchTime;
 
                         if (leftTerrain !== null && rightTerrain !== null) {
                             const currentSide = window._sideViewCurrentSide;
                             let shouldSwitch = false;
                             let newSide = currentSide;
 
-                            // Check if we should consider switching
-                            if (currentSide === 'left' && rightTerrain < leftTerrain - SIDE_SWITCH_THRESHOLD) {
-                                newSide = 'right';
-                                shouldSwitch = true;
-                            } else if (currentSide === 'right' && leftTerrain < rightTerrain - SIDE_SWITCH_THRESHOLD) {
-                                newSide = 'left';
-                                shouldSwitch = true;
+                            // Only consider switching if cooldown has passed
+                            if (timeSinceLastSwitch >= SIDE_SWITCH_COOLDOWN) {
+                                // Check if we should consider switching
+                                if (currentSide === 'left' && rightTerrain < leftTerrain - SIDE_SWITCH_THRESHOLD) {
+                                    newSide = 'right';
+                                    shouldSwitch = true;
+                                } else if (currentSide === 'right' && leftTerrain < rightTerrain - SIDE_SWITCH_THRESHOLD) {
+                                    newSide = 'left';
+                                    shouldSwitch = true;
+                                }
                             }
 
                             // If considering a switch, look ahead to see if it stays better
@@ -659,17 +697,13 @@
                     }
                 }
 
-                // Check if side changed - if so, reset smoothing state to avoid false jitter warnings
+                // Check if side changed - record the switch time for cooldown
                 const previousSide = window._sideViewCurrentSide;
                 if (chosenSide !== previousSide) {
-                    // Side switch - reset smoothing state as camera will jump to other side
-                    window._lastCameraState = null;
-                    if (window._terrainCache) {
-                        window._terrainCache.lastCameraAlt = null;
-                        window._terrainCache.lastBearing = null;
-                        window._terrainCache.lastLng = null;
-                        window._terrainCache.lastLat = null;
-                    }
+                    // Side switch - record time for cooldown
+                    // NOTE: We do NOT reset smoothing caches anymore - let the lerping handle
+                    // the smooth transition to the new side position. This prevents jarring jumps.
+                    window._sideViewLastSwitchTime = performance.now();
                 }
 
                 // Remember chosen side for next frame
@@ -801,33 +835,26 @@
             }
         }
 
-        // Skip smoothing during lerp transitions - the lerp provides its own smoothing
-        // and cache-based smoothing fights the transition, causing jitter and slow descent
-        if (!skipSmoothing) {
-            // Final altitude smoothing - applied AFTER terrain collision to prevent jarring jumps
-            // This is critical for cinematic mode on steep terrain where the camera orbits over cliffs
+        // Skip smoothing during lerp transitions or settling period
+        // Lerp transitions provide their own smoothing; cache-based smoothing fights them
+        if (!useSimplifiedCollision) {
+            const isBirdsEye = mode === CameraModes.BIRDS_EYE;
+
+            // Altitude smoothing - applied AFTER terrain collision to prevent jarring jumps
             // Bird's Eye uses lower limit for ultra-smooth flight
-            const maxAltChangePerFrame = (mode === CameraModes.BIRDS_EYE) ? 8 : 30;
-            if (window._terrainCache.lastCameraAlt !== null) {
-                const altDelta = cameraAlt - window._terrainCache.lastCameraAlt;
-                if (Math.abs(altDelta) > maxAltChangePerFrame) {
-                    cameraAlt = window._terrainCache.lastCameraAlt + Math.sign(altDelta) * maxAltChangePerFrame;
-                }
-            }
+            const maxAltChange = isBirdsEye ? 8 : 30;
+            cameraAlt = smoothValue(cameraAlt, window._terrainCache.lastCameraAlt, maxAltChange);
             window._terrainCache.lastCameraAlt = cameraAlt;
 
             // Position smoothing - prevent camera from jumping around on hairpin turns
-            // Bird's Eye uses much lower limit for ultra-smooth flight
-            const maxPosChangePerFrame = (mode === CameraModes.BIRDS_EYE) ? 5 : 20; // meters
-            if (window._terrainCache.lastLng !== undefined && window._terrainCache.lastLng !== null) {
-                const dLng = (cameraLng - window._terrainCache.lastLng) * 111000 * Math.cos(cameraLat * Math.PI / 180);
+            const maxPosChange = isBirdsEye ? 5 : 20; // meters
+            if (window._terrainCache.lastLng != null && window._terrainCache.lastLat != null) {
+                const cosLat = Math.cos(cameraLat * Math.PI / 180);
+                const dLng = (cameraLng - window._terrainCache.lastLng) * 111000 * cosLat;
                 const dLat = (cameraLat - window._terrainCache.lastLat) * 111000;
                 const posDist = Math.sqrt(dLng * dLng + dLat * dLat);
-                if (posDist > maxPosChangePerFrame) {
-                    // Scale down the movement to the max allowed
-                    const scale = maxPosChangePerFrame / posDist;
-                    const metersPerDegLng = 111000 * Math.cos(cameraLat * Math.PI / 180);
-                    const metersPerDegLat = 111000;
+                if (posDist > maxPosChange) {
+                    const scale = maxPosChange / posDist;
                     cameraLng = window._terrainCache.lastLng + (cameraLng - window._terrainCache.lastLng) * scale;
                     cameraLat = window._terrainCache.lastLat + (cameraLat - window._terrainCache.lastLat) * scale;
                 }
@@ -836,23 +863,16 @@
             window._terrainCache.lastLat = cameraLat;
 
             // Bearing smoothing - prevent jarring camera swings on hairpin turns
-            // Use different limits per mode:
-            // - Bird's Eye: 0.08°/frame (~5°/sec) - ultra smooth, lazy rotation
-            // - Other modes: 4°/frame - smooth but responsive
-            const maxBearingChangePerFrame = (mode === CameraModes.BIRDS_EYE) ? 0.08 : 4;
-            if (window._terrainCache.lastBearing !== undefined && window._terrainCache.lastBearing !== null) {
-                let bearingDelta = cameraBearing - window._terrainCache.lastBearing;
-                // Handle wrap-around (e.g., 350° to 10° should be +20°, not -340°)
-                if (bearingDelta > 180) bearingDelta -= 360;
-                if (bearingDelta < -180) bearingDelta += 360;
-                if (Math.abs(bearingDelta) > maxBearingChangePerFrame) {
-                    cameraBearing = window._terrainCache.lastBearing + Math.sign(bearingDelta) * maxBearingChangePerFrame;
-                    // Normalize to 0-360
-                    if (cameraBearing < 0) cameraBearing += 360;
-                    if (cameraBearing >= 360) cameraBearing -= 360;
-                }
-            }
+            // Bird's Eye: 0.08 deg/frame (~5 deg/sec), others: 4 deg/frame
+            const maxBearingChange = isBirdsEye ? 0.08 : 4;
+            cameraBearing = smoothBearing(cameraBearing, window._terrainCache.lastBearing, maxBearingChange);
             window._terrainCache.lastBearing = cameraBearing;
+
+            // Pitch smoothing - prevent jarring pitch changes on terrain transitions
+            // Bird's Eye: 0.1 deg/frame, others: 2 deg/frame
+            const maxPitchChange = isBirdsEye ? 0.1 : 2;
+            cameraPitch = smoothValue(cameraPitch, window._terrainCache.lastPitch, maxPitchChange);
+            window._terrainCache.lastPitch = cameraPitch;
         }
 
         // Debug logging for camera terrain issues with jitter detection
@@ -1040,20 +1060,16 @@
     /**
      * Camera watchdog - detects and fixes stuck/jittering camera
      *
-     * The smoothing cache in _terrainCache can get desynchronized during lerp
-     * transitions (scrub return, mode changes). This watchdog detects when the
-     * actual applied camera altitude is far from what the cache thinks it is,
-     * and resets the cache to prevent the camera from getting stuck.
+     * The smoothing cache in _terrainCache can desync during lerp transitions.
+     * This watchdog detects altitude drift and jitter, resetting the cache as needed.
      *
      * @param {object} appliedState - The actual camera state that was applied
-     * @param {object} dotPoint - Current rider position
      * @param {boolean} isTransitioning - Whether we're in a lerp transition
      * @returns {boolean} true if watchdog triggered a reset
      */
-    function cameraWatchdog(appliedState, dotPoint, isTransitioning) {
+    function cameraWatchdog(appliedState, isTransitioning) {
         if (!appliedState || !window._terrainCache) return false;
 
-        const now = performance.now();
         const appliedAlt = appliedState.alt;
 
         // Track altitude history for jitter detection
@@ -1065,11 +1081,11 @@
         // During transitions, sync the cache to actual applied position
         // This prevents the cache from drifting during lerp interpolation
         if (isTransitioning) {
-            // Keep cache in sync with what we're actually applying
             window._terrainCache.lastCameraAlt = appliedAlt;
             window._terrainCache.lastLng = appliedState.lng;
             window._terrainCache.lastLat = appliedState.lat;
             window._terrainCache.lastBearing = appliedState.bearing;
+            window._terrainCache.lastPitch = appliedState.pitch;
             watchdogStuckFrames = 0;
             return false;
         }
@@ -1120,18 +1136,30 @@
     }
 
     /**
-     * Reset all camera smoothing caches - use when camera gets stuck
+     * Reset smoothing-related cache fields (altitude, bearing, pitch)
+     * Used when transitioning or seeking to prevent false jitter detection
      */
-    function resetCameraCaches() {
-        if (window._terrainCache) {
-            window._terrainCache.lastCameraAlt = null;
-            window._terrainCache.lastLng = null;
-            window._terrainCache.lastLat = null;
-            window._terrainCache.lastBearing = null;
-            window._terrainCache.lastElevation = null;
-        }
+    function resetSmoothingCache() {
         window._lastCameraState = null;
         window._cinematicState = null;
+        if (window._terrainCache) {
+            window._terrainCache.lastCameraAlt = null;
+            window._terrainCache.lastBearing = null;
+            window._terrainCache.lastPitch = null;
+        }
+    }
+
+    /**
+     * Reset all camera caches including position and terrain data
+     * Use when camera gets stuck or after major transitions
+     */
+    function resetCameraCaches() {
+        resetSmoothingCache();
+        if (window._terrainCache) {
+            window._terrainCache.lastLng = null;
+            window._terrainCache.lastLat = null;
+            window._terrainCache.lastElevation = null;
+        }
         cameraHistory = [];
         watchdogAltitudeHistory = [];
     }
@@ -1145,13 +1173,8 @@
     function transitionToMode(newMode) {
         if (newMode === currentCameraMode && modeTransitionProgress >= 1) return;
 
-        // Reset jitter detection state to prevent false positives from mode transitions
-        window._lastCameraState = null;
-        window._cinematicState = null; // Reset cinematic smoothing
-        if (window._terrainCache) {
-            window._terrainCache.lastCameraAlt = null;
-            window._terrainCache.lastBearing = null;
-        }
+        // Reset smoothing state to prevent false jitter detection from mode transitions
+        resetSmoothingCache();
 
         // Reset stability fallback when user manually changes mode
         // This allows them to try other modes after an auto-fallback
@@ -2525,7 +2548,7 @@
      * Fast zoom-up animation for Google Earth-style scrubbing
      */
     function animateScrubZoomUp() {
-        const ZOOM_UP_SPEED = 8; // Fast! Complete in ~0.125 seconds
+        const ZOOM_UP_SPEED = 16; // Very fast! Complete in ~0.06 seconds
 
         overviewTransitionProgress = Math.min(1, overviewTransitionProgress + ZOOM_UP_SPEED * 0.016);
 
@@ -2560,7 +2583,7 @@
      * Fast zoom-down animation when scrubbing ends
      */
     function animateScrubZoomDown() {
-        const ZOOM_DOWN_SPEED = 6; // Fast swoop down
+        const ZOOM_DOWN_SPEED = 12; // Very fast swoop down
 
         overviewTransitionProgress = Math.max(0, overviewTransitionProgress - ZOOM_DOWN_SPEED * 0.016);
 
@@ -2640,14 +2663,7 @@
      */
     function seekToPositionDuringDrag(newPosition) {
         progress = Math.max(0, Math.min(1, newPosition));
-
-        // Reset jitter detection state
-        window._lastCameraState = null;
-        window._cinematicState = null;
-        if (window._terrainCache) {
-            window._terrainCache.lastCameraAlt = null;
-            window._terrainCache.lastBearing = null;
-        }
+        resetSmoothingCache();
 
         const dotDistance = progress * totalDistance;
         const dotPoint = getPointAlongRoute(dotDistance);
@@ -2662,16 +2678,10 @@
             if (overviewTransitionProgress < 1 && scrubAnimationId) {
                 // Animation is handling it
             } else {
-                // At scrub altitude: fast, smooth tracking of the dot
-                // Use higher lerp factor for responsive movement
-                if (overviewTargetState) {
-                    const smoothedState = lerpCameraState(overviewTargetState, newTargetState, 0.4);
-                    applyCameraState(smoothedState, dotPoint, true); // isTransitioning=true during scrub
-                    overviewTargetState = smoothedState;
-                } else {
-                    applyCameraState(newTargetState, dotPoint, true); // isTransitioning=true during scrub
-                    overviewTargetState = newTargetState;
-                }
+                // At scrub altitude: INSTANT tracking of the dot (Google Earth style)
+                // No lerping here - camera should snap to target position immediately
+                applyCameraState(newTargetState, dotPoint, true); // isTransitioning=true during scrub
+                overviewTargetState = newTargetState;
             }
         }
 
@@ -2761,6 +2771,18 @@
             userOverrideActive = false;
             clearTimeout(userOverrideTimeout);
 
+            // When starting playback after seeking while paused, the terrain cache
+            // may be stale (from the old position). Use the user override return mechanism
+            // to smoothly lerp from current camera position to the target state.
+            // This prevents the jarring altitude/pitch jumps at playback start.
+            if (window._terrainCache &&
+                (window._terrainCache.lastCameraAlt === null || window._terrainCache.lastBearing === null)) {
+                // Cache was reset by a seek - set up smooth transition from current position
+                lastUserCameraState = getCurrentCameraState();
+                returnProgress = 0; // Start lerp from 0 (current state) to 1 (target)
+                settlingFramesRemaining = SETTLING_DURATION;
+            }
+
             // If we're in overview mode (from paused scrubber drag), start returning
             if (overviewTransitionProgress > 0) {
                 shouldReturnFromOverview = true;
@@ -2803,13 +2825,7 @@
         const seekDelta = Math.abs(progress - oldProgress);
         const significantSeek = seekDelta > 0.01; // More than 1% of route
 
-        // Reset jitter detection state to prevent false positives from seeking
-        window._lastCameraState = null;
-        window._cinematicState = null; // Reset cinematic smoothing
-        if (window._terrainCache) {
-            window._terrainCache.lastCameraAlt = null;
-            window._terrainCache.lastBearing = null;
-        }
+        resetSmoothingCache();
 
         // Cancel user override when seeking
         if (userOverrideActive) {
@@ -3083,7 +3099,7 @@
 
             // Run watchdog to detect/fix stuck camera
             // Pass the actual applied state so watchdog can sync caches during transitions
-            cameraWatchdog(state, lookAtPoint, isTransitioning);
+            cameraWatchdog(state, isTransitioning);
         } catch (e) {
             // Fallback to standard camera if FreeCamera fails
             map.easeTo({
@@ -3369,12 +3385,7 @@
 
         // Seek to a specific position (0-1)
         seekTo: (pos) => {
-            window._lastCameraState = null;
-        window._cinematicState = null; // Reset cinematic smoothing
-        if (window._terrainCache) {
-            window._terrainCache.lastCameraAlt = null;
-            window._terrainCache.lastBearing = null;
-        } // Reset jitter detection
+            resetSmoothingCache();
             progress = Math.max(0, Math.min(1, pos));
             updateCamera(0);
             console.log(`Seeked to ${(progress * 100).toFixed(1)}% (${(progress * totalDistance).toFixed(2)} km)`);
@@ -3382,12 +3393,7 @@
 
         // Seek to a specific distance in km
         seekToKm: (km) => {
-            window._lastCameraState = null;
-        window._cinematicState = null; // Reset cinematic smoothing
-        if (window._terrainCache) {
-            window._terrainCache.lastCameraAlt = null;
-            window._terrainCache.lastBearing = null;
-        } // Reset jitter detection
+            resetSmoothingCache();
             progress = Math.max(0, Math.min(1, km / totalDistance));
             updateCamera(0);
             console.log(`Seeked to ${km.toFixed(2)} km (${(progress * 100).toFixed(1)}%)`);
