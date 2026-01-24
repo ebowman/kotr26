@@ -1411,6 +1411,9 @@
      * Setup route option buttons
      */
     function setupRouteOptions() {
+        // Load any saved selections from localStorage
+        loadRouteSelections();
+
         const routeCards = document.querySelectorAll('.route-card');
 
         routeCards.forEach(card => {
@@ -1427,6 +1430,9 @@
                     const variant = option.dataset.variant;
                     selectedVariants[day] = variant;
 
+                    // Persist to localStorage
+                    saveRouteSelections();
+
                     // Update trip summary totals
                     updateTripSummary();
 
@@ -1438,7 +1444,7 @@
                 });
             });
 
-            // Set initial active state based on default selection
+            // Set initial active state based on saved/default selection
             const defaultVariant = selectedVariants[day] || 'standard';
             const defaultOption = card.querySelector(`.route-option[data-variant="${defaultVariant}"]`);
             if (defaultOption) {
@@ -1575,6 +1581,42 @@
      * Storage key for profile setup prompt dismissal
      */
     const PROFILE_PROMPT_DISMISSED_KEY = 'kotr-profile-prompt-dismissed';
+
+    /**
+     * Storage key for route selections
+     */
+    const ROUTE_SELECTIONS_KEY = 'kotr-route-selections';
+
+    /**
+     * Load route selections from localStorage
+     */
+    function loadRouteSelections() {
+        try {
+            const stored = localStorage.getItem(ROUTE_SELECTIONS_KEY);
+            if (stored) {
+                const parsed = JSON.parse(stored);
+                // Validate and apply stored selections
+                [2, 3, 4].forEach(day => {
+                    if (parsed[day] === 'standard' || parsed[day] === 'long') {
+                        selectedVariants[day] = parsed[day];
+                    }
+                });
+            }
+        } catch (e) {
+            console.warn('Failed to load route selections:', e);
+        }
+    }
+
+    /**
+     * Save route selections to localStorage
+     */
+    function saveRouteSelections() {
+        try {
+            localStorage.setItem(ROUTE_SELECTIONS_KEY, JSON.stringify(selectedVariants));
+        } catch (e) {
+            console.warn('Failed to save route selections:', e);
+        }
+    }
 
     /**
      * Initialize profile setup prompt
