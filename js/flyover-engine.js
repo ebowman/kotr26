@@ -936,6 +936,10 @@
         if (!window._terrainCache.transitionExitFrames) {
             window._terrainCache.transitionExitFrames = 0;
         }
+        // Track frames since terrain data became available (for faster smoothing)
+        if (!window._terrainCache.terrainAvailableFrames) {
+            window._terrainCache.terrainAvailableFrames = 0;
+        }
 
         if (useSimplifiedCollision) {
             window._terrainCache.wasInTransition = true;
@@ -959,6 +963,26 @@
         if (!useSimplifiedCollision) {
             terrainElevation = queryTerrainElevationWithCache(cameraLng, cameraLat);
         }
+
+        // Detect when terrain data becomes available after being unavailable
+        // This can cause large altitude jumps that need faster smoothing
+        const hadTerrainBefore = window._terrainCache.hadTerrainData === true;
+        const hasTerrainNow = terrainElevation !== null;
+
+        if (!useSimplifiedCollision) {
+            if (!hadTerrainBefore && hasTerrainNow) {
+                // Terrain just became available - start faster smoothing period
+                window._terrainCache.terrainAvailableFrames = 30; // ~0.5 sec at 60fps
+                if (window.FLYOVER_DEBUG) {
+                    console.log('[TERRAIN] Data became available, enabling faster smoothing');
+                }
+            } else if (window._terrainCache.terrainAvailableFrames > 0) {
+                window._terrainCache.terrainAvailableFrames--;
+            }
+            window._terrainCache.hadTerrainData = hasTerrainNow;
+        }
+
+        const terrainJustBecameAvailable = window._terrainCache.terrainAvailableFrames > 0;
 
         // Store original altitude for logging before terrain collision adjustment
         const originalCameraAlt = cameraAlt;
@@ -1008,15 +1032,39 @@
             // Bird's Eye: 4m/frame, Side View: 3m/frame (reduced to prevent terrain jitter on hairpins)
             // Chase/Cinematic: 8m/frame (needs responsive terrain following)
             //
-            // EXCEPTION: If we just exited a transition AND terrain adjusted our altitude,
-            // use faster smoothing (50m/frame) to quickly correct bad positions from LERP.
-            // This prevents both:
-            // 1. The slow "climbing out of terrain" jitter (if we used normal 3-8m limits)
-            // 2. The jarring instant jump (if we skipped smoothing entirely)
+            // EXCEPTION: Use faster smoothing (50m/frame) when:
+            // 1. Just exited a transition AND terrain adjusted altitude (correcting LERP)
+            // 2. Terrain data just became available AND altitude needs adjustment
+            //    (terrain tiles loaded async, causing sudden clearance requirements)
             // At 60fps, 50m/frame corrects a 500m difference in ~167ms - fast but smooth.
-            const maxAltChange = (justExitedTransition && terrainAdjusted) ? 50
+            const needsFasterSmoothing = (justExitedTransition && terrainAdjusted) ||
+                                         (terrainJustBecameAvailable && terrainAdjusted);
+            const maxAltChange = needsFasterSmoothing ? 50
                 : (isBirdsEye ? 4 : (isSideView ? 3 : 8));
-            cameraAlt = smoothValue(cameraAlt, window._terrainCache.lastCameraAlt, maxAltChange);
+
+            // When lastCameraAlt is null but terrain needs adjustment, initialize it
+            // from the pre-adjustment altitude so smoothing can work from a baseline.
+            // This prevents instant jumps when terrain data first becomes available
+            // after a seek or when tiles load asynchronously.
+            if (window._terrainCache.lastCameraAlt === null && terrainAdjusted) {
+                window._terrainCache.lastCameraAlt = originalCameraAlt;
+            }
+
+            // Apply smoothing
+            let smoothedAlt = smoothValue(cameraAlt, window._terrainCache.lastCameraAlt, maxAltChange);
+
+            // Additional safety: if the altitude change is still too large (e.g., due to
+            // edge cases in cache tracking), limit it to our faster smoothing rate.
+            // This is a safety net for any edge cases we might have missed.
+            if (window._terrainCache.lastCameraAlt !== null) {
+                const actualDelta = Math.abs(smoothedAlt - window._terrainCache.lastCameraAlt);
+                if (actualDelta > 50) {
+                    smoothedAlt = window._terrainCache.lastCameraAlt +
+                        Math.sign(cameraAlt - window._terrainCache.lastCameraAlt) * 50;
+                }
+            }
+
+            cameraAlt = smoothedAlt;
             window._terrainCache.lastCameraAlt = cameraAlt;
 
             // Bearing smoothing - prevent jarring camera swings on hairpin turns
@@ -1042,57 +1090,24 @@
             window._terrainCache.lastPitch = cameraPitch;
         }
 
-        // Debug logging for camera terrain issues with jitter detection
+        // Debug logging for camera state (computed, before final smoothing in applyCameraState)
+        // Note: Actual jitter detection moved to applyCameraState where final smoothing is applied
         if (window.FLYOVER_DEBUG) {
-            // Calculate deltas from previous frame
-            let bearingDelta = 0;
-            let altDelta = 0;
-            let posDelta = 0;
-            if (window._lastCameraState) {
-                const last = window._lastCameraState;
-                bearingDelta = cameraBearing - last.bearing;
-                // Handle bearing wrap-around
-                if (bearingDelta > 180) bearingDelta -= 360;
-                if (bearingDelta < -180) bearingDelta += 360;
-                altDelta = cameraAlt - last.alt;
-                // Position delta in meters (approximate)
-                const dLng = (cameraLng - last.lng) * 111000 * Math.cos(cameraLat * Math.PI / 180);
-                const dLat = (cameraLat - last.lat) * 111000;
-                posDelta = Math.sqrt(dLng * dLng + dLat * dLat);
-            }
             window._lastCameraState = { lng: cameraLng, lat: cameraLat, alt: cameraAlt, bearing: cameraBearing };
 
-            // Flag significant jitter
-            const isJittery = Math.abs(bearingDelta) > 10 || Math.abs(altDelta) > 50 || posDelta > 100;
-
-            const debugInfo = {
-                mode: mode,
-                dotAlt: dotPoint.alt.toFixed(1),
-                cameraPos: { lng: cameraLng.toFixed(5), lat: cameraLat.toFixed(5) },
-                terrainAtCamera: terrainElevation !== null ? terrainElevation.toFixed(1) : 'null',
-                originalCameraAlt: originalCameraAlt.toFixed(1),
-                finalCameraAlt: cameraAlt.toFixed(1),
-                terrainAdjusted: terrainAdjusted,
-                clearance: terrainElevation !== null ? (cameraAlt - terrainElevation).toFixed(1) : 'n/a',
-                bearing: cameraBearing.toFixed(1),
-                pitch: cameraPitch.toFixed(1),
-                delta: {
-                    bearing: bearingDelta.toFixed(1),
-                    alt: altDelta.toFixed(1),
-                    pos: posDelta.toFixed(1)
-                },
-                JITTER: isJittery
-            };
-
-            // Only log if jittery or every 30th frame to reduce noise
-            if (isJittery) {
-                console.warn('[CAMERA JITTER]', JSON.stringify(debugInfo));
-            } else if (!window._cameraLogCount) {
+            if (!window._cameraLogCount) {
                 window._cameraLogCount = 0;
             }
             window._cameraLogCount++;
-            if (window._cameraLogCount % 30 === 0) {
-                console.log('[CAMERA]', JSON.stringify(debugInfo));
+            // Log every 60th frame to reduce noise
+            if (window._cameraLogCount % 60 === 0) {
+                console.log('[CAMERA]', {
+                    mode: mode,
+                    dotAlt: dotPoint.alt.toFixed(1),
+                    terrainAtCamera: terrainElevation !== null ? terrainElevation.toFixed(1) : 'null',
+                    computedAlt: cameraAlt.toFixed(1),
+                    terrainAdjusted: terrainAdjusted
+                });
             }
         }
 
@@ -1313,6 +1328,9 @@
             window._terrainCache.lastCameraAlt = null;
             window._terrainCache.lastBearing = null;
             window._terrainCache.lastPitch = null;
+            // Reset terrain availability tracking so we detect when it becomes available again
+            window._terrainCache.hadTerrainData = false;
+            window._terrainCache.terrainAvailableFrames = 0;
         }
     }
 
@@ -1731,7 +1749,7 @@
         // Auto-start playback if requested
         if (params.get('play') === '1') {
             setTimeout(() => {
-                if (!isPlaying) togglePlayPause();
+                if (!isPlaying) togglePlay();
             }, 500);
         }
     }
@@ -3146,7 +3164,29 @@
                 targetState.alt,
                 dotPoint.alt
             );
-            targetState.alt = collision.altitude;
+
+            // Apply smoothing to terrain collision during transitions
+            // This prevents jarring jumps when terrain tiles load mid-transition
+            // Use a faster rate (50m/frame) since transitions need to be responsive
+            if (!window._transitionTerrainCache) {
+                window._transitionTerrainCache = { lastAlt: null };
+            }
+
+            let smoothedAlt = collision.altitude;
+            if (window._transitionTerrainCache.lastAlt !== null) {
+                const delta = collision.altitude - window._transitionTerrainCache.lastAlt;
+                if (Math.abs(delta) > 50) {
+                    smoothedAlt = window._transitionTerrainCache.lastAlt + Math.sign(delta) * 50;
+                }
+            }
+            window._transitionTerrainCache.lastAlt = smoothedAlt;
+
+            targetState.alt = smoothedAlt;
+        } else {
+            // Reset transition cache when not in transition
+            if (window._transitionTerrainCache) {
+                window._transitionTerrainCache.lastAlt = null;
+            }
         }
 
         // Check for camera stability and apply fallback if needed
@@ -3253,6 +3293,68 @@
 
     function applyCameraState(state, lookAtPoint, isTransitioning = false) {
         try {
+            // FINAL SAFETY SMOOTHING: Apply smoothing as the last line of defense
+            // This catches any jumps that slip through other smoothing layers
+            // Limits scale inversely with zoom level - when zoomed out, movements are
+            // more visible so we need tighter smoothing
+            if (_lastAppliedState) {
+                let modified = false;
+                let newState = { ...state };
+
+                // Scale smoothing limits inversely with zoom
+                // At zoom=1.0 (100%): base limits
+                // At zoom=2.0 (200%): half the limits (movements appear 2x larger)
+                // At zoom=3.0 (300%): one-third the limits
+                const zoomFactor = Math.max(0.5, 1 / zoomLevel);
+
+                // Altitude smoothing: base 12m/frame, scaled by zoom
+                // At 100% zoom: 12m/frame (~720m/sec at 60fps)
+                // At 300% zoom: 4m/frame (~240m/sec at 60fps)
+                const maxAltDelta = 12 * zoomFactor;
+                const altDelta = state.alt - _lastAppliedState.alt;
+                if (Math.abs(altDelta) > maxAltDelta) {
+                    newState.alt = _lastAppliedState.alt + Math.sign(altDelta) * maxAltDelta;
+                    modified = true;
+                }
+
+                // Position smoothing: base 6m/frame, scaled by zoom
+                // At 100% zoom: 6m/frame (~360m/sec at 60fps)
+                // At 300% zoom: 2m/frame (~120m/sec at 60fps)
+                const maxPosDelta = 6 * zoomFactor;
+                const cosLat = Math.cos(state.lat * Math.PI / 180);
+                const lngDeltaM = (state.lng - _lastAppliedState.lng) * 111000 * cosLat;
+                const latDeltaM = (state.lat - _lastAppliedState.lat) * 111000;
+                const posDelta = Math.sqrt(lngDeltaM * lngDeltaM + latDeltaM * latDeltaM);
+                if (posDelta > maxPosDelta) {
+                    const scale = maxPosDelta / posDelta;
+                    newState.lng = _lastAppliedState.lng + (state.lng - _lastAppliedState.lng) * scale;
+                    newState.lat = _lastAppliedState.lat + (state.lat - _lastAppliedState.lat) * scale;
+                    modified = true;
+                }
+
+                // Bearing smoothing: base 1.5 deg/frame, scaled by zoom
+                // At 100% zoom: 1.5 deg/frame (~90 deg/sec at 60fps)
+                // At 300% zoom: 0.5 deg/frame (~30 deg/sec at 60fps)
+                const maxBearingDelta = 1.5 * zoomFactor;
+                let bearingDelta = state.bearing - _lastAppliedState.bearing;
+                if (bearingDelta > 180) bearingDelta -= 360;
+                if (bearingDelta < -180) bearingDelta += 360;
+                if (Math.abs(bearingDelta) > maxBearingDelta) {
+                    newState.bearing = _lastAppliedState.bearing + Math.sign(bearingDelta) * maxBearingDelta;
+                    // Normalize to 0-360
+                    newState.bearing = ((newState.bearing % 360) + 360) % 360;
+                    modified = true;
+                }
+
+                if (modified) {
+                    state = newState;
+                    // Sync terrain cache with actually applied altitude to prevent watchdog false positives
+                    if (window._terrainCache) {
+                        window._terrainCache.lastCameraAlt = state.alt;
+                    }
+                }
+            }
+
             // Jitter detection logging
             if (_lastAppliedState && window.FLYOVER_DEBUG) {
                 const altDelta = Math.abs(state.alt - _lastAppliedState.alt);
@@ -3618,8 +3720,8 @@
         getMap: () => map,
 
         // Pause/play
-        pause: () => { if (isPlaying) togglePlayPause(); },
-        play: () => { if (!isPlaying) togglePlayPause(); },
+        pause: () => { if (isPlaying) togglePlay(); },
+        play: () => { if (!isPlaying) togglePlay(); },
 
         // Watchdog status and controls
         watchdog: {
