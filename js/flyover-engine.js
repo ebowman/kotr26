@@ -253,6 +253,12 @@
             saveZoomToStorage(zoomLevel);
             updateZoomIndicator();
 
+            // Reset predictive camera spring so zoom change is immediate
+            // Without this, the spring would slowly transition to the new zoom level
+            if (predictiveCameraController) {
+                predictiveCameraController.getCameraSpring().reset(null);
+            }
+
             // Force immediate camera update
             if (!isPlaying) {
                 freeNavigationEnabled = false;
@@ -734,6 +740,342 @@
         };
     }
 
+    // =========================================================================
+    // PREDICTIVE CAMERA SYSTEM
+    // Instead of reactively following the rider and applying post-hoc smoothing,
+    // this system samples future rider positions, computes a weighted centroid,
+    // and uses critically damped springs for smooth camera movement.
+    // The key insight: local path variations (zigzags, S-curves) mathematically
+    // cancel out in the weighted centroid - the camera moves smoothly while
+    // the rider follows the actual path.
+    // =========================================================================
+
+    /**
+     * Critically Damped Spring - provides smooth, natural motion without oscillation
+     * This is the gold standard for game camera smoothing.
+     *
+     * @param {number} omega - Angular frequency (higher = faster response, typical: 1.0-2.0)
+     */
+    class CriticallyDampedSpring {
+        constructor(omega = 1.5) {
+            this.omega = omega;
+            this.position = null;  // { lng, lat, alt }
+            this.velocity = { lng: 0, lat: 0, alt: 0 };
+        }
+
+        /**
+         * Update the spring toward a target position
+         * @param {object} target - Target position { lng, lat, alt }
+         * @param {number} deltaTime - Time step in seconds
+         * @returns {object} - Smoothed position { lng, lat, alt }
+         */
+        update(target, deltaTime) {
+            if (!this.position) {
+                this.position = { ...target };
+                return this.position;
+            }
+
+            // Clamp deltaTime to prevent instability
+            const dt = Math.min(deltaTime, 0.1);
+            const omega = this.omega;
+            const omega2 = omega * omega;
+
+            // Critically damped spring: zeta = 1.0
+            // Formula: a = -omega^2 * displacement - 2 * omega * velocity
+            for (const axis of ['lng', 'lat', 'alt']) {
+                const displacement = this.position[axis] - target[axis];
+                const acceleration = -omega2 * displacement - 2 * omega * this.velocity[axis];
+
+                this.velocity[axis] += acceleration * dt;
+                this.position[axis] += this.velocity[axis] * dt;
+            }
+
+            return { ...this.position };
+        }
+
+        /**
+         * Reset the spring to a specific position (for mode changes, etc.)
+         */
+        reset(position) {
+            this.position = position ? { ...position } : null;
+            this.velocity = { lng: 0, lat: 0, alt: 0 };
+        }
+
+        /**
+         * Check if spring has settled (velocity near zero)
+         */
+        isSettled(threshold = 0.001) {
+            return Math.abs(this.velocity.lng) < threshold &&
+                   Math.abs(this.velocity.lat) < threshold &&
+                   Math.abs(this.velocity.alt) < threshold;
+        }
+    }
+
+    /**
+     * Configuration for predictive camera system
+     */
+    const PredictiveCameraConfig = {
+        sampleIntervalMeters: 20,    // Sample every 20m along path
+        minSamples: 6,               // Minimum samples even at low speed
+        maxSamples: 30,              // Cap for performance
+        lookAheadSeconds: 12,        // How far ahead to sample (time-based limit)
+        predictionTau: 6.0,          // Centroid time constant (seconds)
+        cameraSpringOmega: 1.5,      // Camera spring frequency
+        lookAtSpringOmega: 2.0,      // Look-at spring frequency (faster)
+        riderCenterWeight: 0.65,     // Balance rider vs prediction in look-at (0=prediction, 1=rider)
+        minLookAheadSeconds: 3.0,    // Minimum look-ahead even near route end
+    };
+
+    /**
+     * Sample future positions along the route using distance-based intervals.
+     * This ensures consistent path geometry coverage regardless of speed,
+     * which is critical for the weighted centroid to properly average out zigzags.
+     *
+     * @param {number} currentDistanceKm - Current position along route (km)
+     * @param {number} speedKmh - Current speed in km/h
+     * @param {number} maxSeconds - Maximum look-ahead time
+     * @returns {Array} - Array of { time, position, distanceAhead } samples
+     */
+    function sampleFuturePositions(currentDistanceKm, speedKmh, maxSeconds) {
+        const samples = [];
+
+        // Handle edge cases
+        if (!routeData || speedKmh <= 0) {
+            const currentPos = getPointAlongRoute(currentDistanceKm);
+            if (currentPos) {
+                samples.push({ time: 0, position: currentPos, distanceAhead: 0 });
+            }
+            return samples;
+        }
+
+        const config = PredictiveCameraConfig;
+        const routeDistanceKm = totalDistance;
+
+        // Calculate total look-ahead distance based on speed and time
+        const lookAheadDistanceKm = (speedKmh / 3600) * maxSeconds;  // km
+        const lookAheadDistanceM = lookAheadDistanceKm * 1000;       // meters
+
+        // Determine sample count based on distance (not time) for consistent coverage
+        const rawSampleCount = Math.ceil(lookAheadDistanceM / config.sampleIntervalMeters);
+        const sampleCount = Math.max(config.minSamples, Math.min(rawSampleCount, config.maxSamples));
+
+        // Sample at uniform distance intervals
+        for (let i = 0; i < sampleCount; i++) {
+            const fractionAhead = i / (sampleCount - 1);  // 0 to 1
+            const distanceAheadKm = fractionAhead * lookAheadDistanceKm;
+            const sampleDistanceKm = Math.min(
+                currentDistanceKm + distanceAheadKm,
+                routeDistanceKm - 0.001  // Stay slightly before end
+            );
+
+            // Calculate time to reach this point (for weighting)
+            const timeToReach = speedKmh > 0 ? (distanceAheadKm * 3600) / speedKmh : 0;
+
+            const position = getPointAlongRoute(sampleDistanceKm);
+            if (position) {
+                samples.push({
+                    time: timeToReach,
+                    position,
+                    distanceAhead: distanceAheadKm * 1000  // meters
+                });
+            }
+        }
+
+        return samples;
+    }
+
+    /**
+     * Compute weighted centroid of future positions using exponential decay.
+     * This is the core algorithm that makes local path variations "invisible" -
+     * zigzags and S-curves cancel out because we're averaging positions, not following a path.
+     *
+     * @param {Array} samples - Array of { time, position } from sampleFuturePositions
+     * @param {number} tau - Time constant for exponential decay (seconds)
+     * @returns {object} - Weighted centroid { lng, lat, alt }
+     */
+    function computeWeightedCentroid(samples, tau) {
+        if (!samples || samples.length === 0) {
+            return null;
+        }
+
+        if (samples.length === 1) {
+            return { ...samples[0].position };
+        }
+
+        let totalWeight = 0;
+        const weighted = { lng: 0, lat: 0, alt: 0 };
+
+        for (const sample of samples) {
+            // Exponential decay: weight = e^(-t/tau)
+            // At t=0: weight=1.0, at t=tau: weight≈0.37, at t=2*tau: weight≈0.14
+            const weight = Math.exp(-sample.time / tau);
+
+            weighted.lng += sample.position.lng * weight;
+            weighted.lat += sample.position.lat * weight;
+            weighted.alt += sample.position.alt * weight;
+            totalWeight += weight;
+        }
+
+        if (totalWeight === 0) {
+            return { ...samples[0].position };
+        }
+
+        return {
+            lng: weighted.lng / totalWeight,
+            lat: weighted.lat / totalWeight,
+            alt: weighted.alt / totalWeight
+        };
+    }
+
+    /**
+     * Calculate distance between two geographic points in meters
+     */
+    function haversineDistance(p1, p2) {
+        const R = 6371000; // Earth radius in meters
+        const lat1 = p1.lat * Math.PI / 180;
+        const lat2 = p2.lat * Math.PI / 180;
+        const dLat = (p2.lat - p1.lat) * Math.PI / 180;
+        const dLng = (p2.lng - p1.lng) * Math.PI / 180;
+
+        const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                  Math.cos(lat1) * Math.cos(lat2) *
+                  Math.sin(dLng / 2) * Math.sin(dLng / 2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+        return R * c;
+    }
+
+    /**
+     * Predictive Camera Controller
+     * Orchestrates the predictive camera system for all view modes.
+     */
+    class PredictiveCameraController {
+        constructor() {
+            this.config = PredictiveCameraConfig;
+
+            // Springs for smooth camera movement
+            this.cameraSpring = new CriticallyDampedSpring(this.config.cameraSpringOmega);
+            this.lookAtSpring = new CriticallyDampedSpring(this.config.lookAtSpringOmega);
+
+            // Cached prediction state
+            this.lastPredictedTarget = null;
+            this.lastSamples = null;
+
+            // Mode tracking for resets
+            this.lastMode = null;
+        }
+
+        /**
+         * Update the predictive camera system
+         * @param {object} riderPosition - Current rider { lng, lat, alt }
+         * @param {number} riderDistanceKm - Distance along route in km
+         * @param {number} speedKmh - Current speed in km/h
+         * @param {string} mode - Camera mode (chase, birds_eye, side_view)
+         * @param {number} deltaTime - Time since last frame in seconds
+         * @returns {object} - { predictedTarget, cameraTarget, lookAtTarget, samples }
+         */
+        update(riderPosition, riderDistanceKm, speedKmh, mode, deltaTime) {
+            // Reset springs on mode change
+            if (mode !== this.lastMode) {
+                this.cameraSpring.reset(null);
+                this.lookAtSpring.reset(null);
+                this.lastMode = mode;
+            }
+
+            // Calculate effective look-ahead based on remaining route
+            const remainingKm = totalDistance - riderDistanceKm;
+            const remainingSeconds = speedKmh > 0 ? (remainingKm * 3600) / speedKmh : 999;
+            let effectiveLookAhead = Math.min(
+                this.config.lookAheadSeconds,
+                remainingSeconds * 0.8  // Don't look past 80% of remaining
+            );
+            effectiveLookAhead = Math.max(effectiveLookAhead, this.config.minLookAheadSeconds);
+
+            // Sample future positions (distance-based for consistent coverage)
+            const samples = sampleFuturePositions(riderDistanceKm, speedKmh, effectiveLookAhead);
+            this.lastSamples = samples;
+
+            if (samples.length === 0) {
+                return {
+                    predictedTarget: riderPosition,
+                    cameraTarget: riderPosition,
+                    lookAtTarget: riderPosition,
+                    samples: []
+                };
+            }
+
+            // Compute weighted centroid - this "sees through" path zigzags
+            const tau = this.config.predictionTau;
+            const predictedTarget = computeWeightedCentroid(samples, tau);
+            this.lastPredictedTarget = predictedTarget;
+
+            // Calculate look-at point: blend between prediction and rider
+            // Higher riderCenterWeight keeps rider more centered
+            const riderWeight = this.config.riderCenterWeight;
+            const rawLookAt = {
+                lng: lerp(predictedTarget.lng, riderPosition.lng, riderWeight),
+                lat: lerp(predictedTarget.lat, riderPosition.lat, riderWeight),
+                alt: lerp(predictedTarget.alt, riderPosition.alt, riderWeight)
+            };
+
+            // Apply spring smoothing to look-at target
+            const smoothedLookAt = this.lookAtSpring.update(rawLookAt, deltaTime);
+
+            return {
+                predictedTarget,
+                cameraTarget: predictedTarget,  // Mode-specific offset applied later
+                lookAtTarget: smoothedLookAt,
+                samples
+            };
+        }
+
+        /**
+         * Get the camera spring for external position smoothing
+         */
+        getCameraSpring() {
+            return this.cameraSpring;
+        }
+
+        /**
+         * Reset all state (for route changes, etc.)
+         */
+        reset() {
+            this.cameraSpring.reset(null);
+            this.lookAtSpring.reset(null);
+            this.lastPredictedTarget = null;
+            this.lastSamples = null;
+            this.lastMode = null;
+        }
+
+        /**
+         * Get debug info for visualization
+         */
+        getDebugInfo() {
+            return {
+                samples: this.lastSamples,
+                predictedTarget: this.lastPredictedTarget,
+                config: this.config
+            };
+        }
+    }
+
+    // Global predictive camera controller instance
+    let predictiveCameraController = null;
+
+    /**
+     * Get or create the predictive camera controller
+     */
+    function getPredictiveCameraController() {
+        if (!predictiveCameraController) {
+            predictiveCameraController = new PredictiveCameraController();
+        }
+        return predictiveCameraController;
+    }
+
+    // =========================================================================
+    // END PREDICTIVE CAMERA SYSTEM
+    // =========================================================================
+
     /**
      * Calculate camera state for a given mode
      * Applies zoomLevel multiplier to all distance/height parameters
@@ -746,7 +1088,7 @@
      * @param {number} deltaTime - Time since last frame
      * @param {boolean} skipSmoothing - Skip cache-based smoothing (use during lerp transitions)
      */
-    function calculateCameraForMode(mode, dotPoint, nextPoint, deltaTime, skipSmoothing = false) {
+    function calculateCameraForMode(mode, dotPoint, nextPoint, deltaTime, skipSmoothing = false, predictiveData = null) {
         if (!dotPoint || !nextPoint) return null;
 
         const config = CameraModeConfig[mode];
@@ -754,6 +1096,10 @@
 
         // Apply zoom level to all camera distances
         const zoom = zoomLevel;
+
+        // Check if we're using the predictive camera system
+        const usePredictive = isPredictiveCameraEnabled() && predictiveData &&
+            (mode === CameraModes.CHASE || mode === CameraModes.BIRDS_EYE || mode === CameraModes.SIDE_VIEW);
 
         // UNIVERSAL RIDER POSITION SMOOTHING
         // Apply exponential smoothing to rider position for all modes except cinematic
@@ -779,16 +1125,51 @@
                 const calculatedAltitude = offsetBehind * Math.tan(pitchRadians);
 
                 const behindBearing = (forwardBearing + 180) % 360;
+
+                // PREDICTIVE CAMERA: Position camera based on predicted target direction
+                // This makes the camera anticipate direction changes instead of reacting
+                // The predicted target already has local variations averaged out
+                let basePoint = smoothedDotPoint;
+                if (usePredictive && predictiveData && predictiveData.lookAtTarget) {
+                    // Blend between rider and look-at target for camera base position
+                    // This creates a "pulling" effect toward the predicted direction
+                    const blendFactor = 0.3;  // 30% toward predicted, 70% rider
+                    basePoint = {
+                        lng: lerp(smoothedDotPoint.lng, predictiveData.lookAtTarget.lng, blendFactor),
+                        lat: lerp(smoothedDotPoint.lat, predictiveData.lookAtTarget.lat, blendFactor),
+                        alt: lerp(smoothedDotPoint.alt, predictiveData.lookAtTarget.alt, blendFactor)
+                    };
+                }
+
                 const offsetPoint = turf.destination(
-                    turf.point([smoothedDotPoint.lng, smoothedDotPoint.lat]),
+                    turf.point([basePoint.lng, basePoint.lat]),
                     offsetBehind / 1000,
                     behindBearing,
                     { units: 'kilometers' }
                 );
-                cameraLng = offsetPoint.geometry.coordinates[0];
-                cameraLat = offsetPoint.geometry.coordinates[1];
-                // Use calculated altitude based on pitch, plus terrain following
-                cameraAlt = smoothedDotPoint.alt + calculatedAltitude + (smoothedDotPoint.alt * 0.1);
+
+                let idealCameraPos = {
+                    lng: offsetPoint.geometry.coordinates[0],
+                    lat: offsetPoint.geometry.coordinates[1],
+                    // Use calculated altitude based on pitch, plus terrain following
+                    alt: basePoint.alt + calculatedAltitude + (basePoint.alt * 0.1)
+                };
+
+                // PREDICTIVE CAMERA: Apply critically damped spring smoothing
+                // This replaces the multiple exponential smoothing layers with a single,
+                // physics-based smoothing system that naturally handles all variations
+                if (usePredictive && predictiveData && !skipSmoothing) {
+                    const spring = getPredictiveCameraController().getCameraSpring();
+                    const smoothedPos = spring.update(idealCameraPos, deltaTime);
+                    cameraLng = smoothedPos.lng;
+                    cameraLat = smoothedPos.lat;
+                    cameraAlt = smoothedPos.alt;
+                } else {
+                    cameraLng = idealCameraPos.lng;
+                    cameraLat = idealCameraPos.lat;
+                    cameraAlt = idealCameraPos.alt;
+                }
+
                 cameraBearing = forwardBearing;
                 cameraPitch = chaseCamPitch;
                 break;
@@ -799,16 +1180,47 @@
                 // Position directly above for maximum smoothness (no bearing-dependent offset)
                 // Small fixed south offset avoids gimbal lock with lookAtPoint
                 const offsetUp = config.offsetUp * zoom;
+
+                // PREDICTIVE CAMERA: Use predicted target for more stable bearing
+                // In bird's eye, rotation stability is more important than position
+                let basePoint = smoothedDotPoint;
+                if (usePredictive && predictiveData && predictiveData.lookAtTarget) {
+                    // Small blend toward predicted target for smoother position
+                    const blendFactor = 0.2;  // 20% toward predicted
+                    basePoint = {
+                        lng: lerp(smoothedDotPoint.lng, predictiveData.lookAtTarget.lng, blendFactor),
+                        lat: lerp(smoothedDotPoint.lat, predictiveData.lookAtTarget.lat, blendFactor),
+                        alt: lerp(smoothedDotPoint.alt, predictiveData.lookAtTarget.alt, blendFactor)
+                    };
+                }
+
                 const southOffset = turf.destination(
-                    turf.point([smoothedDotPoint.lng, smoothedDotPoint.lat]),
+                    turf.point([basePoint.lng, basePoint.lat]),
                     0.03 * zoom, // Small fixed offset south (not bearing-dependent)
                     180, // Always south - no position jumps when bearing changes
                     { units: 'kilometers' }
                 );
-                cameraLng = southOffset.geometry.coordinates[0];
-                cameraLat = southOffset.geometry.coordinates[1];
-                cameraAlt = smoothedDotPoint.alt + offsetUp;
-                cameraBearing = forwardBearing; // Will be heavily smoothed (0.08°/frame)
+
+                let idealCameraPos = {
+                    lng: southOffset.geometry.coordinates[0],
+                    lat: southOffset.geometry.coordinates[1],
+                    alt: basePoint.alt + offsetUp
+                };
+
+                // PREDICTIVE CAMERA: Apply spring smoothing
+                if (usePredictive && predictiveData && !skipSmoothing) {
+                    const spring = getPredictiveCameraController().getCameraSpring();
+                    const smoothedPos = spring.update(idealCameraPos, deltaTime);
+                    cameraLng = smoothedPos.lng;
+                    cameraLat = smoothedPos.lat;
+                    cameraAlt = smoothedPos.alt;
+                } else {
+                    cameraLng = idealCameraPos.lng;
+                    cameraLat = idealCameraPos.lat;
+                    cameraAlt = idealCameraPos.alt;
+                }
+
+                cameraBearing = forwardBearing; // Already uses predicted target for bearing
                 cameraPitch = config.pitch;
                 break;
             }
@@ -1032,9 +1444,27 @@
                     offsetPoint = rightPoint;
                 }
 
-                cameraLng = offsetPoint.geometry.coordinates[0];
-                cameraLat = offsetPoint.geometry.coordinates[1];
-                cameraAlt = smoothedDotPoint.alt + offsetUp;
+                // PREDICTIVE CAMERA: Apply spring smoothing for side view
+                // Side view benefits greatly from predictive smoothing because it's sensitive
+                // to bearing changes (camera position is perpendicular to direction of travel)
+                let idealCameraPos = {
+                    lng: offsetPoint.geometry.coordinates[0],
+                    lat: offsetPoint.geometry.coordinates[1],
+                    alt: smoothedDotPoint.alt + offsetUp
+                };
+
+                if (usePredictive && predictiveData && !skipSmoothing) {
+                    const spring = getPredictiveCameraController().getCameraSpring();
+                    const smoothedPos = spring.update(idealCameraPos, deltaTime);
+                    cameraLng = smoothedPos.lng;
+                    cameraLat = smoothedPos.lat;
+                    cameraAlt = smoothedPos.alt;
+                } else {
+                    cameraLng = idealCameraPos.lng;
+                    cameraLat = idealCameraPos.lat;
+                    cameraAlt = idealCameraPos.alt;
+                }
+
                 // Look at the dot from the side
                 cameraBearing = (sideBearing + 180) % 360;
                 cameraPitch = config.pitch;
@@ -1930,6 +2360,11 @@
             // Reset last dot point
             lastDotPoint = null;
 
+            // Reset predictive camera controller for new route
+            if (predictiveCameraController) {
+                predictiveCameraController.reset();
+            }
+
             // Initialize stats at position 0
             initializeStats();
 
@@ -1954,11 +2389,15 @@
     /**
      * Apply URL parameters for debugging (position, mode, debug)
      * Supported parameters:
-     *   pos=0.6      - Position as fraction (0-1)
-     *   km=78.5      - Position in kilometers
-     *   mode=chase   - Camera mode (chase, birds_eye, side_view, cinematic)
-     *   debug=1      - Enable debug logging
-     *   play=1       - Auto-start playback
+     *   pos=0.6        - Position as fraction (0-1)
+     *   km=78.5        - Position in kilometers
+     *   mode=chase     - Camera mode (chase, birds_eye, side_view, cinematic)
+     *   debug=1        - Enable debug logging
+     *   play=1         - Auto-start playback
+     *   predictive=0   - Disable predictive camera (use legacy reactive camera for A/B testing)
+     *   predictive=1   - Enable predictive camera (default)
+     *
+     * Debug: Set window.PREDICTIVE_CAMERA_DEBUG=true in console to see prediction info
      */
     function applyUrlParameters(params) {
         // Enable debug mode if requested
@@ -2017,6 +2456,16 @@
                 updateCamera(0);
                 updateProgress();
             }, 100);
+        }
+
+        // Disable predictive camera if requested (for A/B testing)
+        const predictiveParam = params.get('predictive');
+        if (predictiveParam === '0' || predictiveParam === 'false') {
+            window.PREDICTIVE_CAMERA_DISABLED = true;
+            console.log('Predictive camera DISABLED via URL parameter. Using legacy reactive camera.');
+        } else if (predictiveParam === '1' || predictiveParam === 'true') {
+            window.PREDICTIVE_CAMERA_DISABLED = false;
+            console.log('Predictive camera ENABLED via URL parameter.');
         }
 
         // Auto-start playback if requested
@@ -2807,6 +3256,10 @@
                     zoomLevel = ZOOM_DEFAULT;
                     saveZoomToStorage(zoomLevel);
                     updateZoomIndicator();
+                    // Reset predictive camera spring for immediate zoom change
+                    if (predictiveCameraController) {
+                        predictiveCameraController.getCameraSpring().reset(null);
+                    }
                     if (!isPlaying) {
                         freeNavigationEnabled = false;
                         updateCamera(0.016);
@@ -3424,16 +3877,77 @@
      * Update camera position using FreeCamera API with mode support
      * Handles mode transitions, user override, and overview return with smooth transitions
      */
+    /**
+     * Calculate the current virtual speed of the rider in km/h
+     * This is based on animation parameters, not realistic cycling speed
+     */
+    function getCurrentVirtualSpeedKmh() {
+        const duration = Math.max(CONFIG.minDuration, (totalDistance / 100) * CONFIG.baseDuration);
+        const distancePerSecond = totalDistance * speedMultiplier / duration;
+        return distancePerSecond * 3600; // Convert to km/h
+    }
+
+    // Feature flag for predictive camera system
+    // Set to true to enable the new predictive camera for chase/birds_eye/side_view
+    // Can be disabled via URL parameter: ?predictive=0
+    function isPredictiveCameraEnabled() {
+        if (window.PREDICTIVE_CAMERA_DISABLED) return false;
+        return true;  // Default: enabled
+    }
+    const ENABLE_PREDICTIVE_CAMERA = true;  // Base flag (can be overridden by URL param)
+
     function updateCamera(deltaTime = 0) {
         // Dot position from turf.along() - constant speed along the path
         const dotDistance = progress * totalDistance;
         const dotPoint = getPointAlongRoute(dotDistance);
 
-        // Direction point for camera bearing (slightly ahead)
+        // Direction point for camera bearing (slightly ahead) - legacy fallback
         const directionDistance = Math.min(dotDistance + CONFIG.lookAheadDistance / 1000, totalDistance);
         const directionPoint = getPointAlongRoute(directionDistance);
 
         if (!dotPoint || !directionPoint) return;
+
+        // PREDICTIVE CAMERA SYSTEM
+        // For chase, bird's eye, and side view, use the predictive camera controller
+        // which samples future positions and computes a weighted centroid.
+        // This makes local path variations (zigzags, S-curves) mathematically invisible.
+        let predictedTarget = directionPoint;  // Fallback to legacy
+        let predictiveData = null;
+
+        const usePredictive = isPredictiveCameraEnabled() &&
+            (targetCameraMode === CameraModes.CHASE ||
+             targetCameraMode === CameraModes.BIRDS_EYE ||
+             targetCameraMode === CameraModes.SIDE_VIEW);
+
+        if (usePredictive && routeData) {
+            const controller = getPredictiveCameraController();
+            const speedKmh = getCurrentVirtualSpeedKmh();
+
+            predictiveData = controller.update(
+                dotPoint,
+                dotDistance,  // Current distance in km
+                speedKmh,
+                targetCameraMode,
+                deltaTime
+            );
+
+            if (predictiveData && predictiveData.predictedTarget) {
+                // Use the predicted target for bearing calculation
+                // This makes the camera anticipate direction changes
+                predictedTarget = predictiveData.predictedTarget;
+
+                // Debug logging for predictive camera (can be enabled via console)
+                if (window.PREDICTIVE_CAMERA_DEBUG && predictiveData.samples) {
+                    const distToTarget = haversineDistance(dotPoint, predictedTarget);
+                    console.log('[PREDICTIVE]', {
+                        samples: predictiveData.samples.length,
+                        lookAheadM: Math.round(predictiveData.samples[predictiveData.samples.length - 1]?.distanceAhead || 0),
+                        distToTargetM: Math.round(distToTarget),
+                        speedKmh: Math.round(speedKmh)
+                    });
+                }
+            }
+        }
 
         // Handle free navigation mode (when paused, user can navigate freely)
         // Only update dot and UI, don't control camera
@@ -3457,7 +3971,16 @@
 
         // Calculate target camera state for the current/target mode
         // Skip smoothing during transitions - the lerp provides its own smoothing
-        let targetState = calculateCameraForMode(targetCameraMode, dotPoint, directionPoint, deltaTime, isInAnyTransition);
+        // When predictive camera is enabled, use predictedTarget for bearing/direction
+        // This makes the camera anticipate direction changes instead of reacting to them
+        let targetState = calculateCameraForMode(
+            targetCameraMode,
+            dotPoint,
+            usePredictive ? predictedTarget : directionPoint,  // Predicted target for bearing
+            deltaTime,
+            isInAnyTransition,
+            predictiveData  // Pass predictive data for spring-based smoothing
+        );
         if (!targetState) return;
 
         // During transitions, apply terrain collision to the TARGET state.
