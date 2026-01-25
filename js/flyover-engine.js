@@ -312,6 +312,110 @@
     }
 
     /**
+     * Normalize a bearing to [0, 360) range
+     */
+    function normalizeBearing(bearing) {
+        if (bearing < 0) return bearing + 360;
+        if (bearing >= 360) return bearing - 360;
+        return bearing;
+    }
+
+    /**
+     * Calculate bearing delta with wrap-around handling
+     * Returns delta in range (-180, 180]
+     */
+    function bearingDelta(current, previous) {
+        let delta = current - previous;
+        if (delta > 180) delta -= 360;
+        if (delta < -180) delta += 360;
+        return delta;
+    }
+
+    /**
+     * Create a new exponential smoothing state for position tracking
+     */
+    function createSmoothState(point, mode) {
+        return {
+            lng: point.lng,
+            lat: point.lat,
+            alt: point.alt,
+            mode: mode
+        };
+    }
+
+    /**
+     * Apply exponential smoothing to a position state
+     * Returns the smoothed position as { lng, lat, alt }
+     */
+    function applySmoothPosition(state, target, alpha) {
+        state.lng += alpha * (target.lng - state.lng);
+        state.lat += alpha * (target.lat - state.lat);
+        state.alt += alpha * (target.alt - state.alt);
+        return { lng: state.lng, lat: state.lat, alt: state.alt };
+    }
+
+    /**
+     * Get or initialize a global smoothing state, resetting if mode changed
+     */
+    function getOrInitSmoothState(stateKey, point, mode) {
+        if (!window[stateKey] || window[stateKey].mode !== mode) {
+            window[stateKey] = createSmoothState(point, mode);
+        }
+        return window[stateKey];
+    }
+
+    /**
+     * Get smoothing alpha value for a camera mode
+     * Lower alpha = more aggressive smoothing (slower response)
+     */
+    function getRiderSmoothingAlpha(mode) {
+        switch (mode) {
+            case CameraModes.SIDE_VIEW: return 0.008;  // Maximum smoothing for side view
+            case CameraModes.CHASE: return 0.015;
+            default: return 0.03;
+        }
+    }
+
+    /**
+     * Get camera position smoothing alpha value for a camera mode
+     */
+    function getCameraSmoothingAlpha(mode) {
+        switch (mode) {
+            case CameraModes.SIDE_VIEW: return 0.015;  // Maximum smoothing for side view
+            case CameraModes.CHASE: return 0.02;
+            default: return 0.04;
+        }
+    }
+
+    /**
+     * Calculate position delta in meters between two camera states
+     */
+    function calculatePositionDelta(current, previous) {
+        const cosLat = Math.cos(current.lat * Math.PI / 180);
+        const lngDeltaM = (current.lng - previous.lng) * 111000 * cosLat;
+        const latDeltaM = (current.lat - previous.lat) * 111000;
+        return Math.sqrt(lngDeltaM * lngDeltaM + latDeltaM * latDeltaM);
+    }
+
+    /**
+     * Calculate mean and standard deviation of an array
+     */
+    function calculateStats(arr) {
+        const mean = arr.reduce((a, b) => a + b, 0) / arr.length;
+        const variance = arr.reduce((sum, val) => sum + (val - mean) ** 2, 0) / arr.length;
+        return { mean, stddev: Math.sqrt(variance) };
+    }
+
+    /**
+     * Calculate smoothness score from standard deviation
+     * Returns a 0-100 score where 100 is perfectly smooth
+     */
+    function calculateSmoothnessScore(stddev, factor, useSqrt = false) {
+        const penalty = useSqrt ? Math.sqrt(stddev) * factor : stddev * factor;
+        return Math.max(0, 100 - penalty);
+    }
+
+    /**
      * Spherical linear interpolation for coordinates
      */
     function lerpCoord(start, end, t) {
@@ -355,19 +459,44 @@
         try {
             elevation = map.queryTerrainElevation([lng, lat]);
             if (elevation !== null && elevation !== undefined) {
-                // Valid terrain data - cache it
+                // Valid terrain data - cache it with position
                 if (window._terrainCache) {
                     window._terrainCache.lastElevation = elevation;
-                    window._terrainCache.lastPosition = { lng, lat };
+                    window._terrainCache.lastElevationLng = lng;
+                    window._terrainCache.lastElevationLat = lat;
                 }
             } else if (window._terrainCache && window._terrainCache.lastElevation !== null) {
-                // Terrain query returned null - use cached value
-                elevation = window._terrainCache.lastElevation;
+                // Terrain query returned null - only use cache if query is near cached position.
+                // Using a distant cached value causes jitter when moving through varying terrain
+                // because the fallback value doesn't match the actual terrain at the query point.
+                const cachedLng = window._terrainCache.lastElevationLng;
+                const cachedLat = window._terrainCache.lastElevationLat;
+                if (cachedLng != null && cachedLat != null) {
+                    const cosLat = Math.cos(lat * Math.PI / 180);
+                    const dLng = (lng - cachedLng) * 111000 * cosLat;
+                    const dLat = (lat - cachedLat) * 111000;
+                    const distance = Math.sqrt(dLng * dLng + dLat * dLat);
+                    // Only use cache if within 50m - terrain can vary significantly beyond that
+                    if (distance < 50) {
+                        elevation = window._terrainCache.lastElevation;
+                    }
+                    // If too far, return null - better to skip collision than use wrong value
+                }
             }
         } catch (e) {
-            // Terrain query not available - use cached value
+            // Terrain query not available - same position-aware cache logic
             if (window._terrainCache && window._terrainCache.lastElevation !== null) {
-                elevation = window._terrainCache.lastElevation;
+                const cachedLng = window._terrainCache.lastElevationLng;
+                const cachedLat = window._terrainCache.lastElevationLat;
+                if (cachedLng != null && cachedLat != null) {
+                    const cosLat = Math.cos(lat * Math.PI / 180);
+                    const dLng = (lng - cachedLng) * 111000 * cosLat;
+                    const dLat = (lat - cachedLat) * 111000;
+                    const distance = Math.sqrt(dLng * dLng + dLat * dLat);
+                    if (distance < 50) {
+                        elevation = window._terrainCache.lastElevation;
+                    }
+                }
             }
         }
 
@@ -556,10 +685,18 @@
 
             if (cumulativeDistance + segmentLength >= targetDistance) {
                 // Interpolate within this segment
+                // Guard against very short segments (< 1m) which could cause division issues
+                if (segmentLength < 0.001) { // Less than 1 meter
+                    const alt1 = coords[i - 1][2] || 0;
+                    const alt2 = coords[i][2] || 0;
+                    return (alt1 + alt2) / 2; // Just average the two altitudes
+                }
                 const ratio = (targetDistance - cumulativeDistance) / segmentLength;
+                // Clamp ratio to [0, 1] to prevent extrapolation
+                const clampedRatio = Math.max(0, Math.min(1, ratio));
                 const alt1 = coords[i - 1][2] || 0;
                 const alt2 = coords[i][2] || 0;
-                return alt1 + (alt2 - alt1) * ratio;
+                return alt1 + (alt2 - alt1) * clampedRatio;
             }
 
             cumulativeDistance += segmentLength;
@@ -618,6 +755,17 @@
         // Apply zoom level to all camera distances
         const zoom = zoomLevel;
 
+        // UNIVERSAL RIDER POSITION SMOOTHING
+        // Apply exponential smoothing to rider position for all modes except cinematic
+        // (cinematic has its own specialized smoothing). This eliminates micro-jitter
+        // from turf.along interpolation and altitude calculations.
+        let smoothedDotPoint = dotPoint;
+        if (mode !== CameraModes.CINEMATIC && !skipSmoothing) {
+            const state = getOrInitSmoothState('_riderSmoothState', dotPoint, mode);
+            const alpha = getRiderSmoothingAlpha(mode);
+            smoothedDotPoint = applySmoothPosition(state, dotPoint, alpha);
+        }
+
         let cameraLng, cameraLat, cameraAlt, cameraBearing, cameraPitch;
 
         switch (mode) {
@@ -632,7 +780,7 @@
 
                 const behindBearing = (forwardBearing + 180) % 360;
                 const offsetPoint = turf.destination(
-                    turf.point([dotPoint.lng, dotPoint.lat]),
+                    turf.point([smoothedDotPoint.lng, smoothedDotPoint.lat]),
                     offsetBehind / 1000,
                     behindBearing,
                     { units: 'kilometers' }
@@ -640,7 +788,7 @@
                 cameraLng = offsetPoint.geometry.coordinates[0];
                 cameraLat = offsetPoint.geometry.coordinates[1];
                 // Use calculated altitude based on pitch, plus terrain following
-                cameraAlt = dotPoint.alt + calculatedAltitude + (dotPoint.alt * 0.1);
+                cameraAlt = smoothedDotPoint.alt + calculatedAltitude + (smoothedDotPoint.alt * 0.1);
                 cameraBearing = forwardBearing;
                 cameraPitch = chaseCamPitch;
                 break;
@@ -652,14 +800,14 @@
                 // Small fixed south offset avoids gimbal lock with lookAtPoint
                 const offsetUp = config.offsetUp * zoom;
                 const southOffset = turf.destination(
-                    turf.point([dotPoint.lng, dotPoint.lat]),
+                    turf.point([smoothedDotPoint.lng, smoothedDotPoint.lat]),
                     0.03 * zoom, // Small fixed offset south (not bearing-dependent)
                     180, // Always south - no position jumps when bearing changes
                     { units: 'kilometers' }
                 );
                 cameraLng = southOffset.geometry.coordinates[0];
                 cameraLat = southOffset.geometry.coordinates[1];
-                cameraAlt = dotPoint.alt + offsetUp;
+                cameraAlt = smoothedDotPoint.alt + offsetUp;
                 cameraBearing = forwardBearing; // Will be heavily smoothed (0.08°/frame)
                 cameraPitch = config.pitch;
                 break;
@@ -673,26 +821,40 @@
                 const offsetSide = config.offsetSide * zoom;
                 const offsetUp = config.offsetUp * zoom;
 
-                // Calculate both potential side positions
-                const leftBearing = (forwardBearing + 90) % 360;
-                const rightBearing = (forwardBearing - 90 + 360) % 360;
+                // Smooth the forward bearing for side view to prevent camera position swings
+                // This is critical because side view camera position is perpendicular to bearing,
+                // so small bearing changes cause large lateral position shifts
+                if (!window._sideViewBearingState) {
+                    window._sideViewBearingState = { bearing: forwardBearing };
+                }
+                // Exponential smoothing on bearing (handle 360 wraparound)
+                const BEARING_ALPHA = 0.02; // Very aggressive smoothing for bearing
+                const delta = bearingDelta(forwardBearing, window._sideViewBearingState.bearing);
+                window._sideViewBearingState.bearing = normalizeBearing(
+                    window._sideViewBearingState.bearing + BEARING_ALPHA * delta
+                );
+                const smoothedForwardBearing = window._sideViewBearingState.bearing;
+
+                // Calculate both potential side positions using smoothed bearing
+                const leftBearing = (smoothedForwardBearing + 90) % 360;
+                const rightBearing = (smoothedForwardBearing - 90 + 360) % 360;
 
                 const leftPoint = turf.destination(
-                    turf.point([dotPoint.lng, dotPoint.lat]),
+                    turf.point([smoothedDotPoint.lng, smoothedDotPoint.lat]),
                     offsetSide / 1000,
                     leftBearing,
                     { units: 'kilometers' }
                 );
                 const rightPoint = turf.destination(
-                    turf.point([dotPoint.lng, dotPoint.lat]),
+                    turf.point([smoothedDotPoint.lng, smoothedDotPoint.lat]),
                     offsetSide / 1000,
                     rightBearing,
                     { units: 'kilometers' }
                 );
 
                 // Check if either side position would put camera inside terrain
-                // Camera would be at dotPoint.alt + offsetUp - check against terrain at each side
-                const targetCameraAlt = dotPoint.alt + offsetUp;
+                // Camera would be at smoothedDotPoint.alt + offsetUp - check against terrain at each side
+                const targetCameraAlt = smoothedDotPoint.alt + offsetUp;
                 const MIN_SIDE_CLEARANCE = 100; // meters - minimum clearance needed for side view to work
                 let leftBlocked = false;
                 let rightBlocked = false;
@@ -872,7 +1034,7 @@
 
                 cameraLng = offsetPoint.geometry.coordinates[0];
                 cameraLat = offsetPoint.geometry.coordinates[1];
-                cameraAlt = dotPoint.alt + offsetUp;
+                cameraAlt = smoothedDotPoint.alt + offsetUp;
                 // Look at the dot from the side
                 cameraBearing = (sideBearing + 180) % 360;
                 cameraPitch = config.pitch;
@@ -885,27 +1047,83 @@
                 const heightMin = config.heightMin * zoom;
                 const heightMax = config.heightMax * zoom;
 
+                // For high zoom cinematic, smooth the rider position to eliminate any micro-jitter
+                // from turf.along or altitude interpolation. Use exponential smoothing which is
+                // mathematically stable and cannot oscillate.
+                let smoothedDot = dotPoint;
+                if (zoomLevel >= 2.0) {
+                    if (!window._cinematicState) {
+                        window._cinematicState = {
+                            lng: dotPoint.lng,
+                            lat: dotPoint.lat,
+                            alt: dotPoint.alt
+                        };
+                    }
+                    // Exponential smoothing: new = old + alpha * (target - old)
+                    // Very low alpha (0.03) for aggressive smoothing - at 60fps this gives
+                    // a time constant of about 0.5 seconds, filtering out any high-frequency jitter
+                    const alpha = 0.03;
+                    window._cinematicState.lng += alpha * (dotPoint.lng - window._cinematicState.lng);
+                    window._cinematicState.lat += alpha * (dotPoint.lat - window._cinematicState.lat);
+                    window._cinematicState.alt += alpha * (dotPoint.alt - window._cinematicState.alt);
+                    smoothedDot = window._cinematicState;
+                }
+
                 if (deltaTime) {
                     cinematicAngle += config.orbitSpeed * deltaTime;
+                    // Normalize angle to prevent precision issues with very large values
+                    // Keep it in the range [0, 2*PI)
+                    if (cinematicAngle >= 2 * Math.PI) {
+                        cinematicAngle -= 2 * Math.PI;
+                    }
                 }
                 const orbitBearing = (cinematicAngle * 180 / Math.PI) % 360;
-                const offsetPoint = turf.destination(
-                    turf.point([dotPoint.lng, dotPoint.lat]),
-                    orbitRadius / 1000,
-                    orbitBearing,
-                    { units: 'kilometers' }
-                );
-                cameraLng = offsetPoint.geometry.coordinates[0];
-                cameraLat = offsetPoint.geometry.coordinates[1];
 
-                // Vary height sinusoidally above the rider
-                // Terrain collision and altitude smoothing are applied after all modes
+                // Use simple trigonometric offset instead of turf.destination for more stable results
+                // At the scale of 900m orbit radius, the spherical Earth approximation error is negligible
+                // Convert orbit radius from meters to degrees (approximate)
+                const metersPerDegreeLat = 111320; // meters per degree latitude
+                const metersPerDegreeLng = 111320 * Math.cos(smoothedDot.lat * Math.PI / 180);
+
+                // Calculate offset in degrees using simple trig
+                const bearingRad = orbitBearing * Math.PI / 180;
+                const dLat = (orbitRadius * Math.cos(bearingRad)) / metersPerDegreeLat;
+                const dLng = (orbitRadius * Math.sin(bearingRad)) / metersPerDegreeLng;
+
+                let rawCameraLng = smoothedDot.lng + dLng;
+                let rawCameraLat = smoothedDot.lat + dLat;
+
+                // Vary height sinusoidally above the smoothed rider position
                 const heightT = (Math.sin(cinematicAngle * 0.5) + 1) / 2;
-                cameraAlt = dotPoint.alt + lerp(heightMin, heightMax, heightT);
+                let rawCameraAlt = smoothedDot.alt + lerp(heightMin, heightMax, heightT);
 
-                // Look at the dot
+                // Apply exponential smoothing to camera position as well
+                // This smooths out any discontinuities from turf.destination or altitude calculation
+                if (zoomLevel >= 2.0) {
+                    if (!window._cinematicCameraPos) {
+                        window._cinematicCameraPos = {
+                            lng: rawCameraLng,
+                            lat: rawCameraLat,
+                            alt: rawCameraAlt
+                        };
+                    }
+                    const camAlpha = 0.08; // Slightly faster than rider smoothing
+                    window._cinematicCameraPos.lng += camAlpha * (rawCameraLng - window._cinematicCameraPos.lng);
+                    window._cinematicCameraPos.lat += camAlpha * (rawCameraLat - window._cinematicCameraPos.lat);
+                    window._cinematicCameraPos.alt += camAlpha * (rawCameraAlt - window._cinematicCameraPos.alt);
+                    cameraLng = window._cinematicCameraPos.lng;
+                    cameraLat = window._cinematicCameraPos.lat;
+                    cameraAlt = window._cinematicCameraPos.alt;
+                } else {
+                    cameraLng = rawCameraLng;
+                    cameraLat = rawCameraLat;
+                    cameraAlt = rawCameraAlt;
+                }
+
+                // Look at the smoothed dot - bearing points back toward the rider
                 cameraBearing = (orbitBearing + 180) % 360;
-                // Vary pitch
+                // Pitch is computed by lookAtPoint based on camera position and target altitude
+                // We store a nominal value for state tracking
                 const pitchT = (Math.sin(cinematicAngle * 0.3) + 1) / 2;
                 cameraPitch = lerp(config.pitchMin, config.pitchMax, pitchT);
                 break;
@@ -958,9 +1176,14 @@
             settlingFramesRemaining--;
         }
 
-        // Query terrain elevation (used for both collision and logging)
+        // Query terrain elevation (used for collision and logging)
+        // Skip terrain query entirely for cinematic mode at high zoom - the camera is 300m+
+        // above the rider, so terrain collision is unnecessary. This eliminates jitter from
+        // varying terrain queries as the camera orbits over different terrain.
         let terrainElevation = null;
-        if (!useSimplifiedCollision) {
+        const isCinematicHighZoom = mode === CameraModes.CINEMATIC && zoomLevel >= 2.0;
+        if (!useSimplifiedCollision && !isCinematicHighZoom) {
+            // Query terrain at camera position for collision detection
             terrainElevation = queryTerrainElevationWithCache(cameraLng, cameraLat);
         }
 
@@ -987,8 +1210,11 @@
         // Store original altitude for logging before terrain collision adjustment
         const originalCameraAlt = cameraAlt;
 
-        if (useSimplifiedCollision) {
-            // Simplified: only ensure camera is above rider
+        if (useSimplifiedCollision || isCinematicHighZoom) {
+            // Simplified collision: only ensure camera is above rider.
+            // Used during transitions (useSimplifiedCollision) and for cinematic mode at high zoom.
+            // For cinematic at zoom ≥2.0, the camera is 300m+ above the rider, so terrain
+            // collision is unnecessary. Skipping it eliminates jitter from varying terrain queries.
             const minFromRider = dotPoint.alt + RIDER_MIN_CLEARANCE;
             if (cameraAlt < minFromRider) {
                 cameraAlt = minFromRider;
@@ -1006,14 +1232,17 @@
         const isBirdsEye = mode === CameraModes.BIRDS_EYE;
         const isSideView = mode === CameraModes.SIDE_VIEW;
 
-        // Skip ALL smoothing during lerp transitions or settling period
-        // Lerp transitions provide their own smoothing - applying our smoothing
-        // on top causes oscillation/jitter as the two fight each other
-        if (!useSimplifiedCollision) {
+        // Skip ALL smoothing during:
+        // - Lerp transitions (useSimplifiedCollision) - they provide their own smoothing
+        // - Cinematic mode at high zoom - orbit is inherently smooth, no terrain collision,
+        //   and smoothing can cause lag that manifests as jitter
+        if (!useSimplifiedCollision && !isCinematicHighZoom) {
             // Position smoothing - prevent jarring camera jumps during normal playback
             // Bird's Eye: 3m (slow, serene flight), Side View: 2m (reduced to prevent terrain jitter)
-            // Chase/Cinematic: 5m (follows route, needs more movement)
-            const maxPosChange = isBirdsEye ? 3 : (isSideView ? 2 : 5);
+            // Chase/Cinematic: scales with zoom to accommodate larger orbit radius
+            // At zoom 1.0: 5m/frame, At zoom 3.0: 15m/frame (orbit radius is 900m, moves ~2.2m/frame)
+            const cinematicPosLimit = 5 * Math.max(1, zoomLevel);
+            const maxPosChange = isBirdsEye ? 3 : (isSideView ? 2 : cinematicPosLimit);
             if (window._terrainCache.lastLng != null && window._terrainCache.lastLat != null) {
                 const cosLat = Math.cos(cameraLat * Math.PI / 180);
                 const dLng = (cameraLng - window._terrainCache.lastLng) * 111000 * cosLat;
@@ -1039,8 +1268,12 @@
             // At 60fps, 50m/frame corrects a 500m difference in ~167ms - fast but smooth.
             const needsFasterSmoothing = (justExitedTransition && terrainAdjusted) ||
                                          (terrainJustBecameAvailable && terrainAdjusted);
+            // Altitude smoothing scales with zoom for cinematic mode
+            // At higher zoom, the camera height varies more (300-900m at zoom 3.0)
+            // and we need to allow the natural altitude changes from the orbit
+            const cinematicAltLimit = 8 * Math.max(1, zoomLevel);
             const maxAltChange = needsFasterSmoothing ? 50
-                : (isBirdsEye ? 4 : (isSideView ? 3 : 8));
+                : (isBirdsEye ? 4 : (isSideView ? 3 : cinematicAltLimit));
 
             // When lastCameraAlt is null but terrain needs adjustment, initialize it
             // from the pre-adjustment altitude so smoothing can work from a baseline.
@@ -1071,15 +1304,23 @@
             // Bird's Eye: 0.08 deg/frame (~5 deg/sec at 60fps) - ultra slow for serene flight
             // Side View: 0.15 deg/frame (~9 deg/sec) - very slow because perpendicular direction
             //   oscillates rapidly on hairpins, causing hunting behavior if too responsive
-            // Others: 1.5 deg/frame (~90 deg/sec) - chase/cinematic need to follow turns
-            const maxBearingChange = isBirdsEye ? 0.08 : (isSideView ? 0.15 : 1.5);
-            cameraBearing = smoothBearing(cameraBearing, window._terrainCache.lastBearing, maxBearingChange);
+            // Chase/Cinematic: smoothing handled in applyCameraState on geometric bearing
+            // (smoothing here would double-smooth and cause oscillation)
+            const isCinematic = mode === CameraModes.CINEMATIC;
+            const isChase = mode === CameraModes.CHASE;
+            if (!isCinematic && !isChase) {
+                const maxBearingChange = isBirdsEye ? 0.08 : 0.15; // Only side view now
+                cameraBearing = smoothBearing(cameraBearing, window._terrainCache.lastBearing, maxBearingChange);
+            }
             window._terrainCache.lastBearing = cameraBearing;
 
             // Pitch smoothing - prevent jarring pitch changes on terrain transitions
-            // Bird's Eye: 0.1 deg/frame, Side View: 0.3 deg/frame, others: 0.5 deg/frame
-            const maxPitchChange = isBirdsEye ? 0.1 : (isSideView ? 0.3 : 0.5);
-            cameraPitch = smoothValue(cameraPitch, window._terrainCache.lastPitch, maxPitchChange);
+            // Bird's Eye: 0.1 deg/frame, Side View: 0.3 deg/frame
+            // Chase/Cinematic: smoothing handled in applyCameraState on geometric pitch
+            if (!isCinematic && !isChase) {
+                const maxPitchChange = isBirdsEye ? 0.1 : 0.3; // Only side view now
+                cameraPitch = smoothValue(cameraPitch, window._terrainCache.lastPitch, maxPitchChange);
+            }
             window._terrainCache.lastPitch = cameraPitch;
         } else {
             // During transitions, still update the cache so we don't get a jump when transition ends
@@ -1088,6 +1329,20 @@
             window._terrainCache.lastCameraAlt = cameraAlt;
             window._terrainCache.lastBearing = cameraBearing;
             window._terrainCache.lastPitch = cameraPitch;
+        }
+
+        // UNIVERSAL CAMERA POSITION SMOOTHING
+        // Apply exponential smoothing to the final camera position for all modes except cinematic
+        // (cinematic has its own specialized smoothing). This provides a second layer of
+        // smoothing beyond rider position smoothing, catching any jitter from terrain collision.
+        if (mode !== CameraModes.CINEMATIC && !skipSmoothing) {
+            const cameraTarget = { lng: cameraLng, lat: cameraLat, alt: cameraAlt };
+            const state = getOrInitSmoothState('_cameraSmoothState', cameraTarget, mode);
+            const camAlpha = getCameraSmoothingAlpha(mode);
+            const smoothed = applySmoothPosition(state, cameraTarget, camAlpha);
+            cameraLng = smoothed.lng;
+            cameraLat = smoothed.lat;
+            cameraAlt = smoothed.alt;
         }
 
         // Debug logging for camera state (computed, before final smoothing in applyCameraState)
@@ -1252,6 +1507,14 @@
     function cameraWatchdog(appliedState, isTransitioning) {
         if (!appliedState || !window._terrainCache) return false;
 
+        // Skip watchdog entirely for cinematic mode at high zoom
+        // The exponential smoothing handles stability, and watchdog cache resets
+        // would destroy the smoothing state causing jitter
+        const isCinematicHighZoom = currentCameraMode === CameraModes.CINEMATIC && zoomLevel >= 2.0;
+        if (isCinematicHighZoom && !isTransitioning) {
+            return false;
+        }
+
         const appliedAlt = appliedState.alt;
 
         // Track altitude history for jitter detection
@@ -1272,8 +1535,15 @@
             return false;
         }
 
-        // Check for jitter - rapid altitude oscillations
-        if (watchdogAltitudeHistory.length >= 4) {
+        // JITTER DETECTION DISABLED
+        // The watchdog jitter detection was causing a feedback loop:
+        // 1. Terrain causes altitude oscillation
+        // 2. Watchdog detects oscillation and resets caches
+        // 3. Cache reset causes position jump
+        // 4. Jump causes more oscillation -> go to step 2
+        // The smoothing system handles jitter better than cache resets.
+        // Keeping the altitude history tracking for potential future use.
+        if (false && watchdogAltitudeHistory.length >= 4) {
             let oscillations = 0;
             let lastDelta = 0;
             for (let i = 1; i < watchdogAltitudeHistory.length; i++) {
@@ -1324,6 +1594,9 @@
     function resetSmoothingCache() {
         window._lastCameraState = null;
         window._cinematicState = null;
+        window._cinematicCameraPos = null;
+        // Reset emergency smoothing state
+        _lastAppliedState = null;
         if (window._terrainCache) {
             window._terrainCache.lastCameraAlt = null;
             window._terrainCache.lastBearing = null;
@@ -2741,10 +3014,6 @@
      * Fast zoom-up animation for Google Earth-style scrubbing
      */
     function animateScrubZoomUp() {
-        const ZOOM_UP_SPEED = 16; // Very fast! Complete in ~0.06 seconds
-
-        overviewTransitionProgress = Math.min(1, overviewTransitionProgress + ZOOM_UP_SPEED * 0.016);
-
         const dotDistance = progress * totalDistance;
         const dotPoint = getPointAlongRoute(dotDistance);
 
@@ -2752,16 +3021,34 @@
             const currentPoint = { lng: dotPoint.lng, lat: dotPoint.lat, alt: dotPoint.alt };
             const targetState = calculateScrubCameraState(currentPoint);
 
-            // Use easeOutCubic for fast start, gentle finish (like shooting up)
-            const t = easeOutCubic(overviewTransitionProgress);
-            const currentState = lerpCameraState(transitionStartState, targetState, t);
+            // Calculate remaining distance from current applied state to target
+            const lastApplied = _lastAppliedState || transitionStartState;
+            const altDist = Math.abs(lastApplied.alt - targetState.alt);
+            const cosLat = Math.cos(targetState.lat * Math.PI / 180);
+            const lngDistM = Math.abs(lastApplied.lng - targetState.lng) * 111000 * cosLat;
+            const latDistM = Math.abs(lastApplied.lat - targetState.lat) * 111000;
+            const posDistM = Math.sqrt(lngDistM * lngDistM + latDistM * latDistM);
 
-            applyCameraState(currentState, dotPoint, true); // isTransitioning=true
-            updateDotAndUI(dotPoint);
+            // Smoothing limits (same as applyCameraState)
+            // Altitude scales DOWN with zoom, position scales UP with zoom
+            const altZoomFactor = Math.max(0.33, 1 / zoomLevel);
+            const posZoomFactor = Math.max(1, zoomLevel);
+            const maxAltPerFrame = 15 * altZoomFactor;
+            const maxPosPerFrame = 8 * posZoomFactor;
 
-            if (overviewTransitionProgress >= 1) {
+            // Check if close enough to target
+            const closeEnough = altDist < maxAltPerFrame * 2 && posDistM < maxPosPerFrame * 2;
+
+            if (closeEnough) {
+                // Transition complete - snap to target
+                applyCameraState(targetState, dotPoint, false);
+                overviewTransitionProgress = 1;
                 overviewTargetState = targetState;
+            } else {
+                // Still transitioning - apply target directly, smoothing will cap movement
+                applyCameraState(targetState, dotPoint, true);
             }
+            updateDotAndUI(dotPoint);
         }
 
         // Continue if not done and still dragging
@@ -2773,34 +3060,52 @@
     }
 
     /**
-     * Fast zoom-down animation when scrubbing ends
+     * Smooth zoom-down animation when scrubbing ends
+     * Uses direct-to-target approach - the smoothing in applyCameraState handles the rate
      */
     function animateScrubZoomDown() {
-        const ZOOM_DOWN_SPEED = 12; // Very fast swoop down
-
-        overviewTransitionProgress = Math.max(0, overviewTransitionProgress - ZOOM_DOWN_SPEED * 0.016);
-
         const dotDistance = progress * totalDistance;
         const dotPoint = getPointAlongRoute(dotDistance);
 
-        if (dotPoint && transitionStartState && overviewTargetState) {
-            // Interpolate from overview back to normal camera
-            // Use easeInOutCubic for smooth swoop
-            const t = easeInOutCubic(1 - overviewTransitionProgress);
-
-            // Calculate what the normal camera would be at this position
-            // Skip smoothing during transition - the lerp provides smooth interpolation
+        if (dotPoint) {
+            // Calculate target camera state (where we want to end up)
             const directionDistance = Math.min(dotDistance + CONFIG.lookAheadDistance / 1000, totalDistance);
             const directionPoint = getPointAlongRoute(directionDistance);
             const normalCameraState = directionPoint
-                ? calculateCameraForMode(currentCameraMode, dotPoint, directionPoint, 0, true) // skipSmoothing=true
-                : transitionStartState;
+                ? calculateCameraForMode(currentCameraMode, dotPoint, directionPoint, 0, true)
+                : null;
 
             if (normalCameraState) {
-                const currentState = lerpCameraState(overviewTargetState, normalCameraState, t);
-                applyCameraState(currentState, dotPoint, true); // isTransitioning=true
+                // Calculate remaining distance from current applied state to target
+                const lastApplied = _lastAppliedState || overviewTargetState || normalCameraState;
+                const altDist = Math.abs(lastApplied.alt - normalCameraState.alt);
+                const cosLat = Math.cos(normalCameraState.lat * Math.PI / 180);
+                const lngDistM = Math.abs(lastApplied.lng - normalCameraState.lng) * 111000 * cosLat;
+                const latDistM = Math.abs(lastApplied.lat - normalCameraState.lat) * 111000;
+                const posDistM = Math.sqrt(lngDistM * lngDistM + latDistM * latDistM);
+
+                // Smoothing limits (same as applyCameraState)
+                // Altitude scales DOWN with zoom, position scales UP with zoom
+                const altZoomFactor = Math.max(0.33, 1 / zoomLevel);
+                const posZoomFactor = Math.max(1, zoomLevel);
+                const maxAltPerFrame = 15 * altZoomFactor;
+                const maxPosPerFrame = 8 * posZoomFactor;
+
+                // Check if close enough to target
+                const closeEnough = altDist < maxAltPerFrame * 2 && posDistM < maxPosPerFrame * 2;
+
+                if (closeEnough) {
+                    // Transition complete - snap to target
+                    applyCameraState(normalCameraState, dotPoint, false);
+                    overviewTransitionProgress = 0;
+                } else {
+                    // Still transitioning - apply target directly, smoothing will cap movement
+                    applyCameraState(normalCameraState, dotPoint, true);
+                }
             }
             updateDotAndUI(dotPoint);
+        } else {
+            overviewTransitionProgress = 0;
         }
 
         // Continue if not done
@@ -3018,7 +3323,7 @@
         const seekDelta = Math.abs(progress - oldProgress);
         const significantSeek = seekDelta > 0.01; // More than 1% of route
 
-        resetSmoothingCache();
+        resetCameraCaches(); // Reset ALL caches including position to avoid smoothing lag
 
         // Cancel user override when seeking
         if (userOverrideActive) {
@@ -3080,8 +3385,10 @@
     function animate(timestamp) {
         if (!isPlaying) return;
 
-        // Calculate delta time in seconds
-        const deltaTime = (timestamp - lastTimestamp) / 1000;
+        // Calculate delta time in seconds, capped to prevent jumps during frame drops
+        // Cap at 100ms (10fps minimum) - any slower and we'd rather skip frames than jump
+        const rawDeltaTime = (timestamp - lastTimestamp) / 1000;
+        const deltaTime = Math.min(rawDeltaTime, 0.1);
         lastTimestamp = timestamp;
 
         // Calculate progress increment based on route length and speed
@@ -3200,29 +3507,46 @@
 
         // Handle return from overview mode (after scrubber drag ends during playback)
         if (inOverviewReturn) {
-            // Smooth transition - easeInOutCubic needs more time to ramp up
-            overviewTransitionProgress -= deltaTime * 4; // ~0.25 second return
-            overviewTransitionProgress = Math.max(0, overviewTransitionProgress);
+            // Use time-based lerp from transition start to current target.
+            // This avoids the "chasing a moving target" problem that caused jitter.
+            // The transition lasts a fixed duration, then snaps to target.
+            const transitionDuration = 0.5; // seconds
 
-            const stillTransitioning = overviewTransitionProgress > 0;
-            if (stillTransitioning && transitionStartState) {
-                // Use easeInOutCubic for smoother start (less jarring initial jump)
-                const t = easeInOutCubic(1 - overviewTransitionProgress);
-                finalState = lerpCameraState(transitionStartState, targetState, t);
-            } else {
-                // Transition complete - reset caches and start settling period
-                // Settling period skips terrain collision to prevent jitter
+            // Track transition progress using a counter (frames elapsed)
+            if (!window._overviewReturnFrames) {
+                window._overviewReturnFrames = 0;
+            }
+            window._overviewReturnFrames++;
+
+            // Assume 60fps, so 30 frames = 0.5 seconds
+            const maxFrames = Math.round(transitionDuration * 60);
+            const t = Math.min(1, window._overviewReturnFrames / maxFrames);
+            const easedT = easeOutCubic(t);
+
+            if (t >= 1) {
+                // Transition complete - snap to target and reset
                 finalState = targetState;
                 shouldReturnFromOverview = false;
                 overviewTransitionProgress = 0;
                 transitionStartState = null;
                 overviewTargetState = null;
+                window._overviewReturnFrames = 0;
                 resetCameraCaches();
                 settlingFramesRemaining = SETTLING_DURATION;
+
+                applyCameraState(finalState, dotPoint, false);
+            } else {
+                // Lerp from start to current target
+                // This interpolates smoothly even as target moves
+                if (transitionStartState) {
+                    finalState = lerpCameraState(transitionStartState, targetState, easedT);
+                } else {
+                    finalState = targetState;
+                }
+
+                applyCameraState(finalState, dotPoint, true);
             }
 
-            // Apply camera state - mark as transitioning to sync watchdog cache
-            applyCameraState(finalState, dotPoint, stillTransitioning);
             updateDotAndUI(dotPoint);
             return;
         }
@@ -3283,73 +3607,60 @@
 
     /**
      * Apply a camera state to the map
-     * @param {object} state - Camera state to apply
-     * @param {object} lookAtPoint - Point to look at (rider position)
+     * @param {object} state - Camera state to apply (includes lng, lat, alt, bearing, pitch)
+     * @param {object} lookAtPoint - Point for fallback centering only (rider position)
      * @param {boolean} isTransitioning - Whether we're in a lerp transition (scrub return, mode change)
      */
-    // Track last applied state for jitter detection logging
+    // Track last applied state for jitter detection logging and emergency smoothing
     let _lastAppliedState = null;
     let _jitterLogCount = 0;
 
     function applyCameraState(state, lookAtPoint, isTransitioning = false) {
         try {
-            // FINAL SAFETY SMOOTHING: Apply smoothing as the last line of defense
-            // This catches any jumps that slip through other smoothing layers
-            // Limits scale inversely with zoom level - when zoomed out, movements are
-            // more visible so we need tighter smoothing
-            if (_lastAppliedState) {
-                let modified = false;
-                let newState = { ...state };
+            // Validate state values - catch NaN/Infinity from calculation errors
+            if (!state || !isFinite(state.lng) || !isFinite(state.lat) || !isFinite(state.alt) ||
+                !isFinite(state.bearing) || !isFinite(state.pitch)) {
+                console.error('[CAMERA] Invalid state values detected:', state);
+                // Use last known good state if available
+                if (_lastAppliedState) {
+                    state = { ..._lastAppliedState };
+                } else {
+                    return; // Can't recover without a previous state
+                }
+            }
 
-                // Scale smoothing limits inversely with zoom
-                // At zoom=1.0 (100%): base limits
-                // At zoom=2.0 (200%): half the limits (movements appear 2x larger)
-                // At zoom=3.0 (300%): one-third the limits
-                const zoomFactor = Math.max(0.5, 1 / zoomLevel);
+            // EMERGENCY POSITION/ALTITUDE SMOOTHING
+            // This is a safety net to catch any large jumps that bypass earlier smoothing.
+            // Only applies during normal playback (not transitions) and only for excessive changes.
+            // The limits are generous - we're only catching catastrophic jumps.
+            const MAX_POS_DELTA = 30;  // meters/frame (normal motion is ~2-3m/frame)
+            const MAX_ALT_DELTA = 50;  // meters/frame (normal is ~1-25m/frame)
 
-                // Altitude smoothing: base 12m/frame, scaled by zoom
-                // At 100% zoom: 12m/frame (~720m/sec at 60fps)
-                // At 300% zoom: 4m/frame (~240m/sec at 60fps)
-                const maxAltDelta = 12 * zoomFactor;
+            if (_lastAppliedState && !isTransitioning) {
+                let needsSmoothing = false;
+                const posDelta = calculatePositionDelta(state, _lastAppliedState);
+
+                if (posDelta > MAX_POS_DELTA) {
+                    const scale = MAX_POS_DELTA / posDelta;
+                    state = { ...state };
+                    state.lng = _lastAppliedState.lng + (state.lng - _lastAppliedState.lng) * scale;
+                    state.lat = _lastAppliedState.lat + (state.lat - _lastAppliedState.lat) * scale;
+                    needsSmoothing = true;
+                }
+
                 const altDelta = state.alt - _lastAppliedState.alt;
-                if (Math.abs(altDelta) > maxAltDelta) {
-                    newState.alt = _lastAppliedState.alt + Math.sign(altDelta) * maxAltDelta;
-                    modified = true;
+                if (Math.abs(altDelta) > MAX_ALT_DELTA) {
+                    state = { ...state };
+                    state.alt = _lastAppliedState.alt + Math.sign(altDelta) * MAX_ALT_DELTA;
+                    needsSmoothing = true;
                 }
 
-                // Position smoothing: base 6m/frame, scaled by zoom
-                // At 100% zoom: 6m/frame (~360m/sec at 60fps)
-                // At 300% zoom: 2m/frame (~120m/sec at 60fps)
-                const maxPosDelta = 6 * zoomFactor;
-                const cosLat = Math.cos(state.lat * Math.PI / 180);
-                const lngDeltaM = (state.lng - _lastAppliedState.lng) * 111000 * cosLat;
-                const latDeltaM = (state.lat - _lastAppliedState.lat) * 111000;
-                const posDelta = Math.sqrt(lngDeltaM * lngDeltaM + latDeltaM * latDeltaM);
-                if (posDelta > maxPosDelta) {
-                    const scale = maxPosDelta / posDelta;
-                    newState.lng = _lastAppliedState.lng + (state.lng - _lastAppliedState.lng) * scale;
-                    newState.lat = _lastAppliedState.lat + (state.lat - _lastAppliedState.lat) * scale;
-                    modified = true;
-                }
-
-                // Bearing smoothing: base 1.5 deg/frame, scaled by zoom
-                // At 100% zoom: 1.5 deg/frame (~90 deg/sec at 60fps)
-                // At 300% zoom: 0.5 deg/frame (~30 deg/sec at 60fps)
-                const maxBearingDelta = 1.5 * zoomFactor;
-                let bearingDelta = state.bearing - _lastAppliedState.bearing;
-                if (bearingDelta > 180) bearingDelta -= 360;
-                if (bearingDelta < -180) bearingDelta += 360;
-                if (Math.abs(bearingDelta) > maxBearingDelta) {
-                    newState.bearing = _lastAppliedState.bearing + Math.sign(bearingDelta) * maxBearingDelta;
-                    // Normalize to 0-360
-                    newState.bearing = ((newState.bearing % 360) + 360) % 360;
-                    modified = true;
-                }
-
-                if (modified) {
-                    state = newState;
-                    // Sync terrain cache with actually applied altitude to prevent watchdog false positives
+                if (needsSmoothing) {
+                    console.warn('[EMERGENCY SMOOTHING] pos:', posDelta.toFixed(0), 'm, alt:', Math.abs(altDelta).toFixed(0), 'm');
+                    // Sync terrain cache to prevent divergence between tracking systems
                     if (window._terrainCache) {
+                        window._terrainCache.lastLng = state.lng;
+                        window._terrainCache.lastLat = state.lat;
                         window._terrainCache.lastCameraAlt = state.alt;
                     }
                 }
@@ -3357,20 +3668,17 @@
 
             // Jitter detection logging
             if (_lastAppliedState && window.FLYOVER_DEBUG) {
-                const altDelta = Math.abs(state.alt - _lastAppliedState.alt);
-                let bearingDelta = Math.abs(state.bearing - _lastAppliedState.bearing);
-                if (bearingDelta > 180) bearingDelta = 360 - bearingDelta;
-                const lngDelta = Math.abs(state.lng - _lastAppliedState.lng) * 111000;
-                const latDelta = Math.abs(state.lat - _lastAppliedState.lat) * 111000;
-                const posDelta = Math.sqrt(lngDelta * lngDelta + latDelta * latDelta);
+                const posDelta = calculatePositionDelta(state, _lastAppliedState);
+                const altDiff = Math.abs(state.alt - _lastAppliedState.alt);
+                const bearingDiff = Math.abs(bearingDelta(state.bearing, _lastAppliedState.bearing));
 
                 // Log if any significant change (but not during transitions - those are expected)
-                if (!isTransitioning && (altDelta > 20 || bearingDelta > 5 || posDelta > 50)) {
+                if (!isTransitioning && (altDiff > 20 || bearingDiff > 5 || posDelta > 50)) {
                     _jitterLogCount++;
                     if (_jitterLogCount % 5 === 1) { // Log every 5th to reduce spam
                         console.log('[JITTER]', {
-                            altDelta: altDelta.toFixed(0),
-                            bearingDelta: bearingDelta.toFixed(1),
+                            altDelta: altDiff.toFixed(0),
+                            bearingDelta: bearingDiff.toFixed(1),
                             posDelta: posDelta.toFixed(0),
                             settling: settlingFramesRemaining,
                             mode: currentCameraMode
@@ -3380,6 +3688,76 @@
             }
             _lastAppliedState = { ...state };
 
+            // SMOOTHNESS MEASUREMENT SYSTEM
+            // Tracks frame-to-frame deltas and computes standard deviation
+            // Lower stddev = smoother camera motion
+            if (!window._smoothnessMetrics) {
+                window._smoothnessMetrics = {
+                    posDeltas: [],      // Position change per frame (meters)
+                    altDeltas: [],      // Altitude change per frame (meters)
+                    bearingDeltas: [],  // Bearing change per frame (degrees)
+                    lastState: null,
+                    sampleCount: 0,
+                    mode: null,
+                    reportInterval: 300,  // Report every 300 frames (~5 sec at 60fps)
+                    warmupFrames: 60,    // Skip first 60 frames on mode change
+                };
+            }
+            const sm = window._smoothnessMetrics;
+
+            // Reset if mode changed
+            if (sm.mode !== currentCameraMode) {
+                sm.posDeltas = [];
+                sm.altDeltas = [];
+                sm.bearingDeltas = [];
+                sm.sampleCount = 0;
+                sm.mode = currentCameraMode;
+                sm.lastState = null;
+                sm.warmupFrames = 60;
+            }
+
+            // Skip warmup period after mode change
+            if (sm.warmupFrames > 0) {
+                sm.warmupFrames--;
+                sm.lastState = { ...state };
+            } else if (sm.lastState && !isTransitioning) {
+                const posDelta = calculatePositionDelta(state, sm.lastState);
+                const altDelta = Math.abs(state.alt - sm.lastState.alt);
+                const bearingDiff = Math.abs(bearingDelta(state.bearing, sm.lastState.bearing));
+
+                // Store deltas (keep last 300 samples for rolling average)
+                sm.posDeltas.push(posDelta);
+                sm.altDeltas.push(altDelta);
+                sm.bearingDeltas.push(bearingDiff);
+                if (sm.posDeltas.length > 300) {
+                    sm.posDeltas.shift();
+                    sm.altDeltas.shift();
+                    sm.bearingDeltas.shift();
+                }
+                sm.sampleCount++;
+
+                // Report smoothness periodically
+                if (sm.sampleCount % sm.reportInterval === 0 && sm.posDeltas.length >= 60) {
+                    const posStats = calculateStats(sm.posDeltas);
+                    const altStats = calculateStats(sm.altDeltas);
+                    const bearingStats = calculateStats(sm.bearingDeltas);
+
+                    // Position uses sqrt scaling (tolerant of mode differences), alt/bearing use linear
+                    const posScore = calculateSmoothnessScore(posStats.stddev, 14, true);
+                    const altScore = calculateSmoothnessScore(altStats.stddev, 50);
+                    const bearingScore = calculateSmoothnessScore(bearingStats.stddev, 33);
+                    const overallScore = (posScore + altScore + bearingScore) / 3;
+
+                    const modeNames = { 0: 'CHASE', 1: 'BIRDS_EYE', 2: 'SIDE_VIEW', 3: 'CINEMATIC' };
+                    console.log(`[SMOOTHNESS] ${modeNames[sm.mode] || sm.mode}: ` +
+                        `Overall=${overallScore.toFixed(1)}% ` +
+                        `(pos=${posScore.toFixed(1)}% stddev=${posStats.stddev.toFixed(3)}m, ` +
+                        `alt=${altScore.toFixed(1)}% stddev=${altStats.stddev.toFixed(3)}m, ` +
+                        `bearing=${bearingScore.toFixed(1)}% stddev=${bearingStats.stddev.toFixed(3)}deg)`);
+                }
+            }
+            sm.lastState = { ...state };
+
             const camera = map.getFreeCameraOptions();
 
             // Set camera position
@@ -3388,9 +3766,19 @@
                 state.alt
             );
 
-            // Look at the dot position
+            // Set camera orientation to look at the rider
             if (lookAtPoint) {
-                camera.lookAtPoint([lookAtPoint.lng, lookAtPoint.lat]);
+                // For cinematic mode at high zoom, use the smoothed rider position
+                const isCinematicHighZoom = currentCameraMode === CameraModes.CINEMATIC &&
+                                            zoomLevel >= 2.0 &&
+                                            !isTransitioning;
+                const target = isCinematicHighZoom && window._cinematicState
+                    ? window._cinematicState
+                    : lookAtPoint;
+
+                // Use Mapbox's native lookAtPoint - it's the most stable option
+                // The smoothed target position should eliminate any jitter from route data
+                camera.lookAtPoint([target.lng, target.lat]);
             }
 
             // Apply camera settings
@@ -3684,17 +4072,31 @@
 
         // Seek to a specific position (0-1)
         seekTo: (pos) => {
-            resetSmoothingCache();
+            resetCameraCaches(); // Reset ALL caches including position to avoid smoothing lag
             progress = Math.max(0, Math.min(1, pos));
-            updateCamera(0);
+            // Force camera update even when paused
+            if (!isPlaying) {
+                freeNavigationEnabled = false;
+                updateCamera(0.016);
+                freeNavigationEnabled = true;
+            } else {
+                updateCamera(0);
+            }
             console.log(`Seeked to ${(progress * 100).toFixed(1)}% (${(progress * totalDistance).toFixed(2)} km)`);
         },
 
         // Seek to a specific distance in km
         seekToKm: (km) => {
-            resetSmoothingCache();
+            resetCameraCaches(); // Reset ALL caches including position to avoid smoothing lag
             progress = Math.max(0, Math.min(1, km / totalDistance));
-            updateCamera(0);
+            // Force camera update even when paused
+            if (!isPlaying) {
+                freeNavigationEnabled = false;
+                updateCamera(0.016);
+                freeNavigationEnabled = true;
+            } else {
+                updateCamera(0);
+            }
             console.log(`Seeked to ${km.toFixed(2)} km (${(progress * 100).toFixed(1)}%)`);
         },
 
@@ -3722,6 +4124,20 @@
         // Pause/play
         pause: () => { if (isPlaying) togglePlay(); },
         play: () => { if (!isPlaying) togglePlay(); },
+
+        // Set zoom level (0.3 = 30% closest, 3.0 = 300% farthest)
+        setZoom: (zoom) => {
+            zoomLevel = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, zoom));
+            saveZoomToStorage(zoomLevel);
+            updateZoomIndicator();
+            // Force camera update
+            if (!isPlaying) {
+                freeNavigationEnabled = false;
+                updateCamera(0.016);
+                freeNavigationEnabled = true;
+            }
+            console.log(`Zoom set to ${Math.round(zoomLevel * 100)}%`);
+        },
 
         // Watchdog status and controls
         watchdog: {
