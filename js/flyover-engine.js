@@ -153,6 +153,23 @@
     const SETTLING_DURATION = 60;        // frames to skip terrain collision after transition
     let settlingFramesRemaining = 0;     // countdown for settling period
 
+    // Adaptive smoothing for intentional seeks
+    // When user seeks to a distant position, we need larger smoothing limits
+    // that decay back to normal over time
+    let _seekTimestamp = 0;              // When last seek occurred (performance.now())
+    let _seekDistance = 0;               // Distance of last seek in meters
+    // Note: seekToPosition triggers a ~1.5s overview transition first, so we need
+    // ADAPTIVE_WINDOW to be longer than that to cover full catch-up time
+    const ADAPTIVE_WINDOW = 5000;        // ms to apply adaptive smoothing after seek
+    const BASE_POS_LIMIT = 30;           // meters/frame baseline (normal playback)
+    const MAX_POS_LIMIT = 10000;         // meters/frame maximum (600km/sec at 60fps - very fast catch-up)
+    const BASE_ALT_LIMIT = 50;           // meters/frame baseline for altitude
+    const MAX_ALT_LIMIT = 2000;          // meters/frame maximum for altitude
+    // Decay constant provides smooth catch-up: fast initially, then gradual slowdown
+    // At 1600ms with 3000ms decay: exp(-1600/3000) ≈ 0.59, giving strong initial boost
+    // At 5000ms: exp(-5000/3000) ≈ 0.19, still reasonable boost
+    const DECAY_CONSTANT = 3000;         // ms for exponential decay (63% reduction)
+
     // Terrain collision constants
     const TERRAIN_MIN_CLEARANCE = 100;   // meters above terrain at camera position
     const RIDER_MIN_CLEARANCE = 100;     // meters above rider - camera should never be below rider
@@ -772,6 +789,10 @@
         update(target, deltaTime) {
             if (!this.position) {
                 this.position = { ...target };
+                if (window.FLYOVER_DEBUG) {
+                    console.log('[SPRING] Teleported to target (position was null) target=(' +
+                        target.lng.toFixed(4) + ',' + target.lat.toFixed(4) + ')');
+                }
                 return this.position;
             }
 
@@ -1110,6 +1131,17 @@
             const state = getOrInitSmoothState('_riderSmoothState', dotPoint, mode);
             const alpha = getRiderSmoothingAlpha(mode);
             smoothedDotPoint = applySmoothPosition(state, dotPoint, alpha);
+
+            // SEEK DEBUG: Log if rider smoothing is causing significant lag
+            if (window.FLYOVER_DEBUG && window._seekDebugFrameCount > 0) {
+                const riderLag = Math.sqrt(
+                    Math.pow((dotPoint.lng - smoothedDotPoint.lng) * 111320 * Math.cos(dotPoint.lat * Math.PI / 180), 2) +
+                    Math.pow((dotPoint.lat - smoothedDotPoint.lat) * 111320, 2)
+                );
+                if (riderLag > 10) {  // Only log if lag > 10m
+                    console.log('[SEEK DEBUG] RIDER LAG: ' + Math.round(riderLag) + 'm behind actual position');
+                }
+            }
         }
 
         let cameraLng, cameraLat, cameraAlt, cameraBearing, cameraPitch;
@@ -1161,6 +1193,18 @@
                 if (usePredictive && predictiveData && !skipSmoothing) {
                     const spring = getPredictiveCameraController().getCameraSpring();
                     const smoothedPos = spring.update(idealCameraPos, deltaTime);
+
+                    // SEEK DEBUG: Log if spring is causing significant lag
+                    if (window.FLYOVER_DEBUG && window._seekDebugFrameCount > 0) {
+                        const springLag = Math.sqrt(
+                            Math.pow((idealCameraPos.lng - smoothedPos.lng) * 111320 * Math.cos(idealCameraPos.lat * Math.PI / 180), 2) +
+                            Math.pow((idealCameraPos.lat - smoothedPos.lat) * 111320, 2)
+                        );
+                        if (springLag > 10) {  // Only log if lag > 10m
+                            console.log('[SEEK DEBUG] SPRING LAG: ' + Math.round(springLag) + 'm | altLag: ' + Math.round(Math.abs(idealCameraPos.alt - smoothedPos.alt)) + 'm');
+                        }
+                    }
+
                     cameraLng = smoothedPos.lng;
                     cameraLat = smoothedPos.lat;
                     cameraAlt = smoothedPos.alt;
@@ -2027,6 +2071,25 @@
         window._cinematicCameraPos = null;
         // Reset emergency smoothing state
         _lastAppliedState = null;
+        // Reset rider and camera smooth states - CRITICAL for seeks!
+        // Without this, after a 100km seek the smoothed position slowly catches up
+        // at 1.5%/frame, causing the camera to lag 50+ meters behind the rider.
+        window._riderSmoothState = null;
+        window._cameraSmoothState = null;
+        // Reset the entire predictive camera controller if it exists
+        // The controller has TWO springs (camera + lookAt) plus cached predictions
+        // All must be reset after a seek to prevent huge lag
+        if (predictiveCameraController) {
+            // Reset both springs
+            predictiveCameraController.cameraSpring.reset();
+            predictiveCameraController.lookAtSpring.reset();
+            // Clear cached predictions
+            predictiveCameraController.lastPredictedTarget = null;
+            predictiveCameraController.lastSamples = null;
+            // Force mode reset on next update
+            predictiveCameraController.lastMode = null;
+            console.log('[RESET] Predictive camera controller fully reset');
+        }
         if (window._terrainCache) {
             window._terrainCache.lastCameraAlt = null;
             window._terrainCache.lastBearing = null;
@@ -3767,6 +3830,7 @@
     /**
      * Seek to specific position
      * Uses smooth transition to prevent camera jitter
+     * Records seek metadata for adaptive smoothing
      */
     function seekToPosition(newPosition) {
         const oldProgress = progress;
@@ -3775,6 +3839,16 @@
         // Calculate how far we're seeking (as fraction of route)
         const seekDelta = Math.abs(progress - oldProgress);
         const significantSeek = seekDelta > 0.01; // More than 1% of route
+
+        // Record seek metadata for adaptive smoothing
+        // This allows emergency smoothing to use larger limits after intentional seeks
+        const seekDistanceKm = seekDelta * totalDistance;
+        _seekTimestamp = performance.now();
+        _seekDistance = seekDistanceKm * 1000; // Convert to meters
+
+        if (_seekDistance > 1000) { // Log seeks > 1km
+            console.log(`[SEEK] Distance: ${seekDistanceKm.toFixed(1)}km, instant teleport (no lerp transition)`);
+        }
 
         resetCameraCaches(); // Reset ALL caches including position to avoid smoothing lag
 
@@ -3793,7 +3867,14 @@
             transitionStartState = null;
         }
 
-        // For significant seeks, use smooth transition to prevent jitter
+        // For seeks during playback, use instant teleport instead of lerp transition.
+        // The previous lerp approach caused "zoom in/out/in/out" oscillation because:
+        // 1. targetState.alt changes as terrain tiles load asynchronously
+        // 2. The lerp target moves each frame, causing camera altitude to oscillate
+        // 3. Emergency smoothing was bypassed during transition (!isTransitioning)
+        //
+        // New approach: Teleport camera instantly to target position, reset all caches,
+        // and let normal per-frame camera calculation take over.
         if (significantSeek && isPlaying) {
             // Cancel any in-progress scrub animation
             if (scrubAnimationId) {
@@ -3801,19 +3882,23 @@
                 scrubAnimationId = null;
             }
 
-            // Capture current camera state as the start point
-            transitionStartState = getCurrentCameraState();
+            // Reset ALL transition states - no lerp, just teleport
+            overviewTransitionProgress = 0;
+            shouldReturnFromOverview = false;
+            transitionStartState = null;
+            overviewTargetState = null;
+            window._overviewReturnFrames = 0;
 
-            // Set up return transition from current position to new target
-            // Start at "1" (overview) and animate down to "0" (normal camera)
-            overviewTransitionProgress = 1;
-            shouldReturnFromOverview = true;
+            // Reset the last applied state so emergency smoothing starts fresh
+            // This is critical - without this, the first frame would try to smooth
+            // from the OLD camera position, causing the same catch-up problem
+            _lastAppliedState = null;
 
-            // Start settling period to skip terrain collision during transition
+            // Start settling period to skip terrain collision during initial frames
             settlingFramesRemaining = SETTLING_DURATION;
 
-            // The animation loop will handle the smooth swoop-down transition
-            // It calculates the target state from the current progress
+            // Normal animation loop will calculate fresh camera state for new position
+            // No transition lerp - camera goes directly to ideal position for new rider location
         } else {
             // Small seek or not playing - update immediately
             // Temporarily disable free navigation to update camera during seek
@@ -4152,19 +4237,86 @@
                 }
             }
 
-            // EMERGENCY POSITION/ALTITUDE SMOOTHING
-            // This is a safety net to catch any large jumps that bypass earlier smoothing.
-            // Only applies during normal playback (not transitions) and only for excessive changes.
-            // The limits are generous - we're only catching catastrophic jumps.
-            const MAX_POS_DELTA = 30;  // meters/frame (normal motion is ~2-3m/frame)
-            const MAX_ALT_DELTA = 50;  // meters/frame (normal is ~1-25m/frame)
+            // SEEK DEBUG: Log every frame for 10 seconds after a seek to capture the behavior
+            const timeSinceSeekForDebug = performance.now() - _seekTimestamp;
+            const isInSeekDebugWindow = _seekDistance > 1000 && timeSinceSeekForDebug < 10000;
+            const originalState = { ...state }; // Capture before any modifications
 
-            if (_lastAppliedState && !isTransitioning) {
+            // Calculate distance from camera to rider for debugging
+            let cameraToRiderDist = null;
+            if (lookAtPoint && isInSeekDebugWindow) {
+                const dLng = (state.lng - lookAtPoint.lng) * Math.cos(state.lat * Math.PI / 180) * 111320;
+                const dLat = (state.lat - lookAtPoint.lat) * 111320;
+                cameraToRiderDist = Math.sqrt(dLng * dLng + dLat * dLat);
+            }
+
+            // ADAPTIVE EMERGENCY SMOOTHING
+            // This is a safety net to catch any large jumps that bypass earlier smoothing.
+            // After intentional seeks, we use larger limits that decay back to normal over ~1 second.
+            // This allows the camera to quickly catch up to the rider after seeking.
+
+            // Calculate adaptive limits based on time since last seek
+            const timeSinceSeek = performance.now() - _seekTimestamp;
+            let maxPosDelta = BASE_POS_LIMIT;
+            let maxAltDelta = BASE_ALT_LIMIT;
+
+            if (timeSinceSeek < ADAPTIVE_WINDOW && _seekDistance > 0) {
+                // Calculate adaptive multiplier based on seek distance and time decay
+                // distanceFactor: 1x for small seeks, up to ~67x for 100km seeks
+                const distanceFactor = Math.max(1, Math.min(MAX_POS_LIMIT / BASE_POS_LIMIT, _seekDistance / 10000));
+
+                // timeDecay: starts at 1, decays to ~0.05 over ADAPTIVE_WINDOW
+                // exp(-1000/300) ≈ 0.036, so limits return to near-baseline by end of window
+                const timeDecay = Math.exp(-timeSinceSeek / DECAY_CONSTANT);
+
+                // Adaptive limit = base + (max_increase * decay)
+                // At t=0 with 100km seek: 30 + (2000-30)*1 = 2000 m/frame
+                // At t=300ms: 30 + (2000-30)*0.37 = 759 m/frame
+                // At t=1000ms: 30 + (2000-30)*0.04 = 109 m/frame
+                const adaptiveMultiplier = 1 + (distanceFactor - 1) * timeDecay;
+                maxPosDelta = BASE_POS_LIMIT * adaptiveMultiplier;
+                maxAltDelta = BASE_ALT_LIMIT * adaptiveMultiplier;
+
+                // Clamp to maximum limits
+                maxPosDelta = Math.min(maxPosDelta, MAX_POS_LIMIT);
+                maxAltDelta = Math.min(maxAltDelta, MAX_ALT_LIMIT);
+            }
+
+            // SEEK GRACE PERIOD: For the first 1000ms after a seek, lock altitude
+            // to prevent terrain-loading chaos while position catches up instantly.
+            const SEEK_GRACE_PERIOD = 1000; // ms
+            const inSeekGracePeriod = timeSinceSeek < SEEK_GRACE_PERIOD && _seekDistance > 1000;
+
+            if (inSeekGracePeriod) {
+                // During grace period: LOCK altitude to prevent terrain-loading chaos
+                if (!window._seekGraceAltitude) {
+                    // Wait for a reasonable altitude (terrain-based, typically <500m for chase cam)
+                    // Don't lock at high altitudes which indicate terrain not loaded yet
+                    if (state.alt < 800) {
+                        window._seekGraceAltitude = state.alt;
+                    }
+                }
+
+                if (window._seekGraceAltitude) {
+                    // Force altitude to locked value, ignore calculated value entirely
+                    state = { ...state };
+                    state.alt = window._seekGraceAltitude;
+                }
+                // Position and bearing move freely - no smoothing during grace period
+            }
+            else {
+                // Clear the grace altitude tracker when grace period ends
+                if (window._seekGraceAltitude) {
+                    window._seekGraceAltitude = null;
+                }
+            }
+
+            if (!inSeekGracePeriod && _lastAppliedState && !isTransitioning) {
                 let needsSmoothing = false;
                 const posDelta = calculatePositionDelta(state, _lastAppliedState);
 
-                if (posDelta > MAX_POS_DELTA) {
-                    const scale = MAX_POS_DELTA / posDelta;
+                if (posDelta > maxPosDelta) {
+                    const scale = maxPosDelta / posDelta;
                     state = { ...state };
                     state.lng = _lastAppliedState.lng + (state.lng - _lastAppliedState.lng) * scale;
                     state.lat = _lastAppliedState.lat + (state.lat - _lastAppliedState.lat) * scale;
@@ -4172,14 +4324,21 @@
                 }
 
                 const altDelta = state.alt - _lastAppliedState.alt;
-                if (Math.abs(altDelta) > MAX_ALT_DELTA) {
+                if (Math.abs(altDelta) > maxAltDelta) {
                     state = { ...state };
-                    state.alt = _lastAppliedState.alt + Math.sign(altDelta) * MAX_ALT_DELTA;
+                    state.alt = _lastAppliedState.alt + Math.sign(altDelta) * maxAltDelta;
                     needsSmoothing = true;
                 }
 
                 if (needsSmoothing) {
-                    console.warn('[EMERGENCY SMOOTHING] pos:', posDelta.toFixed(0), 'm, alt:', Math.abs(altDelta).toFixed(0), 'm');
+                    // Only log as warning if using baseline limits (not adaptive)
+                    const isAdaptive = timeSinceSeek < ADAPTIVE_WINDOW && _seekDistance > 0;
+                    if (isAdaptive) {
+                        console.log('[ADAPTIVE SMOOTHING] pos:', posDelta.toFixed(0), 'm, limit:', maxPosDelta.toFixed(0), 'm, decay:', (timeSinceSeek / 1000).toFixed(2), 's');
+                    } else {
+                        console.warn('[EMERGENCY SMOOTHING] pos:', posDelta.toFixed(0), 'm, alt:', Math.abs(altDelta).toFixed(0), 'm',
+                            '| timeSinceSeek:', timeSinceSeek.toFixed(0), 'ms, seekDist:', _seekDistance.toFixed(0), 'm, limit:', maxPosDelta.toFixed(0));
+                    }
                     // Sync terrain cache to prevent divergence between tracking systems
                     if (window._terrainCache) {
                         window._terrainCache.lastLng = state.lng;
@@ -4209,6 +4368,34 @@
                     }
                 }
             }
+            // SEEK DEBUG: Log every frame for 10 seconds after a seek
+            if (isInSeekDebugWindow && window.FLYOVER_DEBUG) {
+                // Calculate final camera-to-rider distance
+                let finalCamToRider = null;
+                if (lookAtPoint) {
+                    const dLng = (state.lng - lookAtPoint.lng) * Math.cos(state.lat * Math.PI / 180) * 111320;
+                    const dLat = (state.lat - lookAtPoint.lat) * 111320;
+                    finalCamToRider = Math.sqrt(dLng * dLng + dLat * dLat);
+                }
+
+                // Log every 5th frame to reduce noise but still capture behavior
+                if (!window._seekDebugFrameCount) window._seekDebugFrameCount = 0;
+                window._seekDebugFrameCount++;
+
+                if (window._seekDebugFrameCount % 5 === 0) {
+                    console.log('[SEEK DEBUG] t=' + Math.round(timeSinceSeekForDebug) + 'ms' +
+                        ' | camAlt: ' + Math.round(originalState.alt) + '→' + Math.round(state.alt) + 'm' +
+                        ' | camToRider: ' + (finalCamToRider ? Math.round(finalCamToRider) + 'm' : 'n/a') +
+                        ' | riderAlt: ' + (lookAtPoint ? Math.round(lookAtPoint.alt) : 'n/a') + 'm' +
+                        ' | bearing: ' + Math.round(state.bearing) + '°' +
+                        ' | settling: ' + settlingFramesRemaining +
+                        ' | trans: ' + isTransitioning +
+                        ' | lastApplied: ' + (_lastAppliedState ? 'yes' : 'no'));
+                }
+            } else {
+                window._seekDebugFrameCount = 0;
+            }
+
             _lastAppliedState = { ...state };
 
             // SMOOTHNESS MEASUREMENT SYSTEM
@@ -4594,32 +4781,16 @@
         }),
 
         // Seek to a specific position (0-1)
+        // Uses seekToPosition() to properly trigger adaptive smoothing
         seekTo: (pos) => {
-            resetCameraCaches(); // Reset ALL caches including position to avoid smoothing lag
-            progress = Math.max(0, Math.min(1, pos));
-            // Force camera update even when paused
-            if (!isPlaying) {
-                freeNavigationEnabled = false;
-                updateCamera(0.016);
-                freeNavigationEnabled = true;
-            } else {
-                updateCamera(0);
-            }
+            seekToPosition(pos);
             console.log(`Seeked to ${(progress * 100).toFixed(1)}% (${(progress * totalDistance).toFixed(2)} km)`);
         },
 
         // Seek to a specific distance in km
+        // Uses seekToPosition() to properly trigger adaptive smoothing
         seekToKm: (km) => {
-            resetCameraCaches(); // Reset ALL caches including position to avoid smoothing lag
-            progress = Math.max(0, Math.min(1, km / totalDistance));
-            // Force camera update even when paused
-            if (!isPlaying) {
-                freeNavigationEnabled = false;
-                updateCamera(0.016);
-                freeNavigationEnabled = true;
-            } else {
-                updateCamera(0);
-            }
+            seekToPosition(km / totalDistance);
             console.log(`Seeked to ${km.toFixed(2)} km (${(progress * 100).toFixed(1)}%)`);
         },
 
@@ -4677,6 +4848,41 @@
             reset: () => {
                 resetCameraCaches();
                 console.log('Camera caches reset by watchdog');
+            }
+        },
+
+        // Adaptive smoothing status and controls
+        adaptiveSmoothing: {
+            status: () => {
+                const timeSinceSeek = performance.now() - _seekTimestamp;
+                const isActive = timeSinceSeek < ADAPTIVE_WINDOW && _seekDistance > 0;
+                const distanceFactor = Math.max(1, Math.min(MAX_POS_LIMIT / BASE_POS_LIMIT, _seekDistance / 10000));
+                const timeDecay = isActive ? Math.exp(-timeSinceSeek / DECAY_CONSTANT) : 0;
+                const currentPosLimit = isActive ? Math.min(BASE_POS_LIMIT * (1 + (distanceFactor - 1) * timeDecay), MAX_POS_LIMIT) : BASE_POS_LIMIT;
+
+                return {
+                    isActive: isActive,
+                    seekDistance: _seekDistance,
+                    seekDistanceKm: (_seekDistance / 1000).toFixed(2),
+                    timeSinceSeek: timeSinceSeek.toFixed(0) + 'ms',
+                    timeDecay: timeDecay.toFixed(3),
+                    distanceFactor: distanceFactor.toFixed(1),
+                    currentPosLimit: currentPosLimit.toFixed(0) + 'm/frame',
+                    basePosLimit: BASE_POS_LIMIT + 'm/frame',
+                    maxPosLimit: MAX_POS_LIMIT + 'm/frame'
+                };
+            },
+            // Manually trigger adaptive smoothing (for testing)
+            simulateSeek: (distanceKm) => {
+                _seekTimestamp = performance.now();
+                _seekDistance = distanceKm * 1000;
+                console.log(`Simulated ${distanceKm}km seek - adaptive smoothing engaged`);
+            },
+            // Reset adaptive smoothing state
+            reset: () => {
+                _seekTimestamp = 0;
+                _seekDistance = 0;
+                console.log('Adaptive smoothing state reset');
             }
         }
     };
