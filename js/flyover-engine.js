@@ -260,10 +260,16 @@
      * Adjust zoom level
      */
     function adjustZoom(delta) {
+        const oldZoom = zoomLevel;
         const newZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, zoomLevel + delta));
         if (newZoom !== zoomLevel) {
             zoomLevel = newZoom;
             saveZoomToStorage(zoomLevel);
+
+            // Record input for panic button replay
+            if (stateRecorder && stateRecorder.isEnabled) {
+                stateRecorder.recordInput('zoom', { from: oldZoom, to: newZoom });
+            }
             updateZoomIndicator();
 
             // Reset predictive camera spring so zoom change is immediate
@@ -519,6 +525,11 @@
             }
         }
 
+        // Record terrain query for deterministic replay
+        if (stateRecorder && stateRecorder.isEnabled) {
+            stateRecorder.recordTerrainQuery(elevation);
+        }
+
         return elevation;
     }
 
@@ -575,11 +586,14 @@
 
         // Calculate altitude difference
         const altDiff = Math.abs(end.alt - start.alt);
+        const goingDown = end.alt < start.alt;
 
         // For large altitude differences (>200m), use arc interpolation
         // This creates a smooth "rise up, move, descend" motion instead of diving
+        // ONLY apply arc when going UP - when going DOWN (like returning from scrub),
+        // we want direct descent, not an arc that goes even higher first
         let finalAlt;
-        if (altDiff > 200) {
+        if (altDiff > 200 && !goingDown) {
             // Use higher of the two altitudes as the peak, plus a boost based on altitude difference
             const peakAlt = Math.max(start.alt, end.alt) + altDiff * 0.3;
 
@@ -589,6 +603,7 @@
             const arcBoost = (peakAlt - linearAlt) * arcFactor;
             finalAlt = linearAlt + arcBoost * 0.5; // Blend 50% arc for subtle effect
         } else {
+            // Linear interpolation for going down or small differences
             finalAlt = lerp(start.alt, end.alt, t);
         }
 
@@ -826,6 +841,541 @@
                    Math.abs(this.velocity.lat) < threshold &&
                    Math.abs(this.velocity.alt) < threshold;
         }
+
+        /**
+         * Teleport to a new position instantly (for seeks)
+         * Resets velocity to zero to prevent overshoot
+         */
+        teleportTo(position) {
+            this.position = position ? { ...position } : null;
+            this.velocity = { lng: 0, lat: 0, alt: 0 };
+            if (window.CAMERA_CHAOS_DEBUG) {
+                console.log('[SPRING] Teleported to:', position);
+            }
+        }
+
+        /**
+         * Get current velocity magnitude in meters (approximate)
+         */
+        getVelocityMagnitude() {
+            // Convert lng/lat velocity to approximate meters
+            const vLng = this.velocity.lng * 111320; // rough m/deg at equator
+            const vLat = this.velocity.lat * 111320;
+            const vAlt = this.velocity.alt;
+            return Math.sqrt(vLng * vLng + vLat * vLat + vAlt * vAlt);
+        }
+    }
+
+    /**
+     * Circular Spring for Angular Values
+     * Handles 0-360 degree wraparound using critically damped spring physics.
+     * Ensures smooth transitions across the 0/360 boundary.
+     */
+    class CircularSpring {
+        constructor(omega = 3.0) {
+            this.omega = omega;
+            this.value = null;
+            this.velocity = 0;
+        }
+
+        /**
+         * Update the spring toward a target angle
+         * @param {number} target - Target angle in degrees (0-360)
+         * @param {number} deltaTime - Time step in seconds
+         * @returns {number} - Smoothed angle in degrees (0-360)
+         */
+        update(target, deltaTime) {
+            if (this.value === null) {
+                this.value = target;
+                this.velocity = 0;
+                return target;
+            }
+
+            // Clamp deltaTime to prevent instability
+            const dt = Math.min(deltaTime, 0.1);
+
+            // Calculate shortest angular distance (handles wraparound)
+            let delta = target - this.value;
+            // Normalize to -180 to +180
+            while (delta > 180) delta -= 360;
+            while (delta < -180) delta += 360;
+
+            // Critically damped spring physics for angle
+            const omega = this.omega;
+            const omega2 = omega * omega;
+            const acceleration = -omega2 * (-delta) - 2 * omega * this.velocity;
+
+            this.velocity += acceleration * dt;
+            this.value += this.velocity * dt;
+
+            // Normalize result to 0-360
+            while (this.value < 0) this.value += 360;
+            while (this.value >= 360) this.value -= 360;
+
+            return this.value;
+        }
+
+        /**
+         * Teleport to a specific angle (zero velocity)
+         */
+        teleportTo(angle) {
+            this.value = angle;
+            this.velocity = 0;
+        }
+
+        /**
+         * Reset to uninitialized state
+         */
+        reset() {
+            this.value = null;
+            this.velocity = 0;
+        }
+
+        /**
+         * Check if spring has settled
+         */
+        isSettled(threshold = 0.1) {
+            return Math.abs(this.velocity) < threshold;
+        }
+    }
+
+    /**
+     * Outlier-Rejecting Exponential Moving Average
+     * Filters out sudden large changes (like terrain tile loads) while
+     * allowing gradual adaptation to genuine terrain changes.
+     */
+    class OutlierRejectingEMA {
+        /**
+         * @param {number} alpha - Normal smoothing factor (0-1, higher = faster adaptation)
+         * @param {number} outlierThreshold - Changes larger than this use reduced alpha
+         * @param {number} reducedAlphaFactor - Multiplier for alpha when outlier detected
+         */
+        constructor(alpha = 0.2, outlierThreshold = 50, reducedAlphaFactor = 0.1) {
+            this.alpha = alpha;
+            this.outlierThreshold = outlierThreshold;
+            this.reducedAlphaFactor = reducedAlphaFactor;
+            this.value = null;
+            this.lastRawValue = null;
+        }
+
+        /**
+         * Update with a new value
+         * @param {number|null} rawValue - New measurement (null = no data, hold previous)
+         * @returns {number|null} - Filtered value
+         */
+        update(rawValue) {
+            this.lastRawValue = rawValue;
+
+            // Handle null input - hold previous value
+            if (rawValue === null) {
+                return this.value;
+            }
+
+            // First value - initialize
+            if (this.value === null) {
+                this.value = rawValue;
+                return this.value;
+            }
+
+            // Check for outlier
+            const delta = Math.abs(rawValue - this.value);
+            let effectiveAlpha = this.alpha;
+
+            if (delta > this.outlierThreshold) {
+                // Outlier detected - use much slower adaptation
+                effectiveAlpha = this.alpha * this.reducedAlphaFactor;
+                if (window.CAMERA_CHAOS_DEBUG) {
+                    console.log(`[TERRAIN FILTER] Outlier detected: delta=${delta.toFixed(1)}m, using reduced alpha=${effectiveAlpha.toFixed(3)}`);
+                }
+            }
+
+            // Exponential moving average
+            this.value = this.value + effectiveAlpha * (rawValue - this.value);
+            return this.value;
+        }
+
+        /**
+         * Reset filter state
+         */
+        reset() {
+            this.value = null;
+            this.lastRawValue = null;
+        }
+
+        /**
+         * Force set to a specific value (for teleports)
+         */
+        teleportTo(value) {
+            this.value = value;
+            this.lastRawValue = value;
+        }
+
+        /**
+         * Get current filtered value
+         */
+        getValue() {
+            return this.value;
+        }
+    }
+
+    /**
+     * Unified Camera Controller
+     * Single source of truth for camera smoothing - replaces multiple competing systems.
+     *
+     * Design principles:
+     * 1. ONE spring for position, ONE for orientation
+     * 2. Constraints applied to TARGET before spring, not output after
+     * 3. Disruptions (seeks, mode changes) handled as explicit events
+     * 4. No post-processing of spring output
+     */
+    /**
+     * State Machine States for Unified Camera Controller
+     */
+    const CameraState = {
+        NORMAL: 'NORMAL',           // Spring active, normal tracking
+        TRANSITIONING: 'TRANSITIONING', // Lerp + spring during mode changes
+        SEEKING: 'SEEKING'          // Teleport/sync after large seeks
+    };
+
+    class UnifiedCameraController {
+        constructor() {
+            // THE ONLY SMOOTHING SPRINGS
+            this.positionSpring = new CriticallyDampedSpring(2.0);  // {lng, lat, alt}
+            this.bearingSpring = new CircularSpring(3.0);          // handles 0-360 wraparound
+            this.pitchSpring = { value: null, velocity: 0, omega: 3.0 }; // 1D spring for pitch
+
+            // TERRAIN FILTERING
+            this.terrainFilter = new OutlierRejectingEMA(0.15, 50, 0.05);
+
+            // STATE MACHINE
+            this.state = CameraState.NORMAL;
+
+            // TRANSITION STATE
+            this.transition = null; // { startState, targetMode, progress, duration }
+
+            // MODE
+            this.currentMode = CameraModes.CHASE;
+
+            // Tracking
+            this.lastRiderPosition = null;
+            this.lastTarget = null;
+            this.isEnabled = false;
+
+            // Configuration
+            this.config = {
+                teleportThreshold: 500,     // meters - seeks larger than this teleport
+                smallSeekThreshold: 100,    // meters - seeks smaller than this, spring catches up
+                minTerrainClearance: 100,   // meters above terrain
+                minRiderClearance: 100,     // meters above rider
+                transitionDuration: 1.0,    // seconds for mode transitions
+            };
+        }
+
+        /**
+         * Update pitch using 1D spring physics
+         */
+        smoothPitch(targetPitch, deltaTime) {
+            if (this.pitchSpring.value === null) {
+                this.pitchSpring.value = targetPitch;
+                this.pitchSpring.velocity = 0;
+                return targetPitch;
+            }
+
+            const dt = Math.min(deltaTime, 0.1);
+            const omega = this.pitchSpring.omega;
+            const omega2 = omega * omega;
+            const delta = targetPitch - this.pitchSpring.value;
+            const acceleration = -omega2 * (-delta) - 2 * omega * this.pitchSpring.velocity;
+
+            this.pitchSpring.velocity += acceleration * dt;
+            this.pitchSpring.value += this.pitchSpring.velocity * dt;
+
+            return this.pitchSpring.value;
+        }
+
+        /**
+         * Main update - call once per frame
+         * Replaces ALL other smoothing systems when enabled.
+         *
+         * @param {object} riderPos - Current rider position {lng, lat, alt}
+         * @param {number} terrainElevation - Terrain at camera position (can be null)
+         * @param {string} mode - Current camera mode
+         * @param {number} deltaTime - Seconds since last frame
+         * @param {object} idealTarget - Pre-calculated ideal camera position {lng, lat, alt, bearing, pitch}
+         * @returns {object} - Smoothed camera state {lng, lat, alt, bearing, pitch}
+         */
+        update(riderPos, terrainElevation, mode, deltaTime, idealTarget) {
+            if (!this.isEnabled || !idealTarget) {
+                return idealTarget;
+            }
+
+            // Handle mode change - start transition
+            if (mode !== this.currentMode) {
+                this.startTransition(mode);
+            }
+
+            // Update state machine
+            if (this.state === CameraState.SEEKING) {
+                // Seeking state - teleport already happened, return to normal
+                this.state = CameraState.NORMAL;
+            }
+
+            // 1. Filter terrain to absorb async tile load surprises
+            const filteredTerrain = this.terrainFilter.update(terrainElevation);
+
+            // 2. Apply terrain constraint to TARGET (not output!)
+            let constrainedTarget = { ...idealTarget };
+            if (filteredTerrain !== null) {
+                const minAlt = filteredTerrain + this.config.minTerrainClearance;
+                const minFromRider = riderPos.alt + this.config.minRiderClearance;
+                constrainedTarget.alt = Math.max(constrainedTarget.alt, minAlt, minFromRider);
+            }
+
+            // 3. Handle transition state
+            if (this.state === CameraState.TRANSITIONING && this.transition) {
+                return this.updateTransition(constrainedTarget, deltaTime);
+            }
+
+            // 4. Spring updates - THE ONLY SMOOTHING
+            const smoothedPos = this.positionSpring.update(constrainedTarget, deltaTime);
+            const smoothedBearing = this.bearingSpring.update(idealTarget.bearing, deltaTime);
+            const smoothedPitch = this.smoothPitch(idealTarget.pitch, deltaTime);
+
+            // Debug logging
+            if (window.CAMERA_CHAOS_DEBUG) {
+                const springLag = this.calculateDistance(idealTarget, smoothedPos);
+                if (springLag > 50) {
+                    console.log(`[UNIFIED] Spring lag: ${springLag.toFixed(1)}m, state=${this.state}`);
+                }
+            }
+
+            this.lastTarget = constrainedTarget;
+            this.lastRiderPosition = riderPos;
+
+            // Return smoothed state - NO POST-PROCESSING
+            return {
+                lng: smoothedPos.lng,
+                lat: smoothedPos.lat,
+                alt: smoothedPos.alt,
+                bearing: smoothedBearing,
+                pitch: smoothedPitch
+            };
+        }
+
+        /**
+         * Start a mode transition
+         */
+        startTransition(newMode) {
+            if (window.CAMERA_CHAOS_DEBUG) {
+                console.log(`[UNIFIED] Starting transition: ${this.currentMode} -> ${newMode}`);
+            }
+
+            this.transition = {
+                startState: this.getCurrentState(),
+                targetMode: newMode,
+                progress: 0,
+                duration: this.config.transitionDuration
+            };
+            this.state = CameraState.TRANSITIONING;
+            this.currentMode = newMode;
+        }
+
+        /**
+         * Update during transition - blend lerp with spring
+         */
+        updateTransition(target, deltaTime) {
+            if (!this.transition) {
+                this.state = CameraState.NORMAL;
+                return target;
+            }
+
+            // Update progress
+            this.transition.progress += deltaTime / this.transition.duration;
+
+            if (this.transition.progress >= 1) {
+                // Transition complete
+                this.transition = null;
+                this.state = CameraState.NORMAL;
+
+                // Teleport springs to final position to avoid overshoot
+                this.positionSpring.teleportTo(target);
+                this.bearingSpring.teleportTo(target.bearing);
+                this.pitchSpring.value = target.pitch;
+                this.pitchSpring.velocity = 0;
+
+                if (window.CAMERA_CHAOS_DEBUG) {
+                    console.log(`[UNIFIED] Transition complete`);
+                }
+
+                return target;
+            }
+
+            // Eased progress for smooth transition
+            const t = this.easeInOutCubic(this.transition.progress);
+
+            // Lerp from start to target
+            const startState = this.transition.startState;
+            const lerpedState = {
+                lng: this.lerp(startState.lng, target.lng, t),
+                lat: this.lerp(startState.lat, target.lat, t),
+                alt: this.lerp(startState.alt, target.alt, t),
+                bearing: this.lerpAngle(startState.bearing, target.bearing, t),
+                pitch: this.lerp(startState.pitch, target.pitch, t)
+            };
+
+            // Update springs to track the lerped position (prevents snap at end)
+            this.positionSpring.teleportTo(lerpedState);
+            this.bearingSpring.teleportTo(lerpedState.bearing);
+            this.pitchSpring.value = lerpedState.pitch;
+            this.pitchSpring.velocity = 0;
+
+            return lerpedState;
+        }
+
+        /**
+         * Handle seek event - teleport for large seeks, spring catches up for small ones
+         */
+        onSeek(newRiderPos, newTarget, seekDistanceM) {
+            if (!this.isEnabled) return;
+
+            if (seekDistanceM > this.config.teleportThreshold) {
+                // Large seek - teleport everything
+                this.state = CameraState.SEEKING;
+                this.positionSpring.teleportTo(newTarget);
+                this.bearingSpring.teleportTo(newTarget.bearing);
+                this.pitchSpring.value = newTarget.pitch;
+                this.pitchSpring.velocity = 0;
+                this.terrainFilter.reset();
+
+                // Cancel any active transition
+                this.transition = null;
+
+                if (window.CAMERA_CHAOS_DEBUG) {
+                    console.log(`[UNIFIED] Teleport on seek: ${seekDistanceM.toFixed(0)}m`);
+                }
+            } else if (seekDistanceM > this.config.smallSeekThreshold) {
+                // Medium seek - reset terrain filter but let springs catch up
+                this.terrainFilter.reset();
+                if (window.CAMERA_CHAOS_DEBUG) {
+                    console.log(`[UNIFIED] Medium seek: ${seekDistanceM.toFixed(0)}m - spring catching up`);
+                }
+            }
+            // Small seeks: spring naturally catches up, no special handling
+
+            this.lastRiderPosition = newRiderPos;
+        }
+
+        /**
+         * Get current camera state from springs
+         */
+        getCurrentState() {
+            return {
+                lng: this.positionSpring.position?.lng || 0,
+                lat: this.positionSpring.position?.lat || 0,
+                alt: this.positionSpring.position?.alt || 0,
+                bearing: this.bearingSpring.value || 0,
+                pitch: this.pitchSpring.value || 0
+            };
+        }
+
+        /**
+         * Enable/disable the unified controller
+         */
+        setEnabled(enabled) {
+            this.isEnabled = enabled;
+            if (enabled && !this.positionSpring.position) {
+                this.positionSpring.reset(null);
+            }
+            console.log(`[UNIFIED] Controller ${enabled ? 'enabled' : 'disabled'}`);
+        }
+
+        /**
+         * Reset all state (for route changes, etc.)
+         */
+        reset() {
+            this.positionSpring.reset(null);
+            this.bearingSpring.reset();
+            this.pitchSpring.value = null;
+            this.pitchSpring.velocity = 0;
+            this.terrainFilter.reset();
+            this.state = CameraState.NORMAL;
+            this.transition = null;
+            this.lastRiderPosition = null;
+            this.lastTarget = null;
+        }
+
+        /**
+         * Calculate distance between two positions in meters
+         */
+        calculateDistance(p1, p2) {
+            if (!p1 || !p2) return 0;
+            const dLng = (p2.lng - p1.lng) * 111320 * Math.cos(p1.lat * Math.PI / 180);
+            const dLat = (p2.lat - p1.lat) * 111320;
+            const dAlt = (p2.alt || 0) - (p1.alt || 0);
+            return Math.sqrt(dLng * dLng + dLat * dLat + dAlt * dAlt);
+        }
+
+        /**
+         * Linear interpolation
+         */
+        lerp(a, b, t) {
+            return a + (b - a) * t;
+        }
+
+        /**
+         * Angular interpolation (handles 0-360 wraparound)
+         */
+        lerpAngle(a, b, t) {
+            let delta = b - a;
+            while (delta > 180) delta -= 360;
+            while (delta < -180) delta += 360;
+            let result = a + delta * t;
+            while (result < 0) result += 360;
+            while (result >= 360) result -= 360;
+            return result;
+        }
+
+        /**
+         * Easing function for smooth transitions
+         */
+        easeInOutCubic(t) {
+            return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+        }
+
+        /**
+         * Get debug info
+         */
+        getDebugInfo() {
+            return {
+                enabled: this.isEnabled,
+                state: this.state,
+                mode: this.currentMode,
+                springPosition: this.positionSpring.position,
+                springVelocity: this.positionSpring.velocity,
+                bearing: this.bearingSpring.value,
+                bearingVelocity: this.bearingSpring.velocity,
+                pitch: this.pitchSpring.value,
+                terrainFiltered: this.terrainFilter.getValue(),
+                terrainRaw: this.terrainFilter.lastRawValue,
+                transition: this.transition ? {
+                    progress: this.transition.progress,
+                    targetMode: this.transition.targetMode
+                } : null
+            };
+        }
+    }
+
+    // Global unified camera controller instance
+    let unifiedCameraController = null;
+
+    /**
+     * Get or create the unified camera controller
+     */
+    function getUnifiedCameraController() {
+        if (!unifiedCameraController) {
+            unifiedCameraController = new UnifiedCameraController();
+        }
+        return unifiedCameraController;
     }
 
     /**
@@ -1093,10 +1643,506 @@
     // END PREDICTIVE CAMERA SYSTEM
     // =========================================================================
 
+    // =========================================================================
+    // CAMERA STATE RECORDER - Deterministic Replay & Panic Button
+    // Records camera state in a ring buffer for debugging jitter issues.
+    // When panic button is pressed, exports last 30 seconds of state that
+    // can be replayed deterministically via Chrome MCP.
+    // =========================================================================
+
     /**
-     * Calculate camera state for a given mode
-     * Applies zoomLevel multiplier to all distance/height parameters
+     * Camera State Recorder
+     * Records camera state in a ring buffer for deterministic replay.
+     * Captures all state needed to reproduce camera behavior exactly.
      */
+    class CameraStateRecorder {
+        constructor(maxFrames = 1800) {  // 30 seconds at 60fps
+            this.buffer = new Array(maxFrames);
+            this.maxFrames = maxFrames;
+            this.writeIndex = 0;
+            this.frameCount = 0;
+            this.startTime = performance.now();
+            this.pendingInputEvents = [];  // Events to record with next frame
+            this.isEnabled = true;  // Recording enabled by default
+            this._currentTerrainQuery = null;  // Terrain value for current frame
+            this._lastRecordTime = 0;  // For calculating actual fps
+        }
+
+        /**
+         * Record a single frame of camera state
+         * Called at the end of each updateCamera() call
+         */
+        recordFrame(frameData) {
+            if (!this.isEnabled) return;
+
+            const now = performance.now();
+            const frame = {
+                // Timing
+                frameNumber: this.frameCount,
+                timestamp: now - this.startTime,
+                deltaTime: frameData.deltaTime,
+                actualDeltaTime: this._lastRecordTime > 0 ? (now - this._lastRecordTime) / 1000 : frameData.deltaTime,
+
+                // Route position
+                progress: frameData.progress,
+                distanceKm: frameData.progress * totalDistance,
+
+                // Rider position (raw, before smoothing)
+                riderPosition: frameData.riderPosition ? {
+                    lng: frameData.riderPosition.lng,
+                    lat: frameData.riderPosition.lat,
+                    alt: frameData.riderPosition.alt
+                } : null,
+
+                // Camera position (final, after all smoothing)
+                cameraPosition: frameData.cameraPosition ? {
+                    lng: frameData.cameraPosition.lng,
+                    lat: frameData.cameraPosition.lat,
+                    alt: frameData.cameraPosition.alt
+                } : null,
+
+                // Camera orientation
+                cameraBearing: frameData.bearing,
+                cameraPitch: frameData.pitch,
+
+                // External input (for determinism)
+                terrainElevation: this._currentTerrainQuery,
+
+                // Mode state
+                mode: frameData.mode,
+                targetMode: targetCameraMode,
+                modeTransitionProgress: modeTransitionProgress,
+
+                // User settings
+                zoomLevel: frameData.zoomLevel,
+                chaseCamPitch: chaseCamPitch,
+                speedMultiplier: speedMultiplier,
+                isPlaying: isPlaying,
+
+                // Spring state (for verification)
+                springState: this._captureSpringState(),
+
+                // Smoothing state
+                riderSmoothState: window._riderSmoothState ? { ...window._riderSmoothState } : null,
+                cameraSmoothState: window._cameraSmoothState ? { ...window._cameraSmoothState } : null,
+
+                // Input events that occurred this frame
+                inputEvents: [...this.pendingInputEvents]
+            };
+
+            this.buffer[this.writeIndex] = frame;
+            this.writeIndex = (this.writeIndex + 1) % this.maxFrames;
+            this.frameCount++;
+            this.pendingInputEvents = [];  // Clear for next frame
+            this._currentTerrainQuery = null;  // Reset terrain query
+            this._lastRecordTime = now;
+        }
+
+        /**
+         * Record terrain query result (called from queryTerrainElevationWithCache)
+         */
+        recordTerrainQuery(elevation) {
+            this._currentTerrainQuery = elevation;
+        }
+
+        /**
+         * Record a user input event
+         * Called from event handlers (seek, mode change, zoom, etc.)
+         */
+        recordInput(eventType, value) {
+            if (!this.isEnabled) return;
+
+            this.pendingInputEvents.push({
+                type: eventType,
+                value: value,
+                timestamp: performance.now() - this.startTime
+            });
+        }
+
+        /**
+         * Capture current spring state for verification
+         */
+        _captureSpringState() {
+            const state = {};
+
+            if (predictiveCameraController) {
+                const cameraSpring = predictiveCameraController.getCameraSpring();
+                if (cameraSpring.position) {
+                    state.cameraPosition = { ...cameraSpring.position };
+                    state.cameraVelocity = { ...cameraSpring.velocity };
+                }
+
+                const lookAtSpring = predictiveCameraController.lookAtSpring;
+                if (lookAtSpring && lookAtSpring.position) {
+                    state.lookAtPosition = { ...lookAtSpring.position };
+                    state.lookAtVelocity = { ...lookAtSpring.velocity };
+                }
+            }
+
+            if (unifiedCameraController && unifiedCameraController.isEnabled) {
+                const pos = unifiedCameraController.positionSpring;
+                if (pos.position) {
+                    state.unifiedPosition = { ...pos.position };
+                    state.unifiedVelocity = { ...pos.velocity };
+                }
+                state.unifiedBearing = unifiedCameraController.bearingState.value;
+                state.unifiedBearingVelocity = unifiedCameraController.bearingState.velocity;
+            }
+
+            return state;
+        }
+
+        /**
+         * Export last N seconds of state for replay
+         */
+        export(seconds = 30) {
+            const framesToExport = Math.min(
+                this.frameCount,
+                Math.ceil(seconds * 60)  // Target 60fps
+            );
+
+            const frames = [];
+            let index = (this.writeIndex - framesToExport + this.maxFrames) % this.maxFrames;
+
+            for (let i = 0; i < framesToExport; i++) {
+                if (this.buffer[index]) {
+                    frames.push(this.buffer[index]);
+                }
+                index = (index + 1) % this.maxFrames;
+            }
+
+            // Calculate actual FPS from frames
+            let avgFps = 60;
+            if (frames.length > 1) {
+                const duration = frames[frames.length - 1].timestamp - frames[0].timestamp;
+                if (duration > 0) {
+                    avgFps = (frames.length - 1) / (duration / 1000);
+                }
+            }
+
+            return {
+                version: '1.0',
+                capturedAt: new Date().toISOString(),
+                routeFile: routeData?.filename || getRouteFromUrl(),
+                totalDistance: totalDistance,
+                frameCaptured: frames.length,
+                durationMs: frames.length > 0 ? frames[frames.length - 1].timestamp - frames[0].timestamp : 0,
+                avgFps: avgFps.toFixed(1),
+
+                config: {
+                    predictiveEnabled: isPredictiveCameraEnabled(),
+                    unifiedControllerEnabled: unifiedCameraController?.isEnabled || false,
+                    cameraModeConfig: CameraModeConfig
+                },
+
+                browser: {
+                    userAgent: navigator.userAgent,
+                    screenSize: { w: window.innerWidth, h: window.innerHeight },
+                    devicePixelRatio: window.devicePixelRatio
+                },
+
+                // Diagnostic data at moment of capture
+                diagnostics: {
+                    chaosDebugData: window._chaosDebugData ? { ...window._chaosDebugData } : null,
+                    terrainCache: window._terrainCache ? { ...window._terrainCache } : null,
+                    sideViewState: {
+                        bearingState: window._sideViewBearingState,
+                        currentSide: window._sideViewCurrentSide,
+                        lastSwitchTime: window._sideViewLastSwitchTime
+                    },
+                    adaptiveSmoothing: {
+                        seekTimestamp: _seekTimestamp,
+                        seekDistance: _seekDistance,
+                        timeSinceSeek: performance.now() - _seekTimestamp
+                    }
+                },
+
+                frames: frames
+            };
+        }
+
+        /**
+         * Get recording statistics
+         */
+        getStats() {
+            const bufferedFrames = Math.min(this.frameCount, this.maxFrames);
+            const oldestFrame = this.buffer[(this.writeIndex - bufferedFrames + this.maxFrames) % this.maxFrames];
+            const newestFrame = this.buffer[(this.writeIndex - 1 + this.maxFrames) % this.maxFrames];
+
+            return {
+                isEnabled: this.isEnabled,
+                frameCount: this.frameCount,
+                bufferedFrames: bufferedFrames,
+                bufferCapacity: this.maxFrames,
+                bufferUsagePercent: ((bufferedFrames / this.maxFrames) * 100).toFixed(1),
+                oldestTimestamp: oldestFrame?.timestamp || 0,
+                newestTimestamp: newestFrame?.timestamp || 0,
+                bufferedDurationSec: newestFrame && oldestFrame ?
+                    ((newestFrame.timestamp - oldestFrame.timestamp) / 1000).toFixed(1) : 0
+            };
+        }
+
+        /**
+         * Clear all recorded state
+         */
+        clear() {
+            this.buffer = new Array(this.maxFrames);
+            this.writeIndex = 0;
+            this.frameCount = 0;
+            this.startTime = performance.now();
+            this.pendingInputEvents = [];
+            this._currentTerrainQuery = null;
+            this._lastRecordTime = 0;
+        }
+
+        /**
+         * Enable/disable recording
+         */
+        setEnabled(enabled) {
+            this.isEnabled = enabled;
+            if (enabled && this.frameCount === 0) {
+                this.startTime = performance.now();
+            }
+        }
+    }
+
+    // Global state recorder instance
+    let stateRecorder = null;
+
+    /**
+     * Get or create the state recorder
+     */
+    function getStateRecorder() {
+        if (!stateRecorder) {
+            stateRecorder = new CameraStateRecorder();
+        }
+        return stateRecorder;
+    }
+
+    /**
+     * Get route from URL parameters
+     */
+    function getRouteFromUrl() {
+        const params = new URLSearchParams(window.location.search);
+        return params.get('route') || 'unknown';
+    }
+
+    /**
+     * Panic button handler - captures camera state for debugging
+     */
+    function onPanicButton() {
+        // Pause animation immediately
+        if (isPlaying) {
+            togglePlay();
+        }
+
+        // Capture state
+        const recorder = getStateRecorder();
+        const capturedState = recorder.export(30);
+
+        // Serialize to JSON
+        const json = JSON.stringify(capturedState, null, 2);
+
+        // Show capture modal
+        showPanicCaptureModal(json, capturedState);
+
+        console.log('[PANIC] Camera state captured:', capturedState.frameCaptured, 'frames,',
+            (capturedState.durationMs / 1000).toFixed(1), 'seconds');
+    }
+
+    /**
+     * Show modal with captured state
+     */
+    function showPanicCaptureModal(json, capturedState) {
+        // Remove existing modal if any
+        const existing = document.getElementById('panic-modal');
+        if (existing) existing.remove();
+
+        const modal = document.createElement('div');
+        modal.id = 'panic-modal';
+        modal.className = 'panic-modal';
+        modal.innerHTML = `
+            <div class="panic-overlay" onclick="closePanicModal()"></div>
+            <div class="panic-content">
+                <h2>Camera State Captured</h2>
+                <div class="panic-stats">
+                    <span><strong>${capturedState.frameCaptured}</strong> frames</span>
+                    <span><strong>${(capturedState.durationMs / 1000).toFixed(1)}s</strong> duration</span>
+                    <span><strong>${capturedState.avgFps}</strong> fps</span>
+                    <span><strong>${(json.length / 1024).toFixed(1)}KB</strong> size</span>
+                </div>
+                <p>Copy this state and paste to Claude Code for analysis:</p>
+                <textarea id="panic-json" readonly>${json}</textarea>
+                <div class="panic-actions">
+                    <button onclick="copyPanicState()" class="panic-btn panic-btn-primary">
+                        Copy to Clipboard
+                    </button>
+                    <button onclick="downloadPanicState()" class="panic-btn">
+                        Download JSON
+                    </button>
+                    <button onclick="closePanicModal()" class="panic-btn">
+                        Close
+                    </button>
+                </div>
+                <p class="panic-hint">
+                    In Claude Code, say: <em>"Analyze this camera state capture and
+                    reproduce the jitter using Chrome MCP"</em>
+                </p>
+            </div>
+        `;
+
+        // Add styles if not already present
+        if (!document.getElementById('panic-styles')) {
+            const styles = document.createElement('style');
+            styles.id = 'panic-styles';
+            styles.textContent = `
+                .panic-modal {
+                    position: fixed;
+                    top: 0;
+                    left: 0;
+                    width: 100%;
+                    height: 100%;
+                    z-index: 10000;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                }
+                .panic-overlay {
+                    position: absolute;
+                    top: 0;
+                    left: 0;
+                    width: 100%;
+                    height: 100%;
+                    background: rgba(0, 0, 0, 0.8);
+                }
+                .panic-content {
+                    position: relative;
+                    background: #1a1a2e;
+                    border: 1px solid #e6b800;
+                    border-radius: 8px;
+                    padding: 24px;
+                    max-width: 800px;
+                    width: 90%;
+                    max-height: 80vh;
+                    overflow-y: auto;
+                    color: #fff;
+                    font-family: system-ui, -apple-system, sans-serif;
+                }
+                .panic-content h2 {
+                    margin: 0 0 16px 0;
+                    color: #e6b800;
+                }
+                .panic-stats {
+                    display: flex;
+                    gap: 16px;
+                    margin-bottom: 16px;
+                    padding: 12px;
+                    background: rgba(230, 184, 0, 0.1);
+                    border-radius: 4px;
+                }
+                .panic-stats span {
+                    font-size: 14px;
+                }
+                .panic-content p {
+                    margin: 0 0 12px 0;
+                    color: #ccc;
+                }
+                .panic-content textarea {
+                    width: 100%;
+                    height: 200px;
+                    background: #0d0d1a;
+                    border: 1px solid #333;
+                    border-radius: 4px;
+                    color: #0f0;
+                    font-family: monospace;
+                    font-size: 11px;
+                    padding: 12px;
+                    resize: vertical;
+                }
+                .panic-actions {
+                    display: flex;
+                    gap: 12px;
+                    margin-top: 16px;
+                }
+                .panic-btn {
+                    padding: 10px 20px;
+                    border: 1px solid #e6b800;
+                    background: transparent;
+                    color: #e6b800;
+                    border-radius: 4px;
+                    cursor: pointer;
+                    font-size: 14px;
+                    transition: all 0.2s;
+                }
+                .panic-btn:hover {
+                    background: rgba(230, 184, 0, 0.1);
+                }
+                .panic-btn-primary {
+                    background: #e6b800;
+                    color: #1a1a2e;
+                }
+                .panic-btn-primary:hover {
+                    background: #ffd700;
+                }
+                .panic-hint {
+                    margin-top: 16px !important;
+                    font-size: 13px;
+                    color: #888 !important;
+                }
+                .panic-hint em {
+                    color: #aaa;
+                    font-style: normal;
+                    background: rgba(255,255,255,0.1);
+                    padding: 2px 6px;
+                    border-radius: 3px;
+                }
+            `;
+            document.head.appendChild(styles);
+        }
+
+        document.body.appendChild(modal);
+
+        // Global functions for modal buttons
+        window.copyPanicState = function() {
+            const textarea = document.getElementById('panic-json');
+            textarea.select();
+            document.execCommand('copy');
+            // Also try modern API
+            navigator.clipboard?.writeText(textarea.value);
+            const btn = document.querySelector('.panic-btn-primary');
+            btn.textContent = 'Copied!';
+            setTimeout(() => btn.textContent = 'Copy to Clipboard', 2000);
+        };
+
+        window.downloadPanicState = function() {
+            const blob = new Blob([json], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `camera-state-${new Date().toISOString().slice(0,19).replace(/:/g,'-')}.json`;
+            a.click();
+            URL.revokeObjectURL(url);
+        };
+
+        window.closePanicModal = function() {
+            const modal = document.getElementById('panic-modal');
+            if (modal) modal.remove();
+        };
+
+        // Close on Escape key
+        const escHandler = (e) => {
+            if (e.key === 'Escape') {
+                closePanicModal();
+                document.removeEventListener('keydown', escHandler);
+            }
+        };
+        document.addEventListener('keydown', escHandler);
+    }
+
+    // =========================================================================
+    // END CAMERA STATE RECORDER
+    // =========================================================================
+
     /**
      * Calculate camera state for a given mode
      * @param {string} mode - Camera mode
@@ -1196,6 +2242,21 @@
                         const springLag = Math.sqrt(dLng * dLng + dLat * dLat);
                         if (springLag > 10) {
                             console.log('[SEEK DEBUG] SPRING LAG: ' + Math.round(springLag) + 'm');
+                        }
+                    }
+
+                    // CHAOS DEBUG: Log spring state in chase mode
+                    if (window.CAMERA_CHAOS_DEBUG) {
+                        const currentKm = progress * totalDistance;
+                        const inProblemZone = currentKm >= 50 && currentKm <= 53;
+                        if (inProblemZone) {
+                            const dLng = (idealCameraPos.lng - smoothedPos.lng) * 111320 * Math.cos(idealCameraPos.lat * Math.PI / 180);
+                            const dLat = (idealCameraPos.lat - smoothedPos.lat) * 111320;
+                            const springLag = Math.sqrt(dLng * dLng + dLat * dLat);
+                            console.log(`[CHAOS CHASE] km=${currentKm.toFixed(2)} | forwardBearing=${forwardBearing.toFixed(1)}° | ` +
+                                `behindBearing=${behindBearing.toFixed(1)}° | offsetBehind=${offsetBehind.toFixed(0)}m | ` +
+                                `idealAlt=${idealCameraPos.alt.toFixed(0)}m | smoothedAlt=${smoothedPos.alt.toFixed(0)}m | ` +
+                                `springLag=${springLag.toFixed(0)}m | springVel=(${spring.velocity.lng.toFixed(6)},${spring.velocity.lat.toFixed(6)},${spring.velocity.alt.toFixed(2)})`);
                         }
                     }
 
@@ -1667,7 +2728,23 @@
                 if (window.FLYOVER_DEBUG) {
                     console.log('[TERRAIN] Data became available, enabling faster smoothing');
                 }
-            } else if (window._terrainCache.terrainAvailableFrames > 0) {
+            } else if (hadTerrainBefore && !hasTerrainNow) {
+                // TERRAIN JUST BECAME UNAVAILABLE
+                // When terrain tiles unload, the camera altitude shouldn't drop instantly.
+                // Use the last known terrain-adjusted altitude as a floor to prevent jitter.
+                // This is stored in lastCameraAlt from the previous frame's smoothing.
+                if (window._terrainCache.lastCameraAlt !== null) {
+                    // Store this as the terrain-unavailable floor
+                    window._terrainCache.terrainUnavailableFloor = window._terrainCache.lastCameraAlt;
+                    if (window.FLYOVER_DEBUG) {
+                        console.log('[TERRAIN] Data became unavailable, using floor altitude:', window._terrainCache.terrainUnavailableFloor.toFixed(1));
+                    }
+                }
+            } else if (hasTerrainNow) {
+                // Terrain is available - clear any unavailable floor
+                window._terrainCache.terrainUnavailableFloor = null;
+            }
+            if (window._terrainCache.terrainAvailableFrames > 0) {
                 window._terrainCache.terrainAvailableFrames--;
             }
             window._terrainCache.hadTerrainData = hasTerrainNow;
@@ -1690,10 +2767,34 @@
             }
         } else {
             // Full terrain collision using helper
-            const minAltitude = calculateMinimumAltitude(terrainElevation, dotPoint.alt);
+            let minAltitude = calculateMinimumAltitude(terrainElevation, dotPoint.alt);
+
+            // TERRAIN UNAVAILABLE FLOOR ENFORCEMENT
+            // When terrain becomes null (tiles unloaded), use the stored floor altitude
+            // to prevent the camera from dropping below where it was when terrain was available.
+            // This eliminates the jitter caused by terrain tile loading/unloading.
+            if (terrainElevation === null && window._terrainCache.terrainUnavailableFloor) {
+                minAltitude = Math.max(minAltitude, window._terrainCache.terrainUnavailableFloor);
+            }
+
             if (cameraAlt < minAltitude) {
                 cameraAlt = minAltitude;
                 terrainAdjusted = true;
+            }
+        }
+
+        // SYNC SPRING WITH TERRAIN COLLISION
+        // When terrain collision adjusts altitude, update the predictive camera spring
+        // so it doesn't have a mismatch between its internal state and the actual camera.
+        // Without this, when terrain becomes null (tiles unloaded), the spring's lower
+        // altitude gets used, causing a visible altitude drop.
+        if (terrainAdjusted && predictiveCameraController && !skipSmoothing) {
+            const spring = predictiveCameraController.cameraSpring;
+            if (spring.position && spring.position.alt < cameraAlt) {
+                // Spring is behind where terrain collision put us - sync it up
+                spring.position.alt = cameraAlt;
+                // Also zero the altitude velocity to prevent overshoot
+                spring.velocity.alt = 0;
             }
         }
 
@@ -2113,6 +3214,12 @@
      */
     function transitionToMode(newMode) {
         if (newMode === currentCameraMode && modeTransitionProgress >= 1) return;
+
+        // Record input for panic button replay
+        const recorder = getStateRecorder();
+        if (recorder.isEnabled) {
+            recorder.recordInput('mode', { from: currentCameraMode, to: newMode });
+        }
 
         // Reset smoothing state to prevent false jitter detection from mode transitions
         resetSmoothingCache();
@@ -2641,9 +3748,9 @@
         elevationProfile = new ElevationProfile.ElevationProfileRenderer('elevation-canvas');
         elevationProfile.setRouteData(routeData);
 
-        // Handle clicks on elevation profile to seek
+        // Handle clicks on elevation profile to seek (uses animated seek)
         elevationProfile.onPositionChange = (newPosition) => {
-            seekToPosition(newPosition);
+            animatedSeekTo(newPosition);
         };
 
         // Load rider profile if available and apply to elevation profile
@@ -3104,8 +4211,8 @@
         const shortcutsClose = document.getElementById('shortcuts-close');
 
         playBtn.addEventListener('click', togglePlay);
-        rewindBtn.addEventListener('click', () => seekToPosition(Math.max(0, progress - 0.05)));
-        forwardBtn.addEventListener('click', () => seekToPosition(Math.min(1, progress + 0.05)));
+        rewindBtn.addEventListener('click', () => animatedSeekTo(Math.max(0, progress - 0.05)));
+        forwardBtn.addEventListener('click', () => animatedSeekTo(Math.min(1, progress + 0.05)));
 
         speedBtns.forEach(btn => {
             btn.addEventListener('click', () => {
@@ -3115,7 +4222,7 @@
             });
         });
 
-        // Profile track click to seek
+        // Profile track click to seek (uses animated seek for smooth transition)
         const profileTrack = document.getElementById('profile-track');
         if (profileTrack) {
             profileTrack.addEventListener('click', (e) => {
@@ -3124,7 +4231,7 @@
                 const chartPadding = 10;
                 const chartWidth = rect.width - 2 * chartPadding;
                 const position = (e.clientX - rect.left - chartPadding) / chartWidth;
-                seekToPosition(Math.max(0, Math.min(1, position)));
+                animatedSeekTo(Math.max(0, Math.min(1, position)));
             });
         }
 
@@ -3236,10 +4343,10 @@
                     togglePlay();
                     break;
                 case 'ArrowLeft':
-                    seekToPosition(Math.max(0, progress - 0.02));
+                    animatedSeekTo(Math.max(0, progress - 0.02));
                     break;
                 case 'ArrowRight':
-                    seekToPosition(Math.min(1, progress + 0.02));
+                    animatedSeekTo(Math.min(1, progress + 0.02));
                     break;
                 case 'ArrowUp':
                     e.preventDefault();
@@ -3319,6 +4426,18 @@
                         freeNavigationEnabled = true;
                     }
                     break;
+                // Panic button - capture camera state (Ctrl+Shift+P or just P)
+                case 'p':
+                case 'P':
+                    if (e.ctrlKey && e.shiftKey) {
+                        e.preventDefault();
+                        onPanicButton();
+                    } else if (!e.ctrlKey && !e.metaKey) {
+                        // Plain 'p' also triggers panic button for easy access
+                        e.preventDefault();
+                        onPanicButton();
+                    }
+                    break;
             }
         });
 
@@ -3380,8 +4499,14 @@
             return;
         }
 
+        const oldPitch = chaseCamPitch;
         chaseCamPitch = newPitch;
         savePitchToStorage(chaseCamPitch);
+
+        // Record input for panic button replay
+        if (stateRecorder && stateRecorder.isEnabled) {
+            stateRecorder.recordInput('pitch', { from: oldPitch, to: newPitch });
+        }
 
         // Force camera update to apply the new pitch immediately
         // Temporarily disable free navigation to allow this update
@@ -3646,6 +4771,11 @@
         // Store current overview state for the swoop-down
         overviewTargetState = getCurrentCameraState();
 
+        // Trigger adaptive smoothing for faster altitude descent after scrub
+        // The scrub altitude change is large (often 2000m+), so we want fast catch-up
+        _seekTimestamp = performance.now();
+        _seekDistance = SCRUB_ALTITUDE; // Use scrub altitude as the "seek distance" for adaptive smoothing
+
         if (!isPlaying) {
             // When paused, swoop down to normal camera at current position
             overviewTransitionProgress = 1;
@@ -3766,6 +4896,12 @@
      */
     function togglePlay() {
         isPlaying = !isPlaying;
+
+        // Record input for panic button replay
+        if (stateRecorder && stateRecorder.isEnabled) {
+            stateRecorder.recordInput('playPause', { isPlaying: isPlaying });
+        }
+
         const playBtn = document.getElementById('btn-play');
 
         if (isPlaying) {
@@ -3817,6 +4953,315 @@
         }
     }
 
+    // ============================================================
+    // ANIMATED SEEK SYSTEM (Google Earth style zoom-out-pan-zoom-in)
+    // ============================================================
+
+    const ANIMATED_SEEK_CONFIG = {
+        minDistanceM: 1000,        // Only animate seeks larger than this (meters)
+        zoomOutDuration: 400,      // ms to zoom out (base - scales with distance)
+        panDuration: 600,          // ms to pan while zoomed out (base - scales with distance)
+        zoomInDuration: 500,       // ms to zoom back in (base - scales with distance)
+        zoomOutAltMultiplier: 3.0, // How much higher to go (multiplier of current alt)
+        maxZoomOutAlt: 8000,       // Cap on zoom-out altitude (meters)
+        enabled: true,             // Feature flag
+    };
+
+    let animatedSeekState = {
+        active: false,
+        phase: 'idle',  // 'zoom_out', 'pan', 'zoom_in', 'idle'
+        startProgress: 0,
+        targetProgress: 0,
+        phaseStartTime: 0,
+        startCameraState: null,
+        zoomedOutAlt: 0,
+        animationId: null,
+    };
+
+    /**
+     * Easing function for smooth animations
+     */
+    function easeInOutCubic(t) {
+        return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+    }
+
+    /**
+     * Start an animated seek (Google Earth style)
+     * Zooms out → pans to destination → zooms back in
+     */
+    function animatedSeekTo(newPosition) {
+        const oldProgress = progress;
+        const targetProgress = Math.max(0, Math.min(1, newPosition));
+        const seekDistanceM = Math.abs(targetProgress - oldProgress) * totalDistance * 1000;
+        const seekDistanceKm = seekDistanceM / 1000;
+
+        // If animated seek is disabled or seek is too small, use instant seek
+        if (!ANIMATED_SEEK_CONFIG.enabled || seekDistanceM < ANIMATED_SEEK_CONFIG.minDistanceM) {
+            seekToPosition(newPosition);
+            return;
+        }
+
+        // Cancel any existing animation
+        if (animatedSeekState.animationId) {
+            cancelAnimationFrame(animatedSeekState.animationId);
+        }
+
+        // Get current camera state
+        const currentCameraState = _lastAppliedState ? { ..._lastAppliedState } : null;
+        if (!currentCameraState) {
+            // No current state, fall back to instant seek
+            seekToPosition(newPosition);
+            return;
+        }
+
+        // Calculate zoom-out altitude - scale with seek distance
+        // For short seeks (~2km): ~2x altitude
+        // For long seeks (50km+): go much higher to see the whole journey
+        const baseAlt = currentCameraState.alt;
+        const distanceMultiplier = 1 + Math.log10(1 + seekDistanceKm / 5); // logarithmic scaling
+        const dynamicAltMultiplier = ANIMATED_SEEK_CONFIG.zoomOutAltMultiplier * distanceMultiplier;
+
+        // Minimum altitude based on seek distance (longer seeks need higher view)
+        const minAltForSeek = 1000 + seekDistanceKm * 30; // 1km base + 30m per km traveled
+
+        const zoomedOutAlt = Math.max(
+            minAltForSeek,
+            Math.min(
+                baseAlt * dynamicAltMultiplier,
+                ANIMATED_SEEK_CONFIG.maxZoomOutAlt
+            )
+        );
+
+        // Scale durations with seek distance (longer seeks need more time for tiles to load)
+        const durationScale = Math.max(1, Math.sqrt(seekDistanceKm / 5)); // sqrt scaling
+        const scaledZoomOutDuration = ANIMATED_SEEK_CONFIG.zoomOutDuration * durationScale;
+        const scaledPanDuration = ANIMATED_SEEK_CONFIG.panDuration * durationScale;
+        const scaledZoomInDuration = ANIMATED_SEEK_CONFIG.zoomInDuration * durationScale;
+
+        // Initialize animation state
+        animatedSeekState = {
+            active: true,
+            phase: 'zoom_out',
+            startProgress: oldProgress,
+            targetProgress: targetProgress,
+            phaseStartTime: performance.now(),
+            startCameraState: currentCameraState,
+            zoomedOutAlt: zoomedOutAlt,
+            animationId: null,
+            // Scaled durations
+            zoomOutDuration: scaledZoomOutDuration,
+            panDuration: scaledPanDuration,
+            zoomInDuration: scaledZoomInDuration,
+            // End camera state (calculated at start of pan phase)
+            endCameraState: null,
+        };
+
+        if (window.FLYOVER_DEBUG) {
+            console.log(`[ANIMATED SEEK] Starting: ${(oldProgress * totalDistance).toFixed(1)}km → ${(targetProgress * totalDistance).toFixed(1)}km (${seekDistanceKm.toFixed(1)}km)`);
+            console.log(`[ANIMATED SEEK] Zoom to ${zoomedOutAlt.toFixed(0)}m alt, durations: ${scaledZoomOutDuration.toFixed(0)}ms / ${scaledPanDuration.toFixed(0)}ms / ${scaledZoomInDuration.toFixed(0)}ms`);
+        }
+
+        // Start animation loop
+        animatedSeekState.animationId = requestAnimationFrame(animateSeekStep);
+    }
+
+    /**
+     * Animation step for animated seek
+     */
+    function animateSeekStep(timestamp) {
+        const state = animatedSeekState;
+        if (!state.active) return;
+
+        const elapsed = timestamp - state.phaseStartTime;
+
+        switch (state.phase) {
+            case 'zoom_out': {
+                // Use scaled duration from state
+                const duration = state.zoomOutDuration || ANIMATED_SEEK_CONFIG.zoomOutDuration;
+                const t = Math.min(1, elapsed / duration);
+                const eased = easeInOutCubic(t);
+
+                // Interpolate altitude up
+                const currentAlt = state.startCameraState.alt +
+                    (state.zoomedOutAlt - state.startCameraState.alt) * eased;
+
+                // Apply camera at start position but rising altitude
+                const dotPoint = getPointAlongRoute(state.startProgress * totalDistance);
+                if (dotPoint) {
+                    const cameraState = {
+                        ...state.startCameraState,
+                        alt: currentAlt,
+                    };
+                    applyCameraState(cameraState, dotPoint, true);
+                    updateDotAndUI(dotPoint);
+                }
+
+                if (t >= 1) {
+                    state.phase = 'pan';
+                    state.phaseStartTime = timestamp;
+                }
+                break;
+            }
+
+            case 'pan': {
+                // Use scaled duration from state
+                const duration = state.panDuration || ANIMATED_SEEK_CONFIG.panDuration;
+                const t = Math.min(1, elapsed / duration);
+                const eased = easeInOutCubic(t);
+
+                // Interpolate progress position
+                const currentProgress = state.startProgress +
+                    (state.targetProgress - state.startProgress) * eased;
+
+                // Update progress (for UI and dot position)
+                progress = currentProgress;
+
+                // Get camera position at interpolated progress
+                const dotDistance = currentProgress * totalDistance;
+                const dotPoint = getPointAlongRoute(dotDistance);
+
+                if (dotPoint) {
+                    // Calculate end camera state once (at start of pan phase)
+                    if (!state.endCameraState) {
+                        const endDotDistance = state.targetProgress * totalDistance;
+                        const endDotPoint = getPointAlongRoute(endDotDistance);
+                        const endDirDist = Math.min(endDotDistance + CONFIG.lookAheadDistance / 1000, totalDistance);
+                        const endDirPoint = getPointAlongRoute(endDirDist);
+                        if (endDotPoint && endDirPoint) {
+                            state.endCameraState = calculateCameraForMode(currentCameraMode, endDotPoint, endDirPoint, 0.016, true);
+                        }
+                    }
+
+                    // Smoothly interpolate between start and end camera states
+                    // Don't recalculate bearing at every step - that causes spinning
+                    const startState = state.startCameraState;
+                    const endState = state.endCameraState || startState;
+
+                    // Interpolate bearing using shortest angular path
+                    let bearingDelta = endState.bearing - startState.bearing;
+                    while (bearingDelta > 180) bearingDelta -= 360;
+                    while (bearingDelta < -180) bearingDelta += 360;
+                    const currentBearing = startState.bearing + bearingDelta * eased;
+
+                    // Interpolate pitch
+                    const currentPitch = startState.pitch + (endState.pitch - startState.pitch) * eased;
+
+                    // Create camera state with interpolated values
+                    const cameraState = {
+                        lng: dotPoint.lng,
+                        lat: dotPoint.lat,
+                        alt: state.zoomedOutAlt,
+                        bearing: currentBearing,
+                        pitch: Math.min(currentPitch, -30), // Keep looking down while zoomed out
+                    };
+
+                    applyCameraState(cameraState, dotPoint, true);
+                    updateDotAndUI(dotPoint);
+                    updateProgress();
+                }
+
+                if (t >= 1) {
+                    state.phase = 'zoom_in';
+                    state.phaseStartTime = timestamp;
+
+                    // Notify unified controller about the seek (for proper state reset)
+                    const controller = getUnifiedCameraController();
+                    if (controller.isEnabled) {
+                        const finalDotPoint = getPointAlongRoute(state.targetProgress * totalDistance);
+                        if (finalDotPoint) {
+                            const dirDist = Math.min(state.targetProgress * totalDistance + CONFIG.lookAheadDistance / 1000, totalDistance);
+                            const dirPoint = getPointAlongRoute(dirDist);
+                            if (dirPoint) {
+                                // Use calculateIdealCameraTarget for unified system
+                                const newTarget = (USE_UNIFIED_CAMERA || window._USE_UNIFIED_CAMERA)
+                                    ? calculateIdealCameraTarget(currentCameraMode, finalDotPoint, dirPoint)
+                                    : calculateCameraForMode(currentCameraMode, finalDotPoint, dirPoint, 0.016, true);
+                                if (newTarget) {
+                                    const seekDistanceM = Math.abs(state.targetProgress - state.startProgress) * totalDistance * 1000;
+                                    controller.onSeek(finalDotPoint, newTarget, seekDistanceM);
+                                }
+                            }
+                        }
+                    }
+                }
+                break;
+            }
+
+            case 'zoom_in': {
+                // Use scaled duration from state
+                const duration = state.zoomInDuration || ANIMATED_SEEK_CONFIG.zoomInDuration;
+                const t = Math.min(1, elapsed / duration);
+                const eased = easeInOutCubic(t);
+
+                // Get final position and calculate target camera state
+                const dotDistance = state.targetProgress * totalDistance;
+                const dotPoint = getPointAlongRoute(dotDistance);
+
+                if (dotPoint) {
+                    const directionDistance = Math.min(dotDistance + CONFIG.lookAheadDistance / 1000, totalDistance);
+                    const directionPoint = getPointAlongRoute(directionDistance);
+
+                    let targetCameraState;
+                    if (directionPoint) {
+                        targetCameraState = calculateCameraForMode(currentCameraMode, dotPoint, directionPoint, 0.016, true);
+                    }
+
+                    if (targetCameraState) {
+                        // Interpolate altitude down to target
+                        const currentAlt = state.zoomedOutAlt +
+                            (targetCameraState.alt - state.zoomedOutAlt) * eased;
+
+                        const cameraState = {
+                            ...targetCameraState,
+                            alt: currentAlt,
+                        };
+                        applyCameraState(cameraState, dotPoint, true);
+                    }
+                    updateDotAndUI(dotPoint);
+                }
+
+                if (t >= 1) {
+                    // Animation complete
+                    state.active = false;
+                    state.phase = 'idle';
+                    state.animationId = null;
+
+                    // Reset caches and trigger settling period
+                    resetCameraCaches();
+                    settlingFramesRemaining = SETTLING_DURATION;
+
+                    if (window.FLYOVER_DEBUG) {
+                        console.log(`[ANIMATED SEEK] Complete at ${(progress * totalDistance).toFixed(1)}km`);
+                    }
+                    return;
+                }
+                break;
+            }
+        }
+
+        // Continue animation
+        state.animationId = requestAnimationFrame(animateSeekStep);
+    }
+
+    /**
+     * Check if animated seek is in progress
+     */
+    function isAnimatedSeekActive() {
+        return animatedSeekState.active;
+    }
+
+    /**
+     * Cancel any in-progress animated seek
+     */
+    function cancelAnimatedSeek() {
+        if (animatedSeekState.animationId) {
+            cancelAnimationFrame(animatedSeekState.animationId);
+        }
+        animatedSeekState.active = false;
+        animatedSeekState.phase = 'idle';
+        animatedSeekState.animationId = null;
+    }
+
     /**
      * Seek to specific position
      * Uses smooth transition to prevent camera jitter
@@ -3825,6 +5270,12 @@
     function seekToPosition(newPosition) {
         const oldProgress = progress;
         progress = Math.max(0, Math.min(1, newPosition));
+
+        // Record input for panic button replay
+        const recorder = getStateRecorder();
+        if (recorder.isEnabled) {
+            recorder.recordInput('seek', { from: oldProgress, to: progress });
+        }
 
         // Calculate how far we're seeking (as fraction of route)
         const seekDelta = Math.abs(progress - oldProgress);
@@ -3837,6 +5288,26 @@
 
         if (_seekDistance > 1000 && window.FLYOVER_DEBUG) {
             console.log(`[SEEK] Distance: ${seekDistanceKm.toFixed(1)}km`);
+        }
+
+        // UNIFIED CAMERA: Notify controller about seek
+        const controller = getUnifiedCameraController();
+        if (controller.isEnabled) {
+            const newRiderPos = getPointAlongRoute(progress * totalDistance);
+            if (newRiderPos) {
+                // Calculate new target position for the seek
+                const directionDistance = Math.min(progress * totalDistance + CONFIG.lookAheadDistance / 1000, totalDistance);
+                const directionPoint = getPointAlongRoute(directionDistance);
+                if (directionPoint) {
+                    // Use calculateIdealCameraTarget for unified system, calculateCameraForMode for legacy
+                    const newTarget = (USE_UNIFIED_CAMERA || window._USE_UNIFIED_CAMERA)
+                        ? calculateIdealCameraTarget(currentCameraMode, newRiderPos, directionPoint)
+                        : calculateCameraForMode(currentCameraMode, newRiderPos, directionPoint, 0.016, true);
+                    if (newTarget) {
+                        controller.onSeek(newRiderPos, newTarget, _seekDistance);
+                    }
+                }
+            }
         }
 
         resetCameraCaches(); // Reset ALL caches including position to avoid smoothing lag
@@ -3956,7 +5427,267 @@
     }
     const ENABLE_PREDICTIVE_CAMERA = true;  // Base flag (can be overridden by URL param)
 
+    // =============================================================================
+    // UNIFIED CAMERA SYSTEM
+    // Toggle this flag to switch between legacy (8+ smoothing layers) and unified (1 spring)
+    // =============================================================================
+    const USE_UNIFIED_CAMERA = true;  // Unified camera system enabled by default (disable via flyoverDebug.unified.disable())
+
+    /**
+     * Calculate the ideal camera target for a given mode - PURE GEOMETRY, NO SMOOTHING
+     * This is the "raw" camera position before any spring/filter processing.
+     *
+     * @param {string} mode - Camera mode (chase, birds_eye, side_view, cinematic)
+     * @param {object} dotPoint - Rider position {lng, lat, alt}
+     * @param {object} nextPoint - Look-ahead point for bearing
+     * @returns {object} - Ideal camera state {lng, lat, alt, bearing, pitch}
+     */
+    function calculateIdealCameraTarget(mode, dotPoint, nextPoint) {
+        if (!dotPoint || !nextPoint) return null;
+
+        const config = CameraModeConfig[mode];
+        const forwardBearing = calculateBearing(dotPoint, nextPoint);
+        const zoom = zoomLevel;
+
+        let cameraLng, cameraLat, cameraAlt, cameraBearing, cameraPitch;
+
+        switch (mode) {
+            case CameraModes.CHASE: {
+                const offsetBehind = config.offsetBehind * zoom;
+                const pitchRadians = Math.abs(chaseCamPitch) * Math.PI / 180;
+                const calculatedAltitude = offsetBehind * Math.tan(pitchRadians);
+                const behindBearing = (forwardBearing + 180) % 360;
+
+                const offsetPoint = turf.destination(
+                    turf.point([dotPoint.lng, dotPoint.lat]),
+                    offsetBehind / 1000,
+                    behindBearing,
+                    { units: 'kilometers' }
+                );
+
+                cameraLng = offsetPoint.geometry.coordinates[0];
+                cameraLat = offsetPoint.geometry.coordinates[1];
+                cameraAlt = dotPoint.alt + calculatedAltitude + (dotPoint.alt * 0.1);
+                cameraBearing = forwardBearing;
+                cameraPitch = chaseCamPitch;
+                break;
+            }
+
+            case CameraModes.BIRDS_EYE: {
+                const offsetUp = config.offsetUp * zoom;
+
+                const southOffset = turf.destination(
+                    turf.point([dotPoint.lng, dotPoint.lat]),
+                    0.03 * zoom,
+                    180,
+                    { units: 'kilometers' }
+                );
+
+                cameraLng = southOffset.geometry.coordinates[0];
+                cameraLat = southOffset.geometry.coordinates[1];
+                cameraAlt = dotPoint.alt + offsetUp;
+                cameraBearing = forwardBearing;
+                cameraPitch = config.pitch;
+                break;
+            }
+
+            case CameraModes.SIDE_VIEW: {
+                const offsetSide = config.offsetSide * zoom;
+                const offsetUp = config.offsetUp * zoom;
+
+                // Determine which side to use (left or right of path)
+                // For simplicity in ideal calculation, use left side
+                // The actual side selection logic can be applied in the update
+                const sideBearing = (forwardBearing + 90) % 360;
+
+                const sidePoint = turf.destination(
+                    turf.point([dotPoint.lng, dotPoint.lat]),
+                    offsetSide / 1000,
+                    sideBearing,
+                    { units: 'kilometers' }
+                );
+
+                cameraLng = sidePoint.geometry.coordinates[0];
+                cameraLat = sidePoint.geometry.coordinates[1];
+                cameraAlt = dotPoint.alt + offsetUp;
+                // Look back at the rider from the side
+                cameraBearing = (sideBearing + 180) % 360;
+                cameraPitch = config.pitch;
+                break;
+            }
+
+            case CameraModes.CINEMATIC: {
+                // Cinematic uses orbital motion - calculate based on current angle
+                const orbitRadius = config.orbitRadius * zoom;
+                const orbitAngle = cinematicAngle; // Global orbit angle
+
+                const orbitPoint = turf.destination(
+                    turf.point([dotPoint.lng, dotPoint.lat]),
+                    orbitRadius / 1000,
+                    (orbitAngle * 180 / Math.PI) % 360,
+                    { units: 'kilometers' }
+                );
+
+                // Vary height and pitch based on orbit position
+                const heightVariation = Math.sin(orbitAngle * 2) * 0.3 + 0.7;
+                const heightRange = config.heightMax - config.heightMin;
+
+                cameraLng = orbitPoint.geometry.coordinates[0];
+                cameraLat = orbitPoint.geometry.coordinates[1];
+                cameraAlt = dotPoint.alt + config.heightMin + heightRange * heightVariation;
+                cameraBearing = (orbitAngle * 180 / Math.PI + 180) % 360;
+
+                const pitchVariation = (1 - heightVariation) * 0.5 + 0.5;
+                const pitchRange = config.pitchMax - config.pitchMin;
+                cameraPitch = config.pitchMin + pitchRange * pitchVariation;
+                break;
+            }
+
+            default:
+                return null;
+        }
+
+        return { lng: cameraLng, lat: cameraLat, alt: cameraAlt, bearing: cameraBearing, pitch: cameraPitch };
+    }
+
+    /**
+     * Unified Camera Update - replaces updateCamera when USE_UNIFIED_CAMERA is true
+     * Uses a single spring-based smoothing system instead of 8+ overlapping layers.
+     *
+     * Algorithm:
+     * 1. Get raw rider position (turf.along - deterministic)
+     * 2. Calculate ideal camera target (pure geometry, no smoothing)
+     * 3. Query terrain at camera position
+     * 4. Filter terrain (OutlierRejectingEMA absorbs tile load surprises)
+     * 5. Apply terrain constraint to TARGET (not output!)
+     * 6. Spring update (THE ONLY SMOOTHING)
+     * 7. Apply to map (NO POST-PROCESSING)
+     */
+    function updateCameraUnified(deltaTime = 0) {
+        // Skip during animated seek
+        if (isAnimatedSeekActive()) {
+            return;
+        }
+
+        // 1. Get raw rider position
+        const dotDistance = progress * totalDistance;
+        const dotPoint = getPointAlongRoute(dotDistance);
+
+        const directionDistance = Math.min(dotDistance + CONFIG.lookAheadDistance / 1000, totalDistance);
+        const directionPoint = getPointAlongRoute(directionDistance);
+
+        if (!dotPoint || !directionPoint) return;
+
+        // Handle scrubber dragging
+        if (isScrubberDragging) {
+            return;
+        }
+
+        // Handle free navigation mode
+        if (freeNavigationEnabled && !isPlaying) {
+            updateDotAndUI(dotPoint);
+            return;
+        }
+
+        // Handle user override
+        if (userOverrideActive) {
+            updateDotAndUI(dotPoint);
+            return;
+        }
+
+        // 2. Calculate ideal camera target (pure geometry)
+        const idealTarget = calculateIdealCameraTarget(targetCameraMode, dotPoint, directionPoint);
+        if (!idealTarget) {
+            updateDotAndUI(dotPoint);
+            return;
+        }
+
+        // Update cinematic orbit angle
+        if (targetCameraMode === CameraModes.CINEMATIC) {
+            cinematicAngle += CameraModeConfig.cinematic.orbitSpeed * deltaTime;
+        }
+
+        // 3. Query terrain at camera position
+        let terrainElevation = null;
+        try {
+            terrainElevation = map.queryTerrainElevation([idealTarget.lng, idealTarget.lat]);
+        } catch (e) {
+            // Terrain query failed - continue without
+        }
+
+        // 4-6. Let unified controller handle filtering, constraining, and smoothing
+        const controller = getUnifiedCameraController();
+        const smoothedState = controller.update(
+            dotPoint,
+            terrainElevation,
+            targetCameraMode,
+            deltaTime,
+            idealTarget
+        );
+
+        // 7. Apply to map - NO POST-PROCESSING
+        if (smoothedState) {
+            applyCameraStateDirect(smoothedState, dotPoint);
+        }
+
+        // Update dot and UI
+        updateDotAndUI(dotPoint);
+    }
+
+    /**
+     * Apply camera state directly to map without any post-processing
+     * Used by unified camera system to avoid adding more smoothing layers.
+     */
+    function applyCameraStateDirect(state, lookAtPoint) {
+        try {
+            if (!state || !isFinite(state.lng) || !isFinite(state.lat) || !isFinite(state.alt) ||
+                !isFinite(state.bearing) || !isFinite(state.pitch)) {
+                console.error('[UNIFIED] Invalid state values:', state);
+                return;
+            }
+
+            const camera = map.getFreeCameraOptions();
+            const cameraAltitude = state.alt;
+            const position = mapboxgl.MercatorCoordinate.fromLngLat(
+                { lng: state.lng, lat: state.lat },
+                cameraAltitude
+            );
+
+            camera.position = position;
+
+            // Set look-at target
+            const lookAtAltitude = lookAtPoint ? lookAtPoint.alt : 0;
+            camera.lookAtPoint(
+                { lng: lookAtPoint?.lng || state.lng, lat: lookAtPoint?.lat || state.lat },
+                lookAtAltitude
+            );
+
+            // Apply pitch and bearing
+            camera.setPitchBearing(state.pitch, state.bearing);
+
+            map.setFreeCameraOptions(camera);
+
+            // Debug logging
+            if (window.CAMERA_CHAOS_DEBUG) {
+                const km = (progress * totalDistance).toFixed(1);
+                console.log(`[UNIFIED APPLY] km=${km} alt=${state.alt.toFixed(0)} bearing=${state.bearing.toFixed(0)} pitch=${state.pitch.toFixed(1)}`);
+            }
+        } catch (error) {
+            console.error('[UNIFIED] Error applying camera state:', error);
+        }
+    }
+
     function updateCamera(deltaTime = 0) {
+        // Use unified camera system if enabled (compile-time flag OR runtime toggle)
+        if (USE_UNIFIED_CAMERA || window._USE_UNIFIED_CAMERA) {
+            return updateCameraUnified(deltaTime);
+        }
+
+        // Skip normal camera updates during animated seek - the animation handles camera
+        if (isAnimatedSeekActive()) {
+            return;
+        }
+
         // Dot position from turf.along() - constant speed along the path
         const dotDistance = progress * totalDistance;
         const dotPoint = getPointAlongRoute(dotDistance);
@@ -4177,7 +5908,34 @@
         }
         // Normal guided mode
         else {
-            finalState = targetState;
+            // UNIFIED CAMERA CONTROLLER
+            // When enabled, this replaces all the legacy smoothing with a single spring system
+            const controller = getUnifiedCameraController();
+            if (controller.isEnabled) {
+                // Get terrain at camera position
+                const terrainAtCamera = map.queryTerrainElevation([targetState.lng, targetState.lat]);
+
+                // Let unified controller smooth the position
+                const smoothedPos = controller.update(
+                    dotPoint,           // rider position
+                    terrainAtCamera,    // terrain (can be null)
+                    targetCameraMode,   // current mode
+                    deltaTime,          // time step
+                    targetState         // ideal target from mode calculation
+                );
+
+                // Apply smoothed position AND smoothed bearing from unified controller
+                finalState = {
+                    ...targetState,
+                    lng: smoothedPos.lng,
+                    lat: smoothedPos.lat,
+                    alt: smoothedPos.alt,
+                    bearing: smoothedPos.bearing !== undefined ? smoothedPos.bearing : targetState.bearing
+                };
+            } else {
+                // Legacy path - use targetState with all its smoothing layers
+                finalState = targetState;
+            }
             currentCameraMode = targetCameraMode;
         }
 
@@ -4186,6 +5944,21 @@
 
         // Update dot and UI
         updateDotAndUI(dotPoint);
+
+        // RECORD FRAME STATE for panic button replay
+        const recorder = getStateRecorder();
+        if (recorder.isEnabled) {
+            recorder.recordFrame({
+                deltaTime: deltaTime,
+                progress: progress,
+                riderPosition: dotPoint,
+                cameraPosition: finalState,
+                bearing: finalState.bearing,
+                pitch: finalState.pitch,
+                mode: targetCameraMode,
+                zoomLevel: zoomLevel
+            });
+        }
     }
 
     /**
@@ -4322,6 +6095,71 @@
             }
 
             _lastAppliedState = { ...state };
+
+            // CAMERA CHAOS DEBUGGING - detailed per-frame logging
+            if (window.CAMERA_CHAOS_DEBUG && window._chaosDebugData) {
+                const d = window._chaosDebugData;
+                d.frameCount++;
+
+                // Calculate current km position
+                const currentKm = progress * totalDistance;
+
+                // Calculate deltas from last frame
+                let bearingDelta = 0;
+                let altDelta = 0;
+                let posDelta = 0;
+
+                if (d.lastBearing !== null) {
+                    bearingDelta = state.bearing - d.lastBearing;
+                    // Normalize bearing delta to -180..180
+                    if (bearingDelta > 180) bearingDelta -= 360;
+                    if (bearingDelta < -180) bearingDelta += 360;
+                }
+                if (d.lastAlt !== null) {
+                    altDelta = state.alt - d.lastAlt;
+                }
+                if (d.lastPos) {
+                    const dLng = (state.lng - d.lastPos.lng) * 111320 * Math.cos(state.lat * Math.PI / 180);
+                    const dLat = (state.lat - d.lastPos.lat) * 111320;
+                    posDelta = Math.sqrt(dLng * dLng + dLat * dLat);
+                }
+
+                // Update max deltas
+                if (Math.abs(bearingDelta) > d.maxBearingDelta) d.maxBearingDelta = Math.abs(bearingDelta);
+                if (Math.abs(altDelta) > d.maxAltDelta) d.maxAltDelta = Math.abs(altDelta);
+                if (posDelta > d.maxPosDelta) d.maxPosDelta = posDelta;
+
+                // Store history (keep last 100)
+                d.bearingHistory.push({ km: currentKm.toFixed(2), bearing: state.bearing.toFixed(1), delta: bearingDelta.toFixed(2) });
+                d.altHistory.push({ km: currentKm.toFixed(2), alt: state.alt.toFixed(1), delta: altDelta.toFixed(2) });
+                d.posHistory.push({ km: currentKm.toFixed(2), lng: state.lng.toFixed(5), lat: state.lat.toFixed(5), delta: posDelta.toFixed(2) });
+
+                // Query terrain and store
+                const terrainAtCam = map.queryTerrainElevation([state.lng, state.lat]);
+                d.terrainHistory.push({ km: currentKm.toFixed(2), terrain: terrainAtCam !== null ? terrainAtCam.toFixed(1) : 'null' });
+
+                if (d.bearingHistory.length > 100) {
+                    d.bearingHistory.shift();
+                    d.altHistory.shift();
+                    d.posHistory.shift();
+                    d.terrainHistory.shift();
+                }
+
+                // Update last values
+                d.lastBearing = state.bearing;
+                d.lastAlt = state.alt;
+                d.lastPos = { lng: state.lng, lat: state.lat };
+
+                // Log every frame with significant changes, or every 10th frame between km 50-53
+                const inProblemZone = currentKm >= 50 && currentKm <= 53;
+                const hasSignificantChange = Math.abs(bearingDelta) > 5 || Math.abs(altDelta) > 20 || posDelta > 30;
+
+                if (inProblemZone || hasSignificantChange) {
+                    console.log(`[CHAOS] km=${currentKm.toFixed(2)} | bearing=${state.bearing.toFixed(1)}° (Δ${bearingDelta.toFixed(1)}) | ` +
+                        `alt=${state.alt.toFixed(0)}m (Δ${altDelta.toFixed(0)}) | posDelta=${posDelta.toFixed(1)}m | ` +
+                        `terrain=${terrainAtCam !== null ? terrainAtCam.toFixed(0) : 'null'}m | zoom=${zoomLevel.toFixed(1)}`);
+                }
+            }
 
             // SMOOTHNESS MEASUREMENT SYSTEM
             // Tracks frame-to-frame deltas and computes standard deviation
@@ -4719,11 +6557,55 @@
             console.log(`Seeked to ${km.toFixed(2)} km (${(progress * 100).toFixed(1)}%)`);
         },
 
+        // Animated seek to a specific distance in km (Google Earth style)
+        animatedSeekToKm: (km) => {
+            animatedSeekTo(km / totalDistance);
+            console.log(`Animated seek to ${km.toFixed(2)} km`);
+        },
+
+        // Animated seek controls
+        animatedSeek: {
+            enable: () => {
+                ANIMATED_SEEK_CONFIG.enabled = true;
+                console.log('[ANIMATED SEEK] Enabled');
+            },
+            disable: () => {
+                ANIMATED_SEEK_CONFIG.enabled = false;
+                console.log('[ANIMATED SEEK] Disabled - using instant teleport');
+            },
+            status: () => {
+                console.log('=== ANIMATED SEEK CONFIG ===');
+                console.log(`Enabled: ${ANIMATED_SEEK_CONFIG.enabled}`);
+                console.log(`Min distance: ${ANIMATED_SEEK_CONFIG.minDistanceM}m`);
+                console.log(`Zoom out duration: ${ANIMATED_SEEK_CONFIG.zoomOutDuration}ms`);
+                console.log(`Pan duration: ${ANIMATED_SEEK_CONFIG.panDuration}ms`);
+                console.log(`Zoom in duration: ${ANIMATED_SEEK_CONFIG.zoomInDuration}ms`);
+                console.log(`Zoom out multiplier: ${ANIMATED_SEEK_CONFIG.zoomOutAltMultiplier}x`);
+                console.log(`Max zoom out alt: ${ANIMATED_SEEK_CONFIG.maxZoomOutAlt}m`);
+                console.log(`Current state: ${animatedSeekState.phase}`);
+                return ANIMATED_SEEK_CONFIG;
+            },
+            setDurations: (zoomOut, pan, zoomIn) => {
+                if (zoomOut !== undefined) ANIMATED_SEEK_CONFIG.zoomOutDuration = zoomOut;
+                if (pan !== undefined) ANIMATED_SEEK_CONFIG.panDuration = pan;
+                if (zoomIn !== undefined) ANIMATED_SEEK_CONFIG.zoomInDuration = zoomIn;
+                console.log(`Durations set: zoomOut=${ANIMATED_SEEK_CONFIG.zoomOutDuration}ms, pan=${ANIMATED_SEEK_CONFIG.panDuration}ms, zoomIn=${ANIMATED_SEEK_CONFIG.zoomInDuration}ms`);
+            },
+            setZoomMultiplier: (mult) => {
+                ANIMATED_SEEK_CONFIG.zoomOutAltMultiplier = mult;
+                console.log(`Zoom out multiplier set to ${mult}x`);
+            },
+            setMinDistance: (meters) => {
+                ANIMATED_SEEK_CONFIG.minDistanceM = meters;
+                console.log(`Min distance for animation set to ${meters}m`);
+            },
+        },
+
         // Set camera mode
         setMode: (mode) => {
             const modes = { chase: CameraModes.CHASE, birds_eye: CameraModes.BIRDS_EYE, side_view: CameraModes.SIDE_VIEW, cinematic: CameraModes.CINEMATIC };
             if (modes[mode]) {
-                switchCameraMode(modes[mode]);
+                transitionToMode(modes[mode]);
                 console.log(`Switched to ${mode} mode`);
             } else {
                 console.log('Available modes: chase, birds_eye, side_view, cinematic');
@@ -4809,7 +6691,216 @@
                 _seekDistance = 0;
                 console.log('Adaptive smoothing state reset');
             }
+        },
+
+        // CAMERA CHAOS DEBUGGING
+        // Comprehensive logging to diagnose camera instability issues
+        cameraChaosDiag: {
+            // Enable detailed per-frame logging for camera chaos diagnosis
+            enable: () => {
+                window.CAMERA_CHAOS_DEBUG = true;
+                window._chaosDebugData = {
+                    frameCount: 0,
+                    bearingHistory: [],
+                    altHistory: [],
+                    posHistory: [],
+                    terrainHistory: [],
+                    springHistory: [],
+                    maxBearingDelta: 0,
+                    maxAltDelta: 0,
+                    maxPosDelta: 0,
+                    lastBearing: null,
+                    lastAlt: null,
+                    lastPos: null
+                };
+                console.log('[CHAOS DIAG] Enabled - will log every frame. Use flyoverDebug.cameraChaosDiag.report() to see summary');
+            },
+            disable: () => {
+                window.CAMERA_CHAOS_DEBUG = false;
+                console.log('[CHAOS DIAG] Disabled');
+            },
+            // Get current debug data
+            getData: () => window._chaosDebugData,
+            // Generate summary report
+            report: () => {
+                const d = window._chaosDebugData;
+                if (!d) {
+                    console.log('No chaos debug data - run enable() first');
+                    return;
+                }
+                console.log('=== CAMERA CHAOS DIAGNOSIS REPORT ===');
+                console.log(`Frames analyzed: ${d.frameCount}`);
+                console.log(`Max bearing delta: ${d.maxBearingDelta.toFixed(2)}°/frame`);
+                console.log(`Max altitude delta: ${d.maxAltDelta.toFixed(2)}m/frame`);
+                console.log(`Max position delta: ${d.maxPosDelta.toFixed(2)}m/frame`);
+                console.log('Recent bearing history (last 20):', d.bearingHistory.slice(-20));
+                console.log('Recent altitude history (last 20):', d.altHistory.slice(-20));
+                console.log('Recent terrain history (last 20):', d.terrainHistory.slice(-20));
+                return d;
+            },
+            // Clear collected data
+            clear: () => {
+                if (window._chaosDebugData) {
+                    window._chaosDebugData = {
+                        frameCount: 0,
+                        bearingHistory: [],
+                        altHistory: [],
+                        posHistory: [],
+                        terrainHistory: [],
+                        springHistory: [],
+                        maxBearingDelta: 0,
+                        maxAltDelta: 0,
+                        maxPosDelta: 0,
+                        lastBearing: null,
+                        lastAlt: null,
+                        lastPos: null
+                    };
+                    console.log('[CHAOS DIAG] Data cleared');
+                }
+            }
+        },
+
+        // UNIFIED CAMERA CONTROLLER
+        // Single source of truth camera system to eliminate jitter
+        unifiedController: {
+            enable: () => {
+                const controller = getUnifiedCameraController();
+                controller.setEnabled(true);
+                console.log('[UNIFIED] Controller enabled - camera now using single spring system');
+                console.log('Note: To use the new unified camera loop, also call flyoverDebug.unified.enable()');
+            },
+            disable: () => {
+                const controller = getUnifiedCameraController();
+                controller.setEnabled(false);
+                console.log('[UNIFIED] Controller disabled - using legacy smoothing');
+            },
+            status: () => {
+                const controller = getUnifiedCameraController();
+                const info = controller.getDebugInfo();
+                console.log('=== UNIFIED CAMERA CONTROLLER STATUS ===');
+                console.log(`Enabled: ${info.enabled}`);
+                console.log(`State: ${info.state}`);
+                console.log(`Mode: ${info.mode}`);
+                console.log(`Spring position:`, info.springPosition);
+                console.log(`Spring velocity:`, info.springVelocity);
+                console.log(`Bearing: ${info.bearing?.toFixed(1) ?? 'null'}° (vel: ${info.bearingVelocity?.toFixed(1) ?? 'null'}°/s)`);
+                console.log(`Pitch: ${info.pitch?.toFixed(1) ?? 'null'}°`);
+                console.log(`Terrain (filtered): ${info.terrainFiltered?.toFixed(1) ?? 'null'}m`);
+                console.log(`Terrain (raw): ${info.terrainRaw?.toFixed(1) ?? 'null'}m`);
+                if (info.transition) {
+                    console.log(`Transition: ${(info.transition.progress * 100).toFixed(0)}% to ${info.transition.targetMode}`);
+                }
+                return info;
+            },
+            reset: () => {
+                const controller = getUnifiedCameraController();
+                controller.reset();
+                console.log('[UNIFIED] Controller state reset');
+            },
+            setTeleportThreshold: (meters) => {
+                const controller = getUnifiedCameraController();
+                controller.config.teleportThreshold = meters;
+                console.log(`[UNIFIED] Teleport threshold set to ${meters}m`);
+            },
+            setSpringOmega: (omega) => {
+                const controller = getUnifiedCameraController();
+                controller.positionSpring.omega = omega;
+                console.log(`[UNIFIED] Spring omega set to ${omega}`);
+            }
+        },
+
+        // UNIFIED CAMERA SYSTEM (new architecture)
+        // Toggle between legacy (8+ smoothing layers) and unified (1 spring) camera systems
+        unified: {
+            enable: () => {
+                window._USE_UNIFIED_CAMERA = true;
+                const controller = getUnifiedCameraController();
+                controller.setEnabled(true);
+                console.log('=== UNIFIED CAMERA SYSTEM ENABLED ===');
+                console.log('Camera now uses single spring-based smoothing.');
+                console.log('All 8+ legacy smoothing layers bypassed.');
+                console.log('Use flyoverDebug.unified.status() to monitor state.');
+            },
+            disable: () => {
+                window._USE_UNIFIED_CAMERA = false;
+                const controller = getUnifiedCameraController();
+                controller.setEnabled(false);
+                console.log('=== UNIFIED CAMERA SYSTEM DISABLED ===');
+                console.log('Camera now uses legacy multi-layer smoothing.');
+            },
+            status: () => {
+                const enabled = window._USE_UNIFIED_CAMERA === true;
+                const controller = getUnifiedCameraController();
+                const info = controller.getDebugInfo();
+                console.log('=== UNIFIED CAMERA SYSTEM STATUS ===');
+                console.log(`System active: ${enabled}`);
+                console.log(`Controller enabled: ${info.enabled}`);
+                console.log(`State machine: ${info.state}`);
+                console.log(`Camera mode: ${info.mode}`);
+                if (info.springPosition) {
+                    console.log(`Position: (${info.springPosition.lng?.toFixed(4)}, ${info.springPosition.lat?.toFixed(4)}, ${info.springPosition.alt?.toFixed(0)}m)`);
+                }
+                console.log(`Bearing: ${info.bearing?.toFixed(1)}° | Pitch: ${info.pitch?.toFixed(1)}°`);
+                return { systemActive: enabled, ...info };
+            },
+            toggle: () => {
+                if (window._USE_UNIFIED_CAMERA) {
+                    window.flyoverDebug.unified.disable();
+                } else {
+                    window.flyoverDebug.unified.enable();
+                }
+            }
+        },
+
+        // STATE RECORDER for deterministic replay
+        // Panic button system for capturing camera jitter
+        recorder: {
+            // Trigger panic button (capture state)
+            panic: () => {
+                onPanicButton();
+            },
+            // Get recording stats
+            status: () => {
+                const recorder = getStateRecorder();
+                const stats = recorder.getStats();
+                console.log('=== STATE RECORDER STATUS ===');
+                console.log(`Enabled: ${stats.isEnabled}`);
+                console.log(`Frames recorded: ${stats.frameCount}`);
+                console.log(`Buffered frames: ${stats.bufferedFrames} / ${stats.bufferCapacity} (${stats.bufferUsagePercent}%)`);
+                console.log(`Buffered duration: ${stats.bufferedDurationSec}s`);
+                return stats;
+            },
+            // Enable recording
+            enable: () => {
+                const recorder = getStateRecorder();
+                recorder.setEnabled(true);
+                console.log('[RECORDER] Recording enabled');
+            },
+            // Disable recording
+            disable: () => {
+                const recorder = getStateRecorder();
+                recorder.setEnabled(false);
+                console.log('[RECORDER] Recording disabled');
+            },
+            // Clear recorded data
+            clear: () => {
+                const recorder = getStateRecorder();
+                recorder.clear();
+                console.log('[RECORDER] Buffer cleared');
+            },
+            // Export last N seconds
+            export: (seconds = 30) => {
+                const recorder = getStateRecorder();
+                const data = recorder.export(seconds);
+                console.log(`[RECORDER] Exported ${data.frameCaptured} frames (${(data.durationMs / 1000).toFixed(1)}s)`);
+                return data;
+            },
+            // Get raw buffer (for debugging)
+            getBuffer: () => {
+                return getStateRecorder().buffer;
+            }
         }
     };
     console.log('Flyover debug API available: window.flyoverDebug (try .enable() for logging)');
+    console.log('Panic button available: Press P or Ctrl+Shift+P to capture camera state');
 })();
