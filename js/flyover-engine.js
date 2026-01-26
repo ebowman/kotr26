@@ -1171,12 +1171,29 @@
          * Start a mode transition
          */
         startTransition(newMode) {
+            const startState = this.getCurrentState();
+
+            // If springs aren't properly initialized (position is 0,0), skip transition
+            // This prevents the camera from flying from the Atlantic Ocean
+            const hasValidPosition = this.positionSpring.position &&
+                (Math.abs(this.positionSpring.position.lng) > 0.001 ||
+                 Math.abs(this.positionSpring.position.lat) > 0.001);
+
+            if (!hasValidPosition) {
+                if (window.CAMERA_CHAOS_DEBUG) {
+                    console.log(`[UNIFIED] Skipping transition (no valid position): ${this.currentMode} -> ${newMode}`);
+                }
+                // Just change mode, let springs initialize from next target
+                this.currentMode = newMode;
+                return;
+            }
+
             if (window.CAMERA_CHAOS_DEBUG) {
                 console.log(`[UNIFIED] Starting transition: ${this.currentMode} -> ${newMode}`);
             }
 
             this.transition = {
-                startState: this.getCurrentState(),
+                startState: startState,
                 targetMode: newMode,
                 progress: 0,
                 duration: this.config.transitionDuration
@@ -1272,14 +1289,18 @@
 
         /**
          * Get current camera state from springs
+         * Uses lastTarget as fallback if springs aren't initialized (prevents 0,0,0 bug)
          */
         getCurrentState() {
+            const pos = this.positionSpring.position;
+            const fallback = this.lastTarget || { lng: 0, lat: 0, alt: 300, bearing: 0, pitch: -15 };
+
             return {
-                lng: this.positionSpring.position?.lng || 0,
-                lat: this.positionSpring.position?.lat || 0,
-                alt: this.positionSpring.position?.alt || 0,
-                bearing: this.bearingSpring.value || 0,
-                pitch: this.pitchSpring.value || 0
+                lng: pos?.lng ?? fallback.lng,
+                lat: pos?.lat ?? fallback.lat,
+                alt: pos?.alt ?? fallback.alt,
+                bearing: this.bearingSpring.value ?? fallback.bearing,
+                pitch: this.pitchSpring.value ?? fallback.pitch
             };
         }
 
