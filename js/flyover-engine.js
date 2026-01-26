@@ -5647,24 +5647,19 @@
             }
 
             const camera = map.getFreeCameraOptions();
-            const cameraAltitude = state.alt;
-            const position = mapboxgl.MercatorCoordinate.fromLngLat(
-                { lng: state.lng, lat: state.lat },
-                cameraAltitude
+
+            // Set camera position (use array format like the working applyCameraState)
+            camera.position = mapboxgl.MercatorCoordinate.fromLngLat(
+                [state.lng, state.lat],
+                state.alt
             );
 
-            camera.position = position;
+            // Set look-at target (use array format, no altitude parameter)
+            if (lookAtPoint) {
+                camera.lookAtPoint([lookAtPoint.lng, lookAtPoint.lat]);
+            }
 
-            // Set look-at target
-            const lookAtAltitude = lookAtPoint ? lookAtPoint.alt : 0;
-            camera.lookAtPoint(
-                { lng: lookAtPoint?.lng || state.lng, lat: lookAtPoint?.lat || state.lat },
-                lookAtAltitude
-            );
-
-            // Apply pitch and bearing
-            camera.setPitchBearing(state.pitch, state.bearing);
-
+            // Apply camera settings
             map.setFreeCameraOptions(camera);
 
             // Debug logging
