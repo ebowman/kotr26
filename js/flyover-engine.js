@@ -5435,7 +5435,7 @@
     // UNIFIED CAMERA SYSTEM
     // Toggle this flag to switch between legacy (8+ smoothing layers) and unified (1 spring)
     // =============================================================================
-    const USE_UNIFIED_CAMERA = true;  // Unified camera system enabled by default (disable via flyoverDebug.unified.disable())
+    const USE_UNIFIED_CAMERA = false;  // Disabled - still has issues. Enable via flyoverDebug.unified.enable()
 
     /**
      * Calculate the ideal camera target for a given mode - PURE GEOMETRY, NO SMOOTHING
