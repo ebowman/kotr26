@@ -1105,7 +1105,12 @@
          * @returns {object} - Smoothed camera state {lng, lat, alt, bearing, pitch}
          */
         update(riderPos, terrainElevation, mode, deltaTime, idealTarget) {
-            if (!this.isEnabled || !idealTarget) {
+            // Auto-enable when called (USE_UNIFIED_CAMERA routes here)
+            if (!this.isEnabled) {
+                this.isEnabled = true;
+            }
+
+            if (!idealTarget) {
                 return idealTarget;
             }
 
@@ -5165,8 +5170,9 @@
                     state.phaseStartTime = timestamp;
 
                     // Notify unified controller about the seek (for proper state reset)
-                    const controller = getUnifiedCameraController();
-                    if (controller.isEnabled) {
+                    // Check USE_UNIFIED_CAMERA flag, not controller.isEnabled (which starts false)
+                    if (USE_UNIFIED_CAMERA || window._USE_UNIFIED_CAMERA) {
+                        const controller = getUnifiedCameraController();
                         const finalDotPoint = getPointAlongRoute(state.targetProgress * totalDistance);
                         if (finalDotPoint) {
                             const dirDist = Math.min(state.targetProgress * totalDistance + CONFIG.lookAheadDistance / 1000, totalDistance);
@@ -5291,18 +5297,16 @@
         }
 
         // UNIFIED CAMERA: Notify controller about seek
-        const controller = getUnifiedCameraController();
-        if (controller.isEnabled) {
+        // Check USE_UNIFIED_CAMERA flag, not controller.isEnabled (which starts false)
+        if (USE_UNIFIED_CAMERA || window._USE_UNIFIED_CAMERA) {
+            const controller = getUnifiedCameraController();
             const newRiderPos = getPointAlongRoute(progress * totalDistance);
             if (newRiderPos) {
                 // Calculate new target position for the seek
                 const directionDistance = Math.min(progress * totalDistance + CONFIG.lookAheadDistance / 1000, totalDistance);
                 const directionPoint = getPointAlongRoute(directionDistance);
                 if (directionPoint) {
-                    // Use calculateIdealCameraTarget for unified system, calculateCameraForMode for legacy
-                    const newTarget = (USE_UNIFIED_CAMERA || window._USE_UNIFIED_CAMERA)
-                        ? calculateIdealCameraTarget(currentCameraMode, newRiderPos, directionPoint)
-                        : calculateCameraForMode(currentCameraMode, newRiderPos, directionPoint, 0.016, true);
+                    const newTarget = calculateIdealCameraTarget(currentCameraMode, newRiderPos, directionPoint);
                     if (newTarget) {
                         controller.onSeek(newRiderPos, newTarget, _seekDistance);
                     }
