@@ -5246,6 +5246,11 @@
                         const currentAlt = state.zoomedOutAlt +
                             (targetCameraState.alt - state.zoomedOutAlt) * eased;
 
+                        // DEBUG: Log target vs current altitude
+                        if (t > 0.9) {
+                            console.log(`[ZOOM_IN DEBUG] t=${t.toFixed(3)} eased=${eased.toFixed(3)} targetAlt=${targetCameraState.alt.toFixed(0)} currentAlt=${currentAlt.toFixed(0)} riderAlt=${dotPoint.alt.toFixed(0)}`);
+                        }
+
                         const cameraState = {
                             ...targetCameraState,
                             alt: currentAlt,
