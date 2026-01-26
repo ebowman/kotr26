@@ -5032,6 +5032,14 @@
             cancelAnimationFrame(animatedSeekState.animationId);
         }
 
+        // Reset overview/transition flags to prevent "double move" after animated seek
+        // These flags could be set from previous scrubber interaction
+        shouldReturnFromOverview = false;
+        overviewTransitionProgress = 0;
+        transitionStartState = null;
+        overviewTargetState = null;
+        window._overviewReturnFrames = 0;
+
         // Get current camera state
         const currentCameraState = _lastAppliedState ? { ..._lastAppliedState } : null;
         if (!currentCameraState) {
@@ -5252,6 +5260,14 @@
                     state.active = false;
                     state.phase = 'idle';
                     state.animationId = null;
+
+                    // Reset all transition flags to prevent "double move"
+                    // The animated seek's zoom_in already brought us to target altitude
+                    shouldReturnFromOverview = false;
+                    overviewTransitionProgress = 0;
+                    transitionStartState = null;
+                    overviewTargetState = null;
+                    window._overviewReturnFrames = 0;
 
                     // Reset caches and trigger settling period
                     resetCameraCaches();
