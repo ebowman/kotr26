@@ -3218,6 +3218,70 @@
     }
 
     /**
+     * Initialize all smoothing systems after animated seek completes.
+     * Also enables adaptive smoothing grace period to prevent emergency smoothing
+     * from fighting the natural transition to normal camera operation.
+     *
+     * @param {object} cameraState - Final camera state from animated seek
+     * @param {object} riderPos - Final rider position (for rider smoothing init)
+     * @param {number} seekDistanceKm - Distance of the seek for adaptive smoothing
+     */
+    function initializeSmoothingToState(cameraState, riderPos, seekDistanceKm = 0) {
+        if (!cameraState) return;
+
+        const pos = { lng: cameraState.lng, lat: cameraState.lat, alt: cameraState.alt };
+
+        // Initialize camera smooth state (universal smoothing layer)
+        window._cameraSmoothState = { ...pos, mode: currentCameraMode };
+
+        // Initialize rider smooth state if provided
+        if (riderPos) {
+            window._riderSmoothState = {
+                lng: riderPos.lng,
+                lat: riderPos.lat,
+                alt: riderPos.alt,
+                mode: currentCameraMode
+            };
+        }
+
+        // Initialize predictive springs to this exact position
+        if (predictiveCameraController) {
+            predictiveCameraController.cameraSpring.teleportTo(pos);
+            predictiveCameraController.lookAtSpring.teleportTo(riderPos || pos);
+            // Clear prediction caches - they'll regenerate
+            predictiveCameraController.lastPredictedTarget = null;
+            predictiveCameraController.lastSamples = null;
+        }
+
+        // Set last applied state
+        _lastAppliedState = { ...cameraState };
+
+        // Enable adaptive smoothing grace period - this allows the camera to
+        // naturally transition without emergency smoothing fighting it
+        _seekTimestamp = performance.now();
+        _seekDistance = (seekDistanceKm || 10) * 1000;  // Default to 10km to enable grace period
+
+        // Set terrain cache to current state
+        if (window._terrainCache) {
+            window._terrainCache.lastLng = cameraState.lng;
+            window._terrainCache.lastLat = cameraState.lat;
+            window._terrainCache.lastCameraAlt = cameraState.alt;
+            window._terrainCache.lastBearing = cameraState.bearing;
+            window._terrainCache.lastPitch = cameraState.pitch;
+        }
+
+        if (window.FLYOVER_DEBUG) {
+            console.log('[INIT SMOOTHING] Initialized to state:', {
+                lng: cameraState.lng.toFixed(4),
+                lat: cameraState.lat.toFixed(4),
+                alt: cameraState.alt.toFixed(0),
+                bearing: cameraState.bearing.toFixed(1),
+                seekDistanceKm: seekDistanceKm.toFixed(1)
+            });
+        }
+    }
+
+    /**
      * Reset all camera caches including position and terrain data
      * Use when camera gets stuck or after major transitions
      */
@@ -4941,7 +5005,14 @@
             // may be stale (from the old position). Use the user override return mechanism
             // to smoothly lerp from current camera position to the target state.
             // This prevents the jarring altitude/pitch jumps at playback start.
-            if (window._terrainCache &&
+            // EXCEPTION: After animated seek, we already zoomed in - don't override again!
+            if (animatedSeekState.justCompleted) {
+                // Animated seek already positioned the camera correctly and initialized smoothing
+                animatedSeekState.justCompleted = false;
+                if (window.FLYOVER_DEBUG) {
+                    console.log('[TOGGLE PLAY] Skipping user override setup - animated seek just completed');
+                }
+            } else if (window._terrainCache &&
                 (window._terrainCache.lastCameraAlt === null || window._terrainCache.lastBearing === null)) {
                 // Cache was reset by a seek - set up smooth transition from current position
                 lastUserCameraState = getCurrentCameraState();
@@ -5002,6 +5073,7 @@
         startCameraState: null,
         zoomedOutAlt: 0,
         animationId: null,
+        justCompleted: false,  // Set true when animated seek completes, cleared after first togglePlay
     };
 
     /**
@@ -5072,7 +5144,7 @@
         const scaledPanDuration = ANIMATED_SEEK_CONFIG.panDuration * durationScale;
         const scaledZoomInDuration = ANIMATED_SEEK_CONFIG.zoomInDuration * durationScale;
 
-        // Initialize animation state
+        // Initialize animation state - save playing state to restore after seek
         animatedSeekState = {
             active: true,
             phase: 'zoom_out',
@@ -5088,6 +5160,8 @@
             zoomInDuration: scaledZoomInDuration,
             // End camera state (calculated at start of pan phase)
             endCameraState: null,
+            // Save playing state to restore after seek completes
+            wasPlaying: isPlaying,
         };
 
         if (window.FLYOVER_DEBUG) {
@@ -5246,16 +5320,15 @@
                         const currentAlt = state.zoomedOutAlt +
                             (targetCameraState.alt - state.zoomedOutAlt) * eased;
 
-                        // DEBUG: Log target vs current altitude
-                        if (t > 0.9) {
-                            console.log(`[ZOOM_IN DEBUG] t=${t.toFixed(3)} eased=${eased.toFixed(3)} targetAlt=${targetCameraState.alt.toFixed(0)} currentAlt=${currentAlt.toFixed(0)} riderAlt=${dotPoint.alt.toFixed(0)}`);
-                        }
-
                         const cameraState = {
                             ...targetCameraState,
                             alt: currentAlt,
                         };
                         applyCameraState(cameraState, dotPoint, true);
+
+                        // Store final state for initialization when animation completes
+                        state.finalCameraState = cameraState;
+                        state.finalRiderPos = dotPoint;
                     }
                     updateDotAndUI(dotPoint);
                 }
@@ -5266,20 +5339,38 @@
                     state.phase = 'idle';
                     state.animationId = null;
 
-                    // Reset all transition flags to prevent "double move"
-                    // The animated seek's zoom_in already brought us to target altitude
+                    // Reset all transition flags
                     shouldReturnFromOverview = false;
                     overviewTransitionProgress = 0;
                     transitionStartState = null;
                     overviewTargetState = null;
                     window._overviewReturnFrames = 0;
+                    returnProgress = 1;  // Don't start user override lerp
+                    lastUserCameraState = null;
 
-                    // Reset caches and trigger settling period
-                    resetCameraCaches();
+                    // Calculate seek distance for adaptive smoothing
+                    const seekDistanceKm = Math.abs(state.targetProgress - state.startProgress) * totalDistance;
+
+                    // Initialize smoothing systems to final state with grace period
+                    if (state.finalCameraState) {
+                        initializeSmoothingToState(state.finalCameraState, state.finalRiderPos, seekDistanceKm);
+                    }
+
+                    // Clear history (but keep smoothing state initialized)
+                    cameraHistory = [];
+                    watchdogAltitudeHistory = [];
                     settlingFramesRemaining = SETTLING_DURATION;
 
                     if (window.FLYOVER_DEBUG) {
                         console.log(`[ANIMATED SEEK] Complete at ${(progress * totalDistance).toFixed(1)}km`);
+                    }
+
+                    // Restore playback state if it was playing before seek
+                    if (state.wasPlaying && !isPlaying) {
+                        // Mark that we just completed animated seek - togglePlay should NOT
+                        // set up user override return (we already zoomed in via animation)
+                        state.justCompleted = true;
+                        togglePlay();
                     }
                     return;
                 }
@@ -6060,7 +6151,9 @@
             }
 
             // Apply position and altitude smoothing limits
-            if (!inSeekGracePeriod && _lastAppliedState && !isTransitioning) {
+            // Skip during settling period (after animated seek) to allow natural transition
+            const inSettlingPeriod = settlingFramesRemaining > 0;
+            if (!inSeekGracePeriod && !inSettlingPeriod && _lastAppliedState && !isTransitioning) {
                 const posDelta = calculatePositionDelta(state, _lastAppliedState);
                 const altDelta = state.alt - _lastAppliedState.alt;
                 let needsSmoothing = false;

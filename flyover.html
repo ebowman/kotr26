@@ -1003,6 +1003,56 @@
                 display: none;
             }
         }
+
+        /* Panic button - subtle debug control */
+        .panic-btn-fixed {
+            position: fixed;
+            bottom: var(--space-lg);
+            right: var(--space-lg);
+            width: 44px;
+            height: 44px;
+            border: none;
+            border-radius: 50%;
+            background: rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(8px);
+            color: rgba(255, 255, 255, 0.5);
+            font-size: 1.25rem;
+            cursor: pointer;
+            z-index: 99;
+            transition: all 0.2s ease;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            opacity: 0.5;
+        }
+
+        .panic-btn-fixed:hover {
+            opacity: 1;
+            background: rgba(200, 50, 50, 0.8);
+            color: white;
+            transform: scale(1.1);
+            box-shadow: 0 0 20px rgba(200, 50, 50, 0.5);
+        }
+
+        .panic-btn-fixed:active {
+            transform: scale(0.95);
+        }
+
+        /* Recording indicator when state recorder is active */
+        .panic-btn-fixed.recording::after {
+            content: '';
+            position: absolute;
+            top: 4px;
+            right: 4px;
+            width: 8px;
+            height: 8px;
+            background: #22C55E;
+            border-radius: 50%;
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 0.5; transform: scale(1); }
+            50% { opacity: 1; transform: scale(1.2); }
+        }
     </style>
 </head>
 <body>
@@ -1169,8 +1219,18 @@
                 <div class="shortcut-keys"><kbd>?</kbd></div>
                 <span>Toggle this Help</span>
             </div>
+            <div class="shortcut-divider"></div>
+            <div class="shortcut-row">
+                <div class="shortcut-keys"><kbd>P</kbd></div>
+                <span>Panic (Capture State)</span>
+            </div>
         </div>
     </div>
+
+    <!-- Panic Button (Debug) -->
+    <button id="panic-btn" class="panic-btn-fixed" title="Capture camera state for debugging (P)" onclick="window.flyoverDebug?.recorder?.panic()">
+        🚨
+    </button>
 
     <!-- Climb detail popup (for inline climb markers) -->
     <div class="climb-popup" id="climb-popup">
@@ -1206,6 +1266,6 @@
     <script src="js/elevation-profile.js"></script>
     <script src="js/rider-profile.js"></script>
     <script src="js/power-calculator.js?v=3"></script>
-    <script src="js/flyover-engine.js?v=9"></script>
+    <script src="js/flyover-engine.js?v=10"></script>
 </body>
 </html>
