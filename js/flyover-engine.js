@@ -272,8 +272,12 @@
             }
             updateZoomIndicator();
 
-            // Let the spring smoothly transition to the new zoom level
-            // Resetting causes a jarring jump to "ideal position" that masks the zoom change
+            // Reset springs so camera teleports to correct position for new zoom
+            // This matches behavior of mode switches and ensures consistent steady state
+            if (predictiveCameraController) {
+                predictiveCameraController.cameraSpring.reset();
+                predictiveCameraController.lookAtSpring.reset();
+            }
 
             // Force immediate camera update
             if (!isPlaying) {
@@ -4503,7 +4507,11 @@
                     zoomLevel = ZOOM_DEFAULT;
                     saveZoomToStorage(zoomLevel);
                     updateZoomIndicator();
-                    // Let spring smoothly transition to default zoom
+                    // Reset springs so camera teleports to correct position for default zoom
+                    if (predictiveCameraController) {
+                        predictiveCameraController.cameraSpring.reset();
+                        predictiveCameraController.lookAtSpring.reset();
+                    }
                     if (!isPlaying) {
                         freeNavigationEnabled = false;
                         updateCamera(0.016);
