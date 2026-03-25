@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KOTR 2026 - Route Comparison</title>
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<script src="data-inline.js"></script>
+<script src="gps-inline.js"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #e8e6e1;
+    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    color: #2d2d2d;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 30px 20px 40px;
+  }
+
+  h1 {
+    font-size: 28px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    margin-bottom: 4px;
+  }
+
+  .subtitle {
+    font-size: 14px;
+    color: #666666;
+    margin-bottom: 24px;
+  }
+
+  .grid-wrapper {
+    display: grid;
+    grid-template-columns: 80px repeat(4, 280px);
+    grid-template-rows: 36px repeat(2, 320px);
+    gap: 10px;
+    align-items: start;
+  }
+
+  .col-header {
+    text-align: center;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    color: #666666;
+    padding-top: 8px;
+  }
+
+  .row-label {
+    writing-mode: vertical-rl;
+    text-orientation: mixed;
+    transform: rotate(180deg);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    color: #666666;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 320px;
+  }
+
+  .corner { /* top-left empty cell */ }
+
+  .cell {
+    width: 280px;
+    height: 320px;
+    background: #fff;
+    border-radius: 8px;
+    overflow: hidden;
+    cursor: pointer;
+    position: relative;
+    transition: box-shadow 0.2s;
+    border: 2px solid transparent;
+  }
+
+  .cell:hover {
+    box-shadow: 0 2px 12px rgba(0,0,0,0.1);
+  }
+
+  .cell.selected {
+    border-color: #6a9483;
+    box-shadow: 0 2px 16px rgba(106,148,131,0.3);
+  }
+
+  .cell-header {
+    padding: 10px 12px 0;
+  }
+
+  .cell-day {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    color: #666666;
+  }
+
+  .cell-label {
+    font-size: 14px;
+    font-weight: 600;
+    color: #2d2d2d;
+    margin-top: 1px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .cell-stats {
+    font-size: 11px;
+    color: #666666;
+    margin-top: 2px;
+  }
+
+  .cell-empty {
+    width: 280px;
+    height: 320px;
+    background: #f2f0ec;
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    color: #b0ada6;
+    border: 2px dashed #d0cdc7;
+  }
+
+  .cell-empty .empty-label {
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+  }
+
+  .cell-empty .empty-sub {
+    font-size: 11px;
+    margin-top: 4px;
+  }
+
+  .map-area {
+    width: 280px;
+    height: 180px;
+  }
+
+  .elevation-area {
+    width: 280px;
+    height: 60px;
+    position: absolute;
+    bottom: 0;
+    left: 0;
+  }
+
+  .nav-links {
+    margin-top: 28px;
+    font-size: 14px;
+    color: #666666;
+  }
+
+  .nav-links a {
+    color: #666666;
+    text-decoration: none;
+    margin: 0 6px;
+    transition: color 0.2s;
+  }
+
+  .nav-links a:hover {
+    color: #2d2d2d;
+  }
+
+  .nav-links .sep {
+    color: #b0ada6;
+  }
+
+  .donation {
+    margin-top: 12px;
+    font-size: 13px;
+  }
+
+  .donation a {
+    color: #4a7c6b;
+    text-decoration: underline;
+  }
+</style>
+</head>
+<body>
+
+<h1>ROUTE COMPARISON</h1>
+<p class="subtitle">KOTR 2026 &middot; King of the Road cycling event &middot; Provence</p>
+
+<div class="grid-wrapper" id="grid"></div>
+
+<div class="nav-links">
+  <a href="../index.html">Home</a>
+  <span class="sep">|</span>
+  <a href="../radial/index.html">Radial</a>
+  <span class="sep">|</span>
+  <a href="../skyline/index.html">Skyline</a>
+  <span class="sep">|</span>
+  <a href="../pace/index.html">Pace</a>
+</div>
+
+<p class="donation">
+  Supporting <a href="https://www.justgiving.com/page/eric-bowman-kotr26">M&eacute;decins Sans Fronti&egrave;res</a>
+</p>
+
+<script>
+(function() {
+  const COLORS = {
+    teal: '#8fb5a3',
+    tealLight: '#b8d4c8',
+    tealDark: '#6a9483',
+    text: '#2d2d2d',
+    textLight: '#666666',
+    line: '#b0ada6',
+    lineFaint: '#d0cdc7'
+  };
+
+  const COS44 = Math.cos(44 * Math.PI / 180); // ~0.719
+
+  const CELL_W = 280;
+  const CELL_H = 320;
+  const MAP_H = 180;
+  const ELEV_H = 60;
+  const PAD = 15;
+
+  // Build route lookup: routes[day][variant] = routeData
+  const routes = {};
+  ROUTE_DATA.forEach(r => {
+    if (!routes[r.day]) routes[r.day] = {};
+    routes[r.day][r.variant] = r;
+  });
+
+  // GPS key helper
+  function gpsKey(day, variant) {
+    return 'day' + day + '_' + variant;
+  }
+
+  // Track selected cells
+  let selectedKey = null;
+
+  // Build grid
+  const grid = document.getElementById('grid');
+
+  // Corner cell
+  const corner = document.createElement('div');
+  corner.className = 'corner';
+  grid.appendChild(corner);
+
+  // Column headers
+  for (let d = 1; d <= 4; d++) {
+    const ch = document.createElement('div');
+    ch.className = 'col-header';
+    ch.textContent = 'DAY ' + d;
+    grid.appendChild(ch);
+  }
+
+  // Store cell references for overlay updates
+  const cellMap = {};
+
+  // Rows: standard, long
+  ['standard', 'long'].forEach(variant => {
+    // Row label
+    const rl = document.createElement('div');
+    rl.className = 'row-label';
+    rl.textContent = variant.toUpperCase();
+    grid.appendChild(rl);
+
+    for (let day = 1; day <= 4; day++) {
+      const key = gpsKey(day, variant);
+      const route = routes[day] && routes[day][variant];
+      const gps = ROUTE_GPS[key];
+
+      if (!route || !gps) {
+        // Empty cell (Day 1 Long)
+        const empty = document.createElement('div');
+        empty.className = 'cell-empty';
+        empty.innerHTML = '<div class="empty-label">Standard Only</div><div class="empty-sub">Day ' + day + ' has one route</div>';
+        grid.appendChild(empty);
+        continue;
+      }
+
+      const cell = document.createElement('div');
+      cell.className = 'cell';
+      cell.dataset.key = key;
+      cell.dataset.day = day;
+      cell.dataset.variant = variant;
+      cellMap[key] = cell;
+
+      // Header
+      const header = document.createElement('div');
+      header.className = 'cell-header';
+      header.innerHTML =
+        '<div class="cell-day">DAY ' + day + '</div>' +
+        '<div class="cell-label">' + route.label + '</div>' +
+        '<div class="cell-stats">' + Math.round(route.distance_km) + ' km &middot; ' + Math.round(route.elevation_gain) + 'm climbing</div>';
+      cell.appendChild(header);
+
+      // SVG container for map
+      const mapDiv = document.createElement('div');
+      mapDiv.className = 'map-area';
+      cell.appendChild(mapDiv);
+
+      // SVG container for elevation
+      const elevDiv = document.createElement('div');
+      elevDiv.className = 'elevation-area';
+      cell.appendChild(elevDiv);
+
+      grid.appendChild(cell);
+
+      // Draw map
+      drawMap(mapDiv, gps, variant, key);
+
+      // Draw elevation
+      drawElevation(elevDiv, route.elevations, variant);
+
+      // Click handler
+      cell.addEventListener('click', () => toggleSelect(key, day, variant));
+    }
+  });
+
+  function projectCoords(coords) {
+    return coords.map(c => [c[0] * COS44, -c[1]]);
+  }
+
+  function fitProjection(projected, width, height, padding) {
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    projected.forEach(p => {
+      if (p[0] < minX) minX = p[0];
+      if (p[0] > maxX) maxX = p[0];
+      if (p[1] < minY) minY = p[1];
+      if (p[1] > maxY) maxY = p[1];
+    });
+
+    const dataW = maxX - minX || 1;
+    const dataH = maxY - minY || 1;
+    const availW = width - 2 * padding;
+    const availH = height - 2 * padding;
+    const scale = Math.min(availW / dataW, availH / dataH);
+
+    const cx = (minX + maxX) / 2;
+    const cy = (minY + maxY) / 2;
+    const ox = width / 2;
+    const oy = height / 2;
+
+    return function(p) {
+      return [
+        ox + (p[0] - cx) * scale,
+        oy + (p[1] - cy) * scale
+      ];
+    };
+  }
+
+  function drawMap(container, gps, variant, key) {
+    const svg = d3.select(container)
+      .append('svg')
+      .attr('width', CELL_W)
+      .attr('height', MAP_H);
+
+    const projected = projectCoords(gps.coordinates);
+    const transform = fitProjection(projected, CELL_W, MAP_H, PAD);
+    const points = projected.map(transform);
+
+    const color = variant === 'standard' ? COLORS.tealLight : COLORS.tealDark;
+
+    // Main route path
+    const line = d3.line().x(d => d[0]).y(d => d[1]);
+
+    // Ghost layer (hidden by default, shown on selection)
+    svg.append('path')
+      .attr('class', 'ghost-path')
+      .attr('fill', 'none')
+      .attr('stroke', 'none')
+      .attr('stroke-width', 2);
+
+    // Route path
+    svg.append('path')
+      .datum(points)
+      .attr('class', 'route-path')
+      .attr('d', line)
+      .attr('fill', 'none')
+      .attr('stroke', color)
+      .attr('stroke-width', 2.5)
+      .attr('stroke-linecap', 'round')
+      .attr('stroke-linejoin', 'round');
+
+    // Start point
+    svg.append('circle')
+      .attr('cx', points[0][0])
+      .attr('cy', points[0][1])
+      .attr('r', 4)
+      .attr('fill', color);
+
+    // End point
+    const last = points[points.length - 1];
+    svg.append('circle')
+      .attr('cx', last[0])
+      .attr('cy', last[1])
+      .attr('r', 4)
+      .attr('fill', color)
+      .attr('stroke', '#fff')
+      .attr('stroke-width', 1);
+  }
+
+  function drawElevation(container, elevations, variant) {
+    const svg = d3.select(container)
+      .append('svg')
+      .attr('width', CELL_W)
+      .attr('height', ELEV_H);
+
+    const color = variant === 'standard' ? COLORS.tealLight : COLORS.tealDark;
+
+    const x = d3.scaleLinear().domain([0, elevations.length - 1]).range([0, CELL_W]);
+    const y = d3.scaleLinear()
+      .domain([d3.min(elevations), d3.max(elevations)])
+      .range([ELEV_H - 2, 6]);
+
+    const area = d3.area()
+      .x((d, i) => x(i))
+      .y0(ELEV_H)
+      .y1((d, i) => y(d));
+
+    svg.append('path')
+      .datum(elevations)
+      .attr('d', area)
+      .attr('fill', color)
+      .attr('fill-opacity', 0.3);
+
+    const line = d3.line()
+      .x((d, i) => x(i))
+      .y((d, i) => y(d));
+
+    svg.append('path')
+      .datum(elevations)
+      .attr('d', line)
+      .attr('fill', 'none')
+      .attr('stroke', color)
+      .attr('stroke-width', 1.5);
+  }
+
+  function toggleSelect(key, day, variant) {
+    if (selectedKey === key) {
+      selectedKey = null;
+    } else {
+      selectedKey = key;
+    }
+    updateSelection();
+  }
+
+  function updateSelection() {
+    // Clear all selections and ghost paths
+    Object.keys(cellMap).forEach(k => {
+      const cell = cellMap[k];
+      cell.classList.remove('selected');
+      const svg = cell.querySelector('.map-area svg');
+      if (svg) {
+        const ghost = svg.querySelector('.ghost-path');
+        if (ghost) {
+          ghost.setAttribute('stroke', 'none');
+          ghost.setAttribute('d', '');
+        }
+      }
+    });
+
+    if (!selectedKey) return;
+
+    const selCell = cellMap[selectedKey];
+    if (selCell) selCell.classList.add('selected');
+
+    const day = parseInt(selCell.dataset.day);
+    const variant = selCell.dataset.variant;
+    const otherVariant = variant === 'standard' ? 'long' : 'standard';
+    const otherKey = gpsKey(day, otherVariant);
+    const otherGps = ROUTE_GPS[otherKey];
+
+    if (!otherGps) return; // No pair (Day 1)
+
+    // Draw ghost of other variant in the selected cell
+    drawGhostInCell(selectedKey, otherGps, otherVariant);
+
+    // Also draw ghost of selected variant in the other cell
+    const selGps = ROUTE_GPS[selectedKey];
+    if (cellMap[otherKey] && selGps) {
+      drawGhostInCell(otherKey, selGps, variant);
+    }
+  }
+
+  function drawGhostInCell(cellKey, ghostGps, ghostVariant) {
+    const cell = cellMap[cellKey];
+    if (!cell) return;
+
+    const svg = cell.querySelector('.map-area svg');
+    if (!svg) return;
+
+    // We need to project the ghost route into the cell's coordinate system
+    // The cell was fitted to its own route, so we need to use the same projection
+    const cellDay = parseInt(cell.dataset.day);
+    const cellVariant = cell.dataset.variant;
+    const cellGps = ROUTE_GPS[gpsKey(cellDay, cellVariant)];
+
+    // Recompute the cell's projection
+    const cellProjected = projectCoords(cellGps.coordinates);
+    const transform = fitProjection(cellProjected, CELL_W, MAP_H, PAD);
+
+    // Project the ghost route using the cell's transform
+    const ghostProjected = projectCoords(ghostGps.coordinates);
+    const ghostPoints = ghostProjected.map(transform);
+
+    const ghostColor = ghostVariant === 'standard' ? COLORS.tealLight : COLORS.tealDark;
+
+    const line = d3.line().x(d => d[0]).y(d => d[1]);
+    const ghostPath = svg.querySelector('.ghost-path');
+    ghostPath.setAttribute('d', line(ghostPoints));
+    ghostPath.setAttribute('stroke', ghostColor);
+    ghostPath.setAttribute('stroke-opacity', '0.2');
+    ghostPath.setAttribute('stroke-width', '2');
+  }
+
+})();
+</script>
+
+</body>
+</html>

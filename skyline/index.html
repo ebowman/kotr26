@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KOTR 2026 - Elevation Skyline Strip</title>
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<script src="data-inline.js"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #e8e6e1;
+    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    color: #2d2d2d;
+  }
+  .container {
+    max-width: 1500px;
+    margin: 0 auto;
+    padding: 20px 20px 30px;
+  }
+  h1 {
+    font-size: 22px;
+    font-weight: 600;
+    text-align: center;
+    margin-bottom: 4px;
+    letter-spacing: 0.5px;
+  }
+  .subtitle {
+    text-align: center;
+    font-size: 13px;
+    color: #666666;
+    margin-bottom: 16px;
+  }
+  .controls {
+    text-align: center;
+    margin-bottom: 16px;
+  }
+  .controls label {
+    font-size: 13px;
+    color: #666666;
+    margin-right: 6px;
+  }
+  .controls select {
+    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    font-size: 13px;
+    padding: 4px 8px;
+    border: 1px solid #b0ada6;
+    border-radius: 4px;
+    background: #fff;
+    color: #2d2d2d;
+  }
+  .chart-wrapper {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .nav-links {
+    text-align: center;
+    margin-top: 20px;
+    font-size: 13px;
+    color: #666666;
+  }
+  .nav-links a {
+    color: #6a9483;
+    text-decoration: none;
+  }
+  .nav-links a:hover {
+    text-decoration: underline;
+  }
+  .nav-links .sep {
+    margin: 0 8px;
+    color: #b0ada6;
+  }
+  .donation {
+    text-align: center;
+    margin-top: 10px;
+    font-size: 12px;
+  }
+  .donation a {
+    color: #6a9483;
+    text-decoration: underline;
+  }
+  .donation a:hover {
+    color: #8fb5a3;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>KOTR 2026 &mdash; Elevation Skyline</h1>
+  <p class="subtitle">4 days of cycling in Provence &middot; Shared elevation scale</p>
+
+  <div class="controls">
+    <label for="variant-select">Route variant:</label>
+    <select id="variant-select">
+      <option value="both" selected>Both</option>
+      <option value="standard">Standard</option>
+      <option value="long">Long</option>
+    </select>
+  </div>
+
+  <div class="chart-wrapper" id="chart-wrapper"></div>
+
+  <div class="nav-links">
+    <a href="../">Home</a>
+    <span class="sep">|</span>
+    <a href="../radial/">Radial</a>
+    <span class="sep">|</span>
+    <a href="../pace/">Pace</a>
+    <span class="sep">|</span>
+    <a href="../compare/">Compare</a>
+  </div>
+  <div class="donation">
+    Supporting <a href="https://www.justgiving.com/page/eric-bowman-kotr26">M&eacute;decins Sans Fronti&egrave;res</a>
+  </div>
+</div>
+
+<script>
+(function() {
+  // --- Color palette ---
+  const C = {
+    teal: '#8fb5a3',
+    tealLight: '#b8d4c8',
+    tealDark: '#6a9483',
+    text: '#2d2d2d',
+    textLight: '#666666',
+    line: '#b0ada6',
+    lineFaint: '#d0cdc7',
+    bg: '#e8e6e1'
+  };
+
+  // --- Layout constants ---
+  const margin = { top: 100, right: 30, bottom: 60, left: 55 };
+  const chartHeight = 350;
+  const totalHeight = chartHeight + margin.top + margin.bottom;
+  const panelGap = 24;
+  const poiLabelOffset = 14; // px above chart area for POI labels
+
+  // --- Data ---
+  const data = ROUTE_DATA;
+  const pois = POI_DATA;
+  const days = [1, 2, 3, 4];
+
+  // Global max elevation across all routes
+  const globalMaxElev = d3.max(data, d => d.elevation_max);
+  const yDomainMax = Math.ceil(globalMaxElev / 100) * 100; // round up to nearest 100
+
+  // Shared y scale
+  const yScale = d3.scaleLinear()
+    .domain([0, yDomainMax])
+    .range([chartHeight, 0]);
+
+  // Compute total distance for width proportioning
+  function getMaxDistForDay(dayNum) {
+    const dayRoutes = data.filter(d => d.day === dayNum);
+    return d3.max(dayRoutes, d => d.distance_km);
+  }
+
+  function getRoute(dayNum, variant) {
+    return data.find(d => d.day === dayNum && d.variant === variant)
+      || data.find(d => d.day === dayNum);
+  }
+
+  function getPoiKey(dayNum, variant) {
+    return 'day' + dayNum + '_' + variant;
+  }
+
+  // Width per km (pixels)
+  const totalDistanceKm = days.reduce((s, d) => s + getMaxDistForDay(d), 0);
+  const availableWidth = 1400 - margin.left - margin.right - panelGap * (days.length - 1);
+  const pxPerKm = availableWidth / totalDistanceKm;
+
+  function panelWidth(dayNum) {
+    return getMaxDistForDay(dayNum) * pxPerKm;
+  }
+
+  const totalSvgWidth = margin.left + margin.right +
+    days.reduce((s, d) => s + panelWidth(d), 0) +
+    panelGap * (days.length - 1);
+
+  // --- Build SVG ---
+  const wrapper = d3.select('#chart-wrapper');
+
+  const svg = wrapper.append('svg')
+    .attr('width', totalSvgWidth)
+    .attr('height', totalHeight)
+    .style('display', 'block');
+
+  const g = svg.append('g')
+    .attr('transform', `translate(${margin.left},${margin.top})`);
+
+  // --- Shared y-axis ---
+  const yAxis = d3.axisLeft(yScale)
+    .tickValues([0, 500, 1000, 1500])
+    .tickFormat(d => d + 'm')
+    .tickSize(4);
+
+  const yAxisG = svg.append('g')
+    .attr('transform', `translate(${margin.left},${margin.top})`)
+    .call(yAxis);
+
+  yAxisG.selectAll('text')
+    .style('font-size', '10px')
+    .style('font-family', 'Helvetica Neue, Helvetica, Arial, sans-serif')
+    .style('fill', C.textLight);
+  yAxisG.selectAll('line').style('stroke', C.line);
+  yAxisG.select('.domain').style('stroke', C.line);
+
+  // Horizontal grid lines
+  const gridLineWidth = totalSvgWidth - margin.left - margin.right;
+  g.selectAll('.grid-line')
+    .data([500, 1000, 1500])
+    .join('line')
+    .attr('class', 'grid-line')
+    .attr('x1', 0)
+    .attr('x2', gridLineWidth)
+    .attr('y1', d => yScale(d))
+    .attr('y2', d => yScale(d))
+    .attr('stroke', C.lineFaint)
+    .attr('stroke-width', 0.3)
+    .attr('stroke-opacity', 0.6);
+
+  // Baseline
+  g.append('line')
+    .attr('x1', 0)
+    .attr('x2', gridLineWidth)
+    .attr('y1', chartHeight)
+    .attr('y2', chartHeight)
+    .attr('stroke', C.line)
+    .attr('stroke-width', 1);
+
+  // --- Day panels container ---
+  const panelsG = g.append('g').attr('class', 'panels');
+
+  // --- Render function ---
+  function render(mode) {
+    panelsG.selectAll('*').remove();
+
+    let xOffset = 0;
+
+    days.forEach((dayNum, di) => {
+      const pw = panelWidth(dayNum);
+      const dayG = panelsG.append('g')
+        .attr('transform', `translate(${xOffset},0)`);
+
+      // Vertical divider (before panel, except first)
+      if (di > 0) {
+        dayG.append('line')
+          .attr('x1', -panelGap / 2)
+          .attr('x2', -panelGap / 2)
+          .attr('y1', -10)
+          .attr('y2', chartHeight + 10)
+          .attr('stroke', C.lineFaint)
+          .attr('stroke-width', 1);
+      }
+
+      // Determine which variants to render
+      let variants = [];
+      if (mode === 'both') {
+        // standard first (behind), then long on top
+        const std = data.find(d => d.day === dayNum && d.variant === 'standard');
+        const lng = data.find(d => d.day === dayNum && d.variant === 'long');
+        if (std) variants.push({ route: std, color: C.tealLight, opacity: 0.7 });
+        if (lng) variants.push({ route: lng, color: C.tealDark, opacity: 0.7 });
+      } else {
+        const r = getRoute(dayNum, mode);
+        if (r) {
+          const color = r.variant === 'long' ? C.tealDark : C.tealLight;
+          variants.push({ route: r, color: color, opacity: 1.0 });
+        }
+      }
+
+      // For header/stats, pick the "primary" route
+      const primaryRoute = mode === 'long'
+        ? (data.find(d => d.day === dayNum && d.variant === 'long') || data.find(d => d.day === dayNum))
+        : data.find(d => d.day === dayNum && d.variant === 'standard') || data.find(d => d.day === dayNum);
+
+      // x scale for this panel (based on max distance for this day)
+      const maxDist = getMaxDistForDay(dayNum);
+      const xScale = d3.scaleLinear().domain([0, maxDist]).range([0, pw]);
+
+      // Render each variant's area
+      variants.forEach(v => {
+        const { route, color, opacity } = v;
+        const n = route.elevations.length;
+        const step = route.distance_km / (n - 1);
+
+        const areaGen = d3.area()
+          .x((d, i) => xScale(i * step))
+          .y0(chartHeight)
+          .y1((d) => yScale(d))
+          .curve(d3.curveBasis);
+
+        dayG.append('path')
+          .datum(route.elevations)
+          .attr('d', areaGen)
+          .attr('fill', color)
+          .attr('fill-opacity', opacity)
+          .attr('stroke', 'none');
+
+        // Outline on top
+        const lineGen = d3.line()
+          .x((d, i) => xScale(i * step))
+          .y((d) => yScale(d))
+          .curve(d3.curveBasis);
+
+        dayG.append('path')
+          .datum(route.elevations)
+          .attr('d', lineGen)
+          .attr('fill', 'none')
+          .attr('stroke', color === C.tealDark ? C.tealDark : C.teal)
+          .attr('stroke-width', 1.2)
+          .attr('stroke-opacity', Math.min(opacity + 0.2, 1));
+      });
+
+      // POI markers
+      // Pick POIs for the displayed variant(s)
+      let poiVariant = mode === 'both' ? 'standard' : mode;
+      let poiKey = getPoiKey(dayNum, poiVariant);
+      let poiList = pois[poiKey];
+      if (!poiList) {
+        poiKey = getPoiKey(dayNum, 'standard');
+        poiList = pois[poiKey];
+      }
+      if (!poiList) poiList = [];
+
+      // Use the route whose distance matches the POIs
+      const poiRoute = data.find(d => d.day === dayNum && d.variant === poiVariant)
+        || data.find(d => d.day === dayNum);
+      const poiMaxDist = poiRoute ? poiRoute.distance_km : maxDist;
+
+      // Filter out start/end duplicates and limit density
+      const filteredPois = poiList.filter((p, i) => {
+        if (i === 0 || i === poiList.length - 1) return false; // skip start/end
+        return true;
+      });
+
+      // Limit to 5 POIs per panel with minimum 40px horizontal spacing
+      const maxPois = 5;
+      const minPxSpacing = 40;
+      let candidatePois = filteredPois;
+      // First pass: evenly sample down to maxPois if too many
+      if (candidatePois.length > maxPois) {
+        const step = Math.ceil(candidatePois.length / maxPois);
+        candidatePois = candidatePois.filter((_, i) => i % step === 0);
+      }
+      // Second pass: enforce minimum pixel spacing
+      const displayPois = [];
+      let lastPx = -Infinity;
+      candidatePois.forEach(poi => {
+        const distKm = poi.dist / 1000;
+        if (distKm > maxDist) return;
+        const px = xScale(distKm);
+        if (px - lastPx >= minPxSpacing) {
+          displayPois.push(poi);
+          lastPx = px;
+        }
+      });
+
+      displayPois.forEach(poi => {
+        const distKm = poi.dist / 1000;
+        if (distKm > maxDist) return;
+        const px = xScale(distKm);
+
+        dayG.append('line')
+          .attr('x1', px)
+          .attr('x2', px)
+          .attr('y1', chartHeight)
+          .attr('y2', -poiLabelOffset)
+          .attr('stroke', C.lineFaint)
+          .attr('stroke-width', 0.4)
+          .attr('stroke-opacity', 0.5)
+          .attr('stroke-dasharray', '2,4');
+
+        dayG.append('text')
+          .attr('x', px)
+          .attr('y', -poiLabelOffset - 2)
+          .attr('text-anchor', 'start')
+          .attr('transform', `rotate(-50, ${px}, ${-poiLabelOffset - 2})`)
+          .style('font-size', '8.5px')
+          .style('fill', C.textLight)
+          .style('font-family', 'Helvetica Neue, Helvetica, Arial, sans-serif')
+          .text(truncateName(poi.name));
+      });
+
+      // X-axis tick marks every 10km
+      const tickInterval = 10;
+      const xTicks = d3.range(0, maxDist + 0.01, tickInterval).filter(t => t > 0);
+      xTicks.forEach(t => {
+        const px = xScale(t);
+        dayG.append('line')
+          .attr('x1', px)
+          .attr('x2', px)
+          .attr('y1', chartHeight)
+          .attr('y2', chartHeight + 5)
+          .attr('stroke', C.line)
+          .attr('stroke-width', 0.8);
+
+        dayG.append('text')
+          .attr('x', px)
+          .attr('y', chartHeight + 15)
+          .attr('text-anchor', 'middle')
+          .style('font-size', '9px')
+          .style('fill', C.textLight)
+          .style('font-family', 'Helvetica Neue, Helvetica, Arial, sans-serif')
+          .text(t + 'km');
+      });
+
+      // Day header above panel
+      dayG.append('text')
+        .attr('x', pw / 2)
+        .attr('y', -78)
+        .attr('text-anchor', 'middle')
+        .style('font-size', '14px')
+        .style('font-weight', '600')
+        .style('fill', C.text)
+        .style('font-family', 'Helvetica Neue, Helvetica, Arial, sans-serif')
+        .text('DAY ' + dayNum);
+
+      dayG.append('text')
+        .attr('x', pw / 2)
+        .attr('y', -64)
+        .attr('text-anchor', 'middle')
+        .style('font-size', '11px')
+        .style('fill', C.textLight)
+        .style('font-family', 'Helvetica Neue, Helvetica, Arial, sans-serif')
+        .text(primaryRoute.label);
+
+      dayG.append('text')
+        .attr('x', pw / 2)
+        .attr('y', -52)
+        .attr('text-anchor', 'middle')
+        .style('font-size', '10px')
+        .style('fill', C.textLight)
+        .style('font-family', 'Helvetica Neue, Helvetica, Arial, sans-serif')
+        .text(primaryRoute.date + ', 2026');
+
+      // Stats below panel
+      const statsVariants = mode === 'both'
+        ? variants.map(v => v.route)
+        : [primaryRoute];
+
+      let statsY = chartHeight + 34;
+      statsVariants.forEach(r => {
+        const label = r.variant === 'long' ? 'Long' : 'Std';
+        const statsText = mode === 'both'
+          ? `${label}: ${r.distance_km} km / ${r.elevation_gain}m gain`
+          : `${r.distance_km} km / ${r.elevation_gain}m gain`;
+
+        dayG.append('text')
+          .attr('x', pw / 2)
+          .attr('y', statsY)
+          .attr('text-anchor', 'middle')
+          .style('font-size', '10px')
+          .style('fill', C.textLight)
+          .style('font-family', 'Helvetica Neue, Helvetica, Arial, sans-serif')
+          .text(statsText);
+
+        statsY += 13;
+      });
+
+      xOffset += pw + panelGap;
+    });
+  }
+
+  function truncateName(name) {
+    if (name.length > 15) return name.substring(0, 13) + '\u2026';
+    return name;
+  }
+
+  // --- Initial render ---
+  render('both');
+
+  // --- Dropdown handler ---
+  d3.select('#variant-select').on('change', function() {
+    render(this.value);
+  });
+
+})();
+</script>
+</body>
+</html>

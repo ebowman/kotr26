@@ -1,0 +1,591 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KOTR 2026 - Time-in-Saddle Simulation</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: #e8e6e1;
+            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            color: #2d2d2d;
+            padding: 24px;
+        }
+        h1 {
+            text-align: center;
+            font-size: 28px;
+            font-weight: 300;
+            letter-spacing: 2px;
+            margin-bottom: 4px;
+            color: #2d2d2d;
+        }
+        .subtitle {
+            text-align: center;
+            font-size: 14px;
+            color: #666666;
+            margin-bottom: 24px;
+        }
+        .controls {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 32px;
+            flex-wrap: wrap;
+            margin-bottom: 28px;
+            padding: 16px 24px;
+            background: rgba(255,255,255,0.4);
+            border-radius: 8px;
+            border: 1px solid #b0ada6;
+        }
+        .control-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .control-group label {
+            font-size: 13px;
+            font-weight: 500;
+            color: #2d2d2d;
+            white-space: nowrap;
+        }
+        .control-group select,
+        .control-group input[type="range"] {
+            cursor: pointer;
+        }
+        .control-group select {
+            padding: 4px 8px;
+            border: 1px solid #b0ada6;
+            border-radius: 4px;
+            background: #fff;
+            font-family: inherit;
+            font-size: 13px;
+            color: #2d2d2d;
+        }
+        .control-group input[type="range"] {
+            width: 120px;
+            accent-color: #6a9483;
+        }
+        .control-value {
+            font-size: 13px;
+            font-weight: 600;
+            color: #6a9483;
+            min-width: 42px;
+            text-align: right;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            max-width: 1280px;
+            margin: 0 auto;
+        }
+        .chart-card {
+            background: rgba(255,255,255,0.5);
+            border: 1px solid #b0ada6;
+            border-radius: 8px;
+            padding: 16px;
+        }
+        .chart-title {
+            font-size: 15px;
+            font-weight: 600;
+            text-align: center;
+            margin-bottom: 8px;
+            color: #2d2d2d;
+            letter-spacing: 1px;
+        }
+        .chart-summary {
+            text-align: center;
+            font-size: 12px;
+            color: #666666;
+            margin-top: 8px;
+        }
+        .chart-summary .easy-label { color: #3B82F6; font-weight: 600; }
+        .chart-summary .steady-label { color: #c49b00; font-weight: 600; }
+        .chart-summary .hard-label { color: #F97316; font-weight: 600; }
+        .tooltip-box {
+            position: absolute;
+            pointer-events: none;
+            background: rgba(45,45,45,0.92);
+            color: #f5f3ef;
+            font-size: 12px;
+            line-height: 1.5;
+            padding: 8px 12px;
+            border-radius: 6px;
+            white-space: nowrap;
+            z-index: 10;
+            display: none;
+        }
+        .tooltip-box .tt-dist { font-weight: 600; margin-bottom: 2px; }
+        .tooltip-box .tt-elev { color: #a8a5a0; font-size: 11px; margin-bottom: 4px; }
+        .tooltip-box .tt-easy { color: #7bb8f0; }
+        .tooltip-box .tt-steady { color: #EAB308; }
+        .tooltip-box .tt-hard { color: #F97316; }
+        .legend {
+            display: flex;
+            justify-content: center;
+            gap: 24px;
+            margin-bottom: 20px;
+            font-size: 13px;
+            color: #666666;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .legend-line {
+            width: 28px;
+            height: 0;
+            border-top: 3px solid;
+        }
+        .legend-line.dashed { border-top-style: dashed; }
+        .legend-line.easy { border-color: #3B82F6; }
+        .legend-line.steady { border-color: #EAB308; }
+        .legend-line.hard { border-color: #F97316; }
+        svg text { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; }
+        .axis text { font-size: 11px; fill: #666666; }
+        .axis line, .axis path { stroke: #b0ada6; }
+        .nav-links {
+            text-align: center;
+            margin-top: 32px;
+            font-size: 14px;
+            color: #666666;
+        }
+        .nav-links a {
+            color: #6a9483;
+            text-decoration: none;
+            font-weight: 500;
+        }
+        .nav-links a:hover { text-decoration: underline; }
+        .nav-links .sep { margin: 0 8px; color: #b0ada6; }
+        .donation {
+            text-align: center;
+            margin-top: 16px;
+            margin-bottom: 16px;
+            font-size: 13px;
+        }
+        .donation a {
+            color: #4a7c6b;
+            text-decoration: underline;
+        }
+        .donation a:hover { color: #6a9483; }
+        @media (max-width: 900px) {
+            .grid { grid-template-columns: 1fr; }
+            body { padding: 12px; }
+        }
+    </style>
+</head>
+<body>
+
+<h1>KOTR 2026</h1>
+<p class="subtitle">Time-in-Saddle Simulation &mdash; Avignon, France</p>
+
+<div class="controls">
+    <div class="control-group">
+        <label for="variant-select">Route:</label>
+        <select id="variant-select">
+            <option value="standard">Standard</option>
+            <option value="long">Long</option>
+        </select>
+    </div>
+    <div class="control-group">
+        <label for="weight-slider">Weight:</label>
+        <input type="range" id="weight-slider" min="50" max="120" value="75" step="1">
+        <span class="control-value" id="weight-value">75 kg</span>
+    </div>
+    <div class="control-group">
+        <label for="ftp-slider">FTP:</label>
+        <input type="range" id="ftp-slider" min="100" max="400" value="200" step="5">
+        <span class="control-value" id="ftp-value">200 W</span>
+    </div>
+</div>
+
+<div class="legend">
+    <div class="legend-item"><div class="legend-line dashed easy"></div> Easy (60% FTP)</div>
+    <div class="legend-item"><div class="legend-line steady"></div> Steady (75% FTP)</div>
+    <div class="legend-item"><div class="legend-line dashed hard"></div> Hard (90% FTP)</div>
+</div>
+
+<div class="grid" id="chart-grid"></div>
+
+<div class="nav-links">
+    <a href="../index.html">Home</a>
+    <span class="sep">|</span>
+    <a href="../radial/index.html">Radial</a>
+    <span class="sep">|</span>
+    <a href="../skyline/index.html">Skyline</a>
+    <span class="sep">|</span>
+    <a href="../compare/index.html">Compare</a>
+</div>
+
+<div class="donation">
+    Supporting <a href="https://www.justgiving.com/page/eric-bowman-kotr26">M&eacute;decins Sans Fronti&egrave;res</a>
+</div>
+
+<script src="data-inline.js"></script>
+<script>
+// ── Physics model ──────────────────────────────────────────────────
+const PHYSICS = {
+    g: 9.81, rho: 1.2, Crr: 0.005, CdA: 0.35, efficiency: 0.95, bikeWeight: 9
+};
+
+function calcSpeedForPower(grade, power, riderWeight) {
+    const totalMass = riderWeight + PHYSICS.bikeWeight;
+    const gradeAngle = Math.atan(grade);
+    const effectivePower = power * PHYSICS.efficiency;
+
+    // On descents, compute terminal velocity as a floor speed.
+    // Rider always goes at least as fast as gravity would carry them.
+    let minSpeed = 0.5;
+    if (grade < -0.005) {
+        const grav = totalMass * PHYSICS.g * Math.abs(Math.sin(gradeAngle));
+        const roll = PHYSICS.Crr * totalMass * PHYSICS.g * Math.cos(gradeAngle);
+        if (grav > roll) {
+            minSpeed = Math.min(Math.pow((grav - roll) / (0.5 * PHYSICS.CdA * PHYSICS.rho), 1/3), 25);
+        }
+    }
+
+    // Newton-Raphson to find speed where power output matches rider power
+    let speed = Math.max(5, minSpeed);
+    for (let i = 0; i < 50; i++) {
+        const Pg = totalMass * PHYSICS.g * Math.sin(gradeAngle) * speed;
+        const Pr = PHYSICS.Crr * totalMass * PHYSICS.g * Math.cos(gradeAngle) * speed;
+        const Pa = 0.5 * PHYSICS.CdA * PHYSICS.rho * Math.pow(speed, 3);
+        const f = Pg + Pr + Pa - effectivePower;
+        const df = totalMass * PHYSICS.g * Math.sin(gradeAngle)
+                 + PHYSICS.Crr * totalMass * PHYSICS.g * Math.cos(gradeAngle)
+                 + 1.5 * PHYSICS.CdA * PHYSICS.rho * Math.pow(speed, 2);
+        if (Math.abs(df) < 1e-10) break;
+        const ns = speed - f / df;
+        if (Math.abs(ns - speed) < 0.001) return Math.max(minSpeed, ns);
+        speed = Math.max(minSpeed, ns);
+    }
+    return Math.max(minSpeed, speed);
+}
+
+// ── Simulation ─────────────────────────────────────────────────────
+function simulate(route, ftpFraction, ftp, weight) {
+    const elevs = route.elevations;
+    const numSegments = elevs.length - 1;
+    const segLen = (route.distance_km * 1000) / numSegments;
+    const power = ftp * ftpFraction;
+
+    const points = [{ dist: 0, time: 0 }];
+    let cumTime = 0;
+    let cumDist = 0;
+
+    for (let i = 0; i < numSegments; i++) {
+        const grade = (elevs[i + 1] - elevs[i]) / segLen;
+        const speed = calcSpeedForPower(grade, power, weight);
+        const dt = segLen / speed;
+        cumTime += dt;
+        cumDist += segLen;
+        points.push({ dist: cumDist / 1000, time: cumTime / 3600 });
+    }
+    return points;
+}
+
+function formatTime(hours) {
+    const h = Math.floor(hours);
+    const m = Math.round((hours - h) * 60);
+    return h + 'h ' + (m < 10 ? '0' : '') + m + 'm';
+}
+
+// ── Chart dimensions ───────────────────────────────────────────────
+const margin = { top: 30, right: 20, bottom: 40, left: 50 };
+const width = 600;
+const height = 350;
+const innerW = width - margin.left - margin.right;
+const innerH = height - margin.top - margin.bottom;
+
+const efforts = [
+    { key: 'easy',   frac: 0.60, color: '#3B82F6', dash: '6,4', strokeW: 2 },
+    { key: 'steady', frac: 0.75, color: '#EAB308', dash: null,  strokeW: 2.5 },
+    { key: 'hard',   frac: 0.90, color: '#F97316', dash: '6,4', strokeW: 2 },
+];
+
+// ── Build / update charts ──────────────────────────────────────────
+function getRoutesForDay(day, variant) {
+    if (day === 1) return ROUTE_DATA.filter(r => r.day === 1);
+    return ROUTE_DATA.filter(r => r.day === day && r.variant === variant);
+}
+
+function getPoiKey(day, variant) {
+    if (day === 1) return 'day1_standard';
+    return 'day' + day + '_' + variant;
+}
+
+function buildAll() {
+    const variant = document.getElementById('variant-select').value;
+    const weight = +document.getElementById('weight-slider').value;
+    const ftp = +document.getElementById('ftp-slider').value;
+
+    const grid = document.getElementById('chart-grid');
+    grid.innerHTML = '';
+
+    for (let day = 1; day <= 4; day++) {
+        const routes = getRoutesForDay(day, variant);
+        if (routes.length === 0) continue;
+        const route = routes[0];
+        const poiKey = getPoiKey(day, variant);
+        const pois = (POI_DATA[poiKey] || []).filter(p => p.dist > 0 && p.dist < route.distance_km * 1000 * 0.98);
+
+        // Simulate
+        const curves = efforts.map(e => ({
+            ...e,
+            data: simulate(route, e.frac, ftp, weight)
+        }));
+
+        // Card
+        const card = document.createElement('div');
+        card.className = 'chart-card';
+        grid.appendChild(card);
+
+        // Title
+        const title = document.createElement('div');
+        title.className = 'chart-title';
+        title.textContent = 'DAY ' + day + ' \u2014 ' + route.label;
+        card.appendChild(title);
+
+        // SVG
+        const svg = d3.select(card).append('svg')
+            .attr('width', width)
+            .attr('height', height)
+            .attr('viewBox', '0 0 ' + width + ' ' + height)
+            .style('width', '100%')
+            .style('height', 'auto');
+
+        const g = svg.append('g')
+            .attr('transform', 'translate(' + margin.left + ',' + margin.top + ')');
+
+        // Scales
+        const xMax = route.distance_km;
+        const yMax = d3.max(curves, c => c.data[c.data.length - 1].time) * 1.08;
+
+        const x = d3.scaleLinear().domain([0, xMax]).range([0, innerW]);
+        const y = d3.scaleLinear().domain([0, yMax]).range([innerH, 0]);
+
+        // Elevation profile area (bottom 20%)
+        const elevH = innerH * 0.2;
+        const elevMin = d3.min(route.elevations);
+        const elevMax = d3.max(route.elevations);
+        const elevY = d3.scaleLinear()
+            .domain([elevMin, elevMax])
+            .range([innerH, innerH - elevH]);
+
+        const elevArea = d3.area()
+            .x((d, i) => x(i * route.distance_km / (route.elevations.length - 1)))
+            .y0(innerH)
+            .y1((d) => elevY(d))
+            .curve(d3.curveMonotoneX);
+
+        g.append('path')
+            .datum(route.elevations)
+            .attr('d', elevArea)
+            .attr('fill', '#d4d1cc')
+            .attr('opacity', 0.5);
+
+        // Axes
+        g.append('g')
+            .attr('class', 'axis')
+            .attr('transform', 'translate(0,' + innerH + ')')
+            .call(d3.axisBottom(x).ticks(6).tickFormat(d => d + ' km'));
+
+        // Y-axis: major ticks every hour, minor every 30min
+        const yMaxCeil = Math.ceil(yMax);
+        const yTicksAll = [];
+        for (let t = 0; t <= yMaxCeil; t += 0.5) { if (t <= yMax * 1.02) yTicksAll.push(t); }
+        g.append('g')
+            .attr('class', 'axis')
+            .call(d3.axisLeft(y)
+                .tickValues(yTicksAll)
+                .tickFormat(d => {
+                    const h = Math.floor(d);
+                    const m = Math.round((d - h) * 60);
+                    return h + ':' + (m < 10 ? '0' : '') + m + 'h';
+                }));
+
+        // Grid lines (on hour marks only)
+        const yTicksMajor = yTicksAll.filter(t => t === Math.floor(t));
+        g.append('g')
+            .attr('class', 'grid')
+            .selectAll('line')
+            .data(yTicksMajor)
+            .join('line')
+            .attr('x1', 0).attr('x2', innerW)
+            .attr('y1', d => y(d)).attr('y2', d => y(d))
+            .attr('stroke', '#b0ada6').attr('stroke-opacity', 0.3)
+            .attr('stroke-dasharray', '2,3');
+
+        // POI markers — thin to avoid overlap
+        // Skip first and last POIs (long start/finish names at edges)
+        const innerPois = pois.filter((p, i) => i > 0 && i < pois.length - 1);
+        // Select spaced subset: at most 6 labels, minimum 50px apart
+        const maxLabels = 6;
+        const minPx = 50;
+        const selectedPois = [];
+        let lastPx = -Infinity;
+        for (const poi of innerPois) {
+            const px = x(poi.dist / 1000);
+            if (px < 10 || px > innerW - 10) continue;
+            if (px - lastPx < minPx) continue;
+            selectedPois.push(poi);
+            lastPx = px;
+            if (selectedPois.length >= maxLabels) break;
+        }
+
+        selectedPois.forEach(poi => {
+            const px = x(poi.dist / 1000);
+            g.append('line')
+                .attr('x1', px).attr('x2', px)
+                .attr('y1', 0).attr('y2', innerH)
+                .attr('stroke', '#d0cdc7')
+                .attr('stroke-width', 0.5)
+                .attr('stroke-dasharray', '2,3')
+                .attr('opacity', 0.6);
+
+            // Truncate long names to 16 chars
+            let name = poi.name;
+            if (name.length > 16) name = name.substring(0, 14) + '\u2026';
+
+            g.append('text')
+                .attr('x', px)
+                .attr('y', -4)
+                .attr('text-anchor', 'start')
+                .attr('transform', 'rotate(-45,' + px + ',-4)')
+                .attr('font-size', '9px')
+                .attr('fill', '#999')
+                .text(name);
+        });
+
+        // Curves
+        const line = d3.line()
+            .x(d => x(d.dist))
+            .y(d => y(d.time))
+            .curve(d3.curveMonotoneX);
+
+        curves.forEach(c => {
+            g.append('path')
+                .datum(c.data)
+                .attr('d', line)
+                .attr('fill', 'none')
+                .attr('stroke', c.color)
+                .attr('stroke-width', c.strokeW)
+                .attr('stroke-dasharray', c.dash);
+        });
+
+        // Hover crosshair + tooltip
+        const crosshairLine = g.append('line')
+            .attr('y1', 0).attr('y2', innerH)
+            .attr('stroke', '#666').attr('stroke-width', 0.8)
+            .attr('stroke-dasharray', '3,3')
+            .style('display', 'none');
+
+        const crosshairDots = curves.map(c =>
+            g.append('circle')
+                .attr('r', 4)
+                .attr('fill', c.color)
+                .attr('stroke', '#fff').attr('stroke-width', 1.5)
+                .style('display', 'none')
+        );
+
+        const tooltip = document.createElement('div');
+        tooltip.className = 'tooltip-box';
+        card.style.position = 'relative';
+        card.appendChild(tooltip);
+
+        // Invisible overlay rect to capture mouse events
+        const overlay = g.append('rect')
+            .attr('width', innerW).attr('height', innerH)
+            .attr('fill', 'none')
+            .attr('pointer-events', 'all')
+            .style('cursor', 'crosshair');
+
+        const bisect = d3.bisector(d => d.dist).left;
+
+        overlay.on('mousemove', function(event) {
+            const [mx] = d3.pointer(event, this);
+            const distKm = x.invert(mx);
+            if (distKm < 0 || distKm > xMax) return;
+
+            crosshairLine.attr('x1', mx).attr('x2', mx).style('display', null);
+
+            // Find elevation at this distance
+            const elevIdx = Math.min(
+                Math.round(distKm / xMax * (route.elevations.length - 1)),
+                route.elevations.length - 1
+            );
+            const elev = route.elevations[elevIdx];
+
+            let html = '<div class="tt-dist">' + distKm.toFixed(1) + ' km</div>';
+            html += '<div class="tt-elev">' + Math.round(elev) + 'm elevation</div>';
+
+            const labels = ['tt-easy', 'tt-steady', 'tt-hard'];
+            const names = ['Easy', 'Steady', 'Hard'];
+            curves.forEach((c, ci) => {
+                const idx = bisect(c.data, distKm);
+                const d = c.data[Math.min(idx, c.data.length - 1)];
+                crosshairDots[ci]
+                    .attr('cx', x(d.dist)).attr('cy', y(d.time))
+                    .style('display', null);
+                html += '<div class="' + labels[ci] + '">' + names[ci] + ': ' + formatTime(d.time) + '</div>';
+            });
+
+            tooltip.innerHTML = html;
+            tooltip.style.display = 'block';
+
+            // Position tooltip relative to card
+            const svgRect = svg.node().getBoundingClientRect();
+            const cardRect = card.getBoundingClientRect();
+            const tipX = svgRect.left - cardRect.left + margin.left + mx + 12;
+            const tipY = svgRect.top - cardRect.top + margin.top + 10;
+            // Flip to left if near right edge
+            const tipW = tooltip.offsetWidth || 120;
+            if (tipX + tipW > card.offsetWidth - 10) {
+                tooltip.style.left = (tipX - tipW - 24) + 'px';
+            } else {
+                tooltip.style.left = tipX + 'px';
+            }
+            tooltip.style.top = tipY + 'px';
+        });
+
+        overlay.on('mouseleave', function() {
+            crosshairLine.style('display', 'none');
+            crosshairDots.forEach(d => d.style('display', 'none'));
+            tooltip.style.display = 'none';
+        });
+
+        // Summary
+        const summary = document.createElement('div');
+        summary.className = 'chart-summary';
+        const easyTime = curves[0].data[curves[0].data.length - 1].time;
+        const steadyTime = curves[1].data[curves[1].data.length - 1].time;
+        const hardTime = curves[2].data[curves[2].data.length - 1].time;
+        summary.innerHTML =
+            '<span class="easy-label">Easy: ' + formatTime(easyTime) + '</span>' +
+            ' &nbsp;|&nbsp; ' +
+            '<span class="steady-label">Steady: ' + formatTime(steadyTime) + '</span>' +
+            ' &nbsp;|&nbsp; ' +
+            '<span class="hard-label">Hard: ' + formatTime(hardTime) + '</span>';
+        card.appendChild(summary);
+    }
+}
+
+// ── Event listeners ────────────────────────────────────────────────
+document.getElementById('weight-slider').addEventListener('input', function() {
+    document.getElementById('weight-value').textContent = this.value + ' kg';
+    buildAll();
+});
+document.getElementById('ftp-slider').addEventListener('input', function() {
+    document.getElementById('ftp-value').textContent = this.value + ' W';
+    buildAll();
+});
+document.getElementById('variant-select').addEventListener('change', buildAll);
+
+// Initial render
+buildAll();
+</script>
+</body>
+</html>
