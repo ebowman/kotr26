@@ -391,13 +391,19 @@
     gLabels = svg.append('g').attr('transform', `translate(${cx},${cy}) rotate(${rotation})`);
     renderLabels(gLabels, currentLayouts, rotation);
 
-    // Subtitle (fixed, outside the wheel)
-    svg.append('text')
+    // Subtitle (fixed, outside the wheel) — links to donation page
+    const link = svg.append('a')
+      .attr('href', 'https://www.justgiving.com/page/eric-bowman-kotr26')
+      .attr('target', '_blank');
+    link.append('text')
       .attr('x', cx).attr('y', H - 10)
       .attr('text-anchor', 'middle')
       .attr('font-size', '9px')
-      .attr('fill', COLORS.textLight)
+      .attr('fill', '#4a7c6b')
       .attr('letter-spacing', '2px')
+      .attr('text-decoration', 'underline')
+      .style('cursor', 'pointer')
+      .style('pointer-events', 'auto')
       .text('SUPPORTING MÉDECINS SANS FRONTIÈRES');
   }
 
