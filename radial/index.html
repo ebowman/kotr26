@@ -114,35 +114,36 @@
     return ((deg % 360) + 360) % 360;
   }
 
-  // Flip with hysteresis: once flipped, stay flipped until well past the boundary.
-  // This prevents jitter when text is near 90° or 270°.
+  // Check if a text rotation (in degrees) would render upside-down on screen.
+  // Text is upside-down when its effective screen rotation is in (90, 270).
+  // textRotDeg: the local SVG rotation of the text element
+  // groupRotDeg: the rotation applied to the parent <g> group
   const flipState = new Map();
-  const HYSTERESIS = 12; // degrees of dead zone
+  const HYSTERESIS = 10;
 
-  function shouldFlip(angleRad, rotationDeg, key) {
-    const worldDeg = normAngle(angleRad * 180 / Math.PI + rotationDeg);
+  function isUpsideDown(textRotDeg, groupRotDeg, key) {
+    const effective = normAngle(textRotDeg + groupRotDeg);
     const prev = key != null ? flipState.get(key) : undefined;
 
     let flipped;
     if (prev === true) {
-      // Currently flipped — only unflip when clearly in top half
-      flipped = worldDeg > (90 - HYSTERESIS) && worldDeg < (270 + HYSTERESIS);
+      flipped = effective > (90 - HYSTERESIS) && effective < (270 + HYSTERESIS);
     } else if (prev === false) {
-      // Currently not flipped — only flip when clearly in bottom half
-      flipped = worldDeg > (90 + HYSTERESIS) && worldDeg < (270 - HYSTERESIS);
+      flipped = effective > (90 + HYSTERESIS) && effective < (270 - HYSTERESIS);
     } else {
-      // No prior state — use simple threshold
-      flipped = worldDeg > 90 && worldDeg < 270;
+      flipped = effective > 90 && effective < 270;
     }
 
     if (key != null) flipState.set(key, flipped);
     return flipped;
   }
 
-  // Place a radial text label, always right-side-up accounting for group rotation
+  // Place a radial text label (perpendicular to radius, like "DAY 1")
   function placeRadialText(parent, angle, radius, text, opts, rotDeg) {
-    const flip = shouldFlip(angle, rotDeg, `r_${radius}_${text}`);
-    const baseDeg = angle * 180 / Math.PI + 90;
+    const angleDeg = angle * 180 / Math.PI;
+    const baseDeg = angleDeg + 90; // perpendicular to radius
+    const key = `r_${radius}_${text}`;
+    const flip = isUpsideDown(baseDeg, rotDeg, key);
     const rot = flip ? baseDeg + 180 : baseDeg;
     const x = radius * Math.cos(angle);
     const y = radius * Math.sin(angle);
@@ -161,10 +162,12 @@
     return el;
   }
 
-  // Place a tangential text label (reads along the arc)
+  // Place a tangential text label (along the arc, like town names)
   function placeTangentText(parent, angle, radius, text, opts, rotDeg) {
-    const flip = shouldFlip(angle, rotDeg, `t_${radius}_${text}`);
-    const baseDeg = angle * 180 / Math.PI;
+    const angleDeg = angle * 180 / Math.PI;
+    const baseDeg = angleDeg; // tangent to arc
+    const key = `t_${radius}_${text}`;
+    const flip = isUpsideDown(baseDeg, rotDeg, key);
     const rot = flip ? baseDeg + 180 : baseDeg;
     const x = radius * Math.cos(angle);
     const y = radius * Math.sin(angle);
