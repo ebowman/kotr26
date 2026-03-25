@@ -45,9 +45,16 @@
   #viz {
     width: 1200px;
     height: 1200px;
+    cursor: grab;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  #viz:active {
+    cursor: grabbing;
   }
   svg text {
     font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    pointer-events: none;
   }
 </style>
 </head>
@@ -68,7 +75,6 @@
   const W = 1200, H = 1200;
   const cx = W / 2, cy = H / 2;
 
-  // Radii
   const R_INNER = 100;
   const R_ELEV_INNER = 105;
   const R_ELEV_OUTER = 240;
@@ -97,87 +103,127 @@
   const dayColors = [COLORS.tealLight, COLORS.teal, COLORS.tealDark, COLORS.teal];
 
   function filterRoutes(variant) {
-    // One route per day. Day 1 only has standard; for days 2-4 pick the selected variant.
     return [1, 2, 3, 4].map(day => {
       const candidates = allData.filter(d => d.day === day);
       return candidates.find(d => d.variant === variant) || candidates[0];
     });
   }
 
-  function render(variant) {
-    d3.select('#viz').selectAll('*').remove();
+  // Normalize angle to [0, 360)
+  function normAngle(deg) {
+    return ((deg % 360) + 360) % 360;
+  }
 
+  // Flip with hysteresis: once flipped, stay flipped until well past the boundary.
+  // This prevents jitter when text is near 90° or 270°.
+  const flipState = new Map();
+  const HYSTERESIS = 12; // degrees of dead zone
+
+  function shouldFlip(angleRad, rotationDeg, key) {
+    const worldDeg = normAngle(angleRad * 180 / Math.PI + rotationDeg);
+    const prev = key != null ? flipState.get(key) : undefined;
+
+    let flipped;
+    if (prev === true) {
+      // Currently flipped — only unflip when clearly in top half
+      flipped = worldDeg > (90 - HYSTERESIS) && worldDeg < (270 + HYSTERESIS);
+    } else if (prev === false) {
+      // Currently not flipped — only flip when clearly in bottom half
+      flipped = worldDeg > (90 + HYSTERESIS) && worldDeg < (270 - HYSTERESIS);
+    } else {
+      // No prior state — use simple threshold
+      flipped = worldDeg > 90 && worldDeg < 270;
+    }
+
+    if (key != null) flipState.set(key, flipped);
+    return flipped;
+  }
+
+  // Place a radial text label, always right-side-up accounting for group rotation
+  function placeRadialText(parent, angle, radius, text, opts, rotDeg) {
+    const flip = shouldFlip(angle, rotDeg, `r_${radius}_${text}`);
+    const baseDeg = angle * 180 / Math.PI + 90;
+    const rot = flip ? baseDeg + 180 : baseDeg;
+    const x = radius * Math.cos(angle);
+    const y = radius * Math.sin(angle);
+
+    const el = parent.append('text')
+      .attr('x', x).attr('y', y)
+      .attr('text-anchor', opts.anchor || 'middle')
+      .attr('dominant-baseline', 'middle')
+      .attr('transform', `rotate(${rot}, ${x}, ${y})`)
+      .attr('font-size', opts.fontSize || '10px')
+      .attr('font-weight', opts.fontWeight || '400')
+      .attr('fill', opts.fill || COLORS.text)
+      .text(text);
+
+    if (opts.letterSpacing) el.attr('letter-spacing', opts.letterSpacing);
+    return el;
+  }
+
+  // Place a tangential text label (reads along the arc)
+  function placeTangentText(parent, angle, radius, text, opts, rotDeg) {
+    const flip = shouldFlip(angle, rotDeg, `t_${radius}_${text}`);
+    const baseDeg = angle * 180 / Math.PI;
+    const rot = flip ? baseDeg + 180 : baseDeg;
+    const x = radius * Math.cos(angle);
+    const y = radius * Math.sin(angle);
+
+    const el = parent.append('text')
+      .attr('x', x).attr('y', y)
+      .attr('text-anchor', flip ? 'end' : 'start')
+      .attr('dominant-baseline', 'middle')
+      .attr('transform', `rotate(${rot}, ${x}, ${y})`)
+      .attr('font-size', opts.fontSize || '7px')
+      .attr('font-weight', opts.fontWeight || '400')
+      .attr('fill', opts.fill || COLORS.textLight)
+      .text(text);
+
+    return el;
+  }
+
+  let currentVariant = 'standard';
+  let currentLayouts = null;
+
+  function buildLayouts(variant) {
     const routes = filterRoutes(variant);
-
-    const svg = d3.select('#viz')
-      .append('svg')
-      .attr('width', W)
-      .attr('height', H)
-      .attr('viewBox', `0 0 ${W} ${H}`);
-
-    svg.append('rect').attr('width', W).attr('height', H).attr('fill', '#e8e6e1');
-    const g = svg.append('g').attr('transform', `translate(${cx},${cy})`);
-
-    // Slice proportional to km per day
     const gapAngle = 0.04;
     const totalKm = d3.sum(routes, d => d.distance_km);
     const availableAngle = 2 * Math.PI - 4 * gapAngle;
     let curAngle = -Math.PI / 2;
-    const dayLayouts = routes.map((route, i) => {
+    return routes.map((route, i) => {
       const dayAngle = (route.distance_km / totalKm) * availableAngle;
       const startAngle = curAngle;
       curAngle += dayAngle + gapAngle;
       return {
-        route,
-        day: i + 1,
-        startAngle,
-        endAngle: startAngle + (route.distance_km / totalKm) * availableAngle,
-        midAngle: startAngle + (route.distance_km / totalKm) * availableAngle / 2,
+        route, day: i + 1, startAngle,
+        endAngle: startAngle + dayAngle,
+        midAngle: startAngle + dayAngle / 2,
         color: dayColors[i],
       };
     });
+  }
+
+  function renderShapes(g, layouts) {
+    const maxElev = d3.max(layouts, dl => d3.max(dl.route.elevations));
 
     // Concentric reference circles
     [R_INNER, R_ELEV_OUTER, R_CP_INNER, R_CP_OUTER, R_OUTER].forEach(r => {
-      g.append('circle')
-        .attr('cx', 0).attr('cy', 0).attr('r', r)
-        .attr('fill', 'none')
-        .attr('stroke', COLORS.lineFaint)
+      g.append('circle').attr('cx', 0).attr('cy', 0).attr('r', r)
+        .attr('fill', 'none').attr('stroke', COLORS.lineFaint)
         .attr('stroke-width', r === R_OUTER ? 1.5 : 0.5);
     });
 
-    const maxElev = d3.max(routes, d => d3.max(d.elevations));
-
-    for (const dl of dayLayouts) {
-      const { route, startAngle, endAngle, midAngle, color } = dl;
+    for (const dl of layouts) {
+      const { route, startAngle, endAngle, color } = dl;
 
       // Day separator lines
       for (const angle of [startAngle, endAngle]) {
         g.append('line')
-          .attr('x1', R_INNER * Math.cos(angle))
-          .attr('y1', R_INNER * Math.sin(angle))
-          .attr('x2', R_OUTER * Math.cos(angle))
-          .attr('y2', R_OUTER * Math.sin(angle))
-          .attr('stroke', COLORS.lineFaint)
-          .attr('stroke-width', 0.75);
+          .attr('x1', R_INNER * Math.cos(angle)).attr('y1', R_INNER * Math.sin(angle))
+          .attr('x2', R_OUTER * Math.cos(angle)).attr('y2', R_OUTER * Math.sin(angle))
+          .attr('stroke', COLORS.lineFaint).attr('stroke-width', 0.75);
       }
-
-      // Day label
-      const labelR = R_DAY_LABEL;
-      const rotation = (midAngle * 180 / Math.PI) + 90;
-      const flip = midAngle > Math.PI / 2 && midAngle < 3 * Math.PI / 2;
-
-      g.append('text')
-        .attr('x', labelR * Math.cos(midAngle))
-        .attr('y', labelR * Math.sin(midAngle))
-        .attr('text-anchor', 'middle')
-        .attr('dominant-baseline', 'middle')
-        .attr('transform', `rotate(${flip ? rotation + 180 : rotation}, ${labelR * Math.cos(midAngle)}, ${labelR * Math.sin(midAngle)})`)
-        .attr('font-size', '22px')
-        .attr('font-weight', '700')
-        .attr('letter-spacing', '3px')
-        .attr('fill', COLORS.text)
-        .text(`DAY ${dl.day}`);
 
       // Elevation profile
       const elevs = route.elevations;
@@ -196,12 +242,9 @@
         const angle = startAngle + t * (endAngle - startAngle);
         innerPath.push([R_ELEV_INNER * Math.cos(angle), R_ELEV_INNER * Math.sin(angle)]);
       }
-      const line = d3.line().x(d => d[0]).y(d => d[1]).curve(d3.curveLinearClosed);
       g.append('path')
-        .attr('d', line([...pathData, ...innerPath]))
-        .attr('fill', COLORS.black)
-        .attr('fill-opacity', 0.85)
-        .attr('stroke', 'none');
+        .attr('d', d3.line().x(d => d[0]).y(d => d[1]).curve(d3.curveLinearClosed)([...pathData, ...innerPath]))
+        .attr('fill', COLORS.black).attr('fill-opacity', 0.85).attr('stroke', 'none');
 
       // Tick marks (every 5km)
       const totalDist = route.distance_km;
@@ -212,172 +255,140 @@
         const r1 = R_ELEV_OUTER + 2;
         const r2 = R_ELEV_OUTER + (t % 2 === 0 ? 8 : 5);
         g.append('line')
-          .attr('x1', r1 * Math.cos(angle))
-          .attr('y1', r1 * Math.sin(angle))
-          .attr('x2', r2 * Math.cos(angle))
-          .attr('y2', r2 * Math.sin(angle))
-          .attr('stroke', COLORS.textLight)
-          .attr('stroke-width', 0.5);
+          .attr('x1', r1 * Math.cos(angle)).attr('y1', r1 * Math.sin(angle))
+          .attr('x2', r2 * Math.cos(angle)).attr('y2', r2 * Math.sin(angle))
+          .attr('stroke', COLORS.textLight).attr('stroke-width', 0.5);
       }
 
-      // Course point region bands
+      // Town/POI region bands from Mapbox data
       const totalDistM = route.distance_km * 1000;
-      const keyPts = route.course_points.filter(cp => {
-        const skip = ['left', 'right', 'straight', 'slight_left', 'slight_right', 'sharp_left', 'sharp_right'];
-        return !skip.includes(cp.type) && cp.name.length > 5;
-      });
-
-      const segments = [];
-      for (let i = 0; i < keyPts.length; i++) {
-        const start = keyPts[i].dist;
-        const end = i < keyPts.length - 1 ? keyPts[i + 1].dist : totalDistM;
-        if (end - start > totalDistM * 0.02) {
-          segments.push({ name: keyPts[i].name, startFrac: start / totalDistM, endFrac: end / totalDistM });
-        }
-      }
-
-      segments.forEach((seg, si) => {
-        if (si % 3 !== 0) return;
-        const a1 = startAngle + seg.startFrac * (endAngle - startAngle);
-        const a2 = startAngle + seg.endFrac * (endAngle - startAngle);
+      const poiKey = `day${dl.day}_${route.variant}`;
+      const pois = (typeof POI_DATA !== 'undefined' && POI_DATA[poiKey]) || [];
+      pois.forEach((poi, pi) => {
+        if (pi % 2 !== 0) return; // alternate bands
+        const nextDist = pi < pois.length - 1 ? pois[pi + 1].dist : totalDistM;
+        const a1 = startAngle + (poi.dist / totalDistM) * (endAngle - startAngle);
+        const a2 = startAngle + (nextDist / totalDistM) * (endAngle - startAngle);
         g.append('path')
           .attr('d', d3.arc().innerRadius(R_CP_INNER).outerRadius(R_CP_OUTER)
             .startAngle(a1 + Math.PI / 2).endAngle(a2 + Math.PI / 2))
-          .attr('fill', color)
-          .attr('fill-opacity', 0.4)
-          .attr('stroke', 'none');
+          .attr('fill', color).attr('fill-opacity', 0.35).attr('stroke', 'none');
       });
 
-      // Radial grid lines in course point area
+      // Radial grid lines
       for (let i = 0; i <= 20; i++) {
-        const frac = i / 20;
-        const angle = startAngle + frac * (endAngle - startAngle);
+        const angle = startAngle + (i / 20) * (endAngle - startAngle);
         g.append('line')
-          .attr('x1', R_CP_INNER * Math.cos(angle))
-          .attr('y1', R_CP_INNER * Math.sin(angle))
-          .attr('x2', R_CP_OUTER * Math.cos(angle))
-          .attr('y2', R_CP_OUTER * Math.sin(angle))
-          .attr('stroke', COLORS.lineFaint)
-          .attr('stroke-width', 0.3);
+          .attr('x1', R_CP_INNER * Math.cos(angle)).attr('y1', R_CP_INNER * Math.sin(angle))
+          .attr('x2', R_CP_OUTER * Math.cos(angle)).attr('y2', R_CP_OUTER * Math.sin(angle))
+          .attr('stroke', COLORS.lineFaint).attr('stroke-width', 0.3);
       }
 
-      // Concentric rings in course point area
+      // Concentric rings
       for (let r = R_CP_INNER; r <= R_CP_OUTER; r += 30) {
         g.append('path')
           .attr('d', d3.arc().innerRadius(r).outerRadius(r + 0.5)
             .startAngle(startAngle + Math.PI / 2).endAngle(endAngle + Math.PI / 2))
-          .attr('fill', COLORS.lineFaint)
-          .attr('stroke', 'none');
+          .attr('fill', COLORS.lineFaint).attr('stroke', 'none');
       }
-
-      // Course point labels
-      const labelCandidates = [];
-      const seen = new Set();
-      for (const cp of route.course_points) {
-        const shortName = cp.name.substring(0, 10);
-        if (!seen.has(shortName) && cp.name.length > 5) {
-          seen.add(shortName);
-          labelCandidates.push(cp);
-        }
-      }
-      const maxLabels = 10;
-      const labelStep = Math.max(1, Math.floor(labelCandidates.length / maxLabels));
-      const selectedLabels = labelCandidates.filter((_, i) => i % labelStep === 0).slice(0, maxLabels);
-
-      selectedLabels.forEach(cp => {
-        const frac = cp.dist / totalDistM;
-        const angle = startAngle + frac * (endAngle - startAngle);
-        const cpLabelR = R_CP_INNER + 30;
-        const rot = (angle * 180 / Math.PI);
-        const cpFlip = angle > 0 && angle < Math.PI;
-        let name = cp.name;
-        if (name.length > 14) name = name.substring(0, 14);
-
-        g.append('text')
-          .attr('x', cpLabelR * Math.cos(angle))
-          .attr('y', cpLabelR * Math.sin(angle))
-          .attr('text-anchor', cpFlip ? 'end' : 'start')
-          .attr('dominant-baseline', 'middle')
-          .attr('transform', `rotate(${cpFlip ? rot + 180 : rot}, ${cpLabelR * Math.cos(angle)}, ${cpLabelR * Math.sin(angle)})`)
-          .attr('font-size', '7px')
-          .attr('fill', COLORS.textLight)
-          .attr('font-weight', '400')
-          .text(name);
-      });
-
-      // Route label
-      const regionR = R_REGION;
-      const regionRot = (midAngle * 180 / Math.PI) + 90;
-      g.append('text')
-        .attr('x', regionR * Math.cos(midAngle))
-        .attr('y', regionR * Math.sin(midAngle))
-        .attr('text-anchor', 'middle')
-        .attr('dominant-baseline', 'middle')
-        .attr('transform', `rotate(${flip ? regionRot + 180 : regionRot}, ${regionR * Math.cos(midAngle)}, ${regionR * Math.sin(midAngle)})`)
-        .attr('font-size', '11px')
-        .attr('font-weight', '600')
-        .attr('letter-spacing', '1.5px')
-        .attr('fill', COLORS.text)
-        .text(route.label.toUpperCase());
-
-      // Stats
-      const statsR = R_STATS;
-      const statsRot = (midAngle * 180 / Math.PI) + 90;
-      const statsText = `${route.distance_km} km · ${Math.round(route.elevation_gain)}m climbing`;
-      g.append('text')
-        .attr('x', statsR * Math.cos(midAngle))
-        .attr('y', statsR * Math.sin(midAngle))
-        .attr('text-anchor', 'middle')
-        .attr('dominant-baseline', 'middle')
-        .attr('transform', `rotate(${flip ? statsRot + 180 : statsRot}, ${statsR * Math.cos(midAngle)}, ${statsR * Math.sin(midAngle)})`)
-        .attr('font-size', '8px')
-        .attr('font-weight', '400')
-        .attr('fill', COLORS.textLight)
-        .text(statsText);
-
-      // Date label
-      const dateR = R_OUTER - 10;
-      const dateRot = (midAngle * 180 / Math.PI) + 90;
-      g.append('text')
-        .attr('x', dateR * Math.cos(midAngle))
-        .attr('y', dateR * Math.sin(midAngle))
-        .attr('text-anchor', 'middle')
-        .attr('dominant-baseline', 'middle')
-        .attr('transform', `rotate(${flip ? dateRot + 180 : dateRot}, ${dateR * Math.cos(midAngle)}, ${dateR * Math.sin(midAngle)})`)
-        .attr('font-size', '7px')
-        .attr('font-weight', '400')
-        .attr('fill', COLORS.textLight)
-        .text(route.date);
     }
 
-    // Center branding
+    // Center circle
     g.append('circle').attr('cx', 0).attr('cy', 0).attr('r', R_INNER).attr('fill', COLORS.black);
+  }
 
-    g.append('text').attr('x', 0).attr('y', -20)
+  function renderLabels(g, layouts, rotDeg) {
+    // Remove old labels
+    g.selectAll('*').remove();
+
+    for (const dl of layouts) {
+      const { route, startAngle, endAngle, midAngle } = dl;
+      const totalDistM = route.distance_km * 1000;
+
+      // Day label
+      placeRadialText(g, midAngle, R_DAY_LABEL, `DAY ${dl.day}`, {
+        fontSize: '22px', fontWeight: '700', letterSpacing: '3px', fill: COLORS.text
+      }, rotDeg);
+
+      // Route label
+      placeRadialText(g, midAngle, R_REGION, route.label.toUpperCase(), {
+        fontSize: '11px', fontWeight: '600', letterSpacing: '1.5px', fill: COLORS.text
+      }, rotDeg);
+
+      // Stats
+      placeRadialText(g, midAngle, R_STATS,
+        `${route.distance_km} km · ${Math.round(route.elevation_gain)}m climbing`, {
+        fontSize: '8px', fill: COLORS.textLight
+      }, rotDeg);
+
+      // Date
+      placeRadialText(g, midAngle, R_OUTER - 10, route.date, {
+        fontSize: '7px', fill: COLORS.textLight
+      }, rotDeg);
+
+      // Town/POI labels from Mapbox data
+      const poiKey = `day${dl.day}_${route.variant}`;
+      const pois = (typeof POI_DATA !== 'undefined' && POI_DATA[poiKey]) || [];
+      pois.forEach(poi => {
+        const frac = poi.dist / totalDistM;
+        const angle = startAngle + frac * (endAngle - startAngle);
+        // Larger text for town names (like reference image)
+        placeTangentText(g, angle, R_CP_INNER + 20, poi.name.toUpperCase(), {
+          fontSize: '7.5px', fontWeight: '500', fill: COLORS.text
+        }, rotDeg);
+      });
+    }
+
+    // Center branding (counter-rotate so it stays upright)
+    const brand = g.append('g').attr('transform', `rotate(${-rotDeg})`);
+
+    brand.append('text').attr('x', 0).attr('y', -20)
       .attr('text-anchor', 'middle').attr('dominant-baseline', 'middle')
       .attr('font-size', '14px').attr('font-weight', '700')
       .attr('letter-spacing', '4px').attr('fill', COLORS.white)
       .text('KING OF');
 
-    g.append('text').attr('x', 0).attr('y', 0)
+    brand.append('text').attr('x', 0).attr('y', 0)
       .attr('text-anchor', 'middle').attr('dominant-baseline', 'middle')
       .attr('font-size', '22px').attr('font-weight', '800')
       .attr('letter-spacing', '3px').attr('fill', COLORS.white)
       .text('THE ROAD');
 
-    g.append('text').attr('x', 0).attr('y', 22)
+    brand.append('text').attr('x', 0).attr('y', 22)
       .attr('text-anchor', 'middle').attr('dominant-baseline', 'middle')
       .attr('font-size', '11px').attr('font-weight', '400')
       .attr('letter-spacing', '2px').attr('fill', COLORS.tealLight)
       .text('AVIGNON 2026');
 
-    g.append('text').attr('x', 0).attr('y', 42)
+    brand.append('text').attr('x', 0).attr('y', 42)
       .attr('text-anchor', 'middle').attr('dominant-baseline', 'middle')
       .attr('font-size', '7px').attr('font-weight', '400')
       .attr('letter-spacing', '1px').attr('fill', COLORS.grayDark)
       .text('MAY 28 – JUN 1');
+  }
 
-    // Subtitle
+  let svg, gData, gLabels, gSubtitle;
+
+  function render(variant) {
+    d3.select('#viz').selectAll('*').remove();
+    currentVariant = variant;
+    currentLayouts = buildLayouts(variant);
+
+    svg = d3.select('#viz').append('svg')
+      .attr('width', W).attr('height', H)
+      .attr('viewBox', `0 0 ${W} ${H}`);
+
+    svg.append('rect').attr('width', W).attr('height', H).attr('fill', '#e8e6e1');
+
+    // Shapes group: rotates with drag
+    gData = svg.append('g').attr('transform', `translate(${cx},${cy}) rotate(${rotation})`);
+    renderShapes(gData, currentLayouts);
+
+    // Labels group: also rotated with shapes, but text orientations compensate
+    gLabels = svg.append('g').attr('transform', `translate(${cx},${cy}) rotate(${rotation})`);
+    renderLabels(gLabels, currentLayouts, rotation);
+
+    // Subtitle (fixed, outside the wheel)
     svg.append('text')
       .attr('x', cx).attr('y', H - 10)
       .attr('text-anchor', 'middle')
@@ -386,6 +397,69 @@
       .attr('letter-spacing', '2px')
       .text('SUPPORTING MÉDECINS SANS FRONTIÈRES');
   }
+
+  // --- Drag-to-rotate ---
+  let rotation = 0;
+  let velocity = 0;
+  let dragging = false;
+  let lastAngle = 0;
+  let animFrame = null;
+
+  function getAngle(x, y) {
+    const rect = document.getElementById('viz').getBoundingClientRect();
+    const dx = x - (rect.left + rect.width / 2);
+    const dy = y - (rect.top + rect.height / 2);
+    return Math.atan2(dy, dx) * 180 / Math.PI;
+  }
+
+  function applyRotation() {
+    if (gData) gData.attr('transform', `translate(${cx},${cy}) rotate(${rotation})`);
+    if (gLabels) {
+      gLabels.attr('transform', `translate(${cx},${cy}) rotate(${rotation})`);
+      renderLabels(gLabels, currentLayouts, rotation);
+    }
+  }
+
+  function drift() {
+    if (dragging) return;
+    if (Math.abs(velocity) < 0.01) { velocity = 0; return; }
+    velocity *= 0.95;
+    rotation += velocity;
+    applyRotation();
+    animFrame = requestAnimationFrame(drift);
+  }
+
+  const vizEl = document.getElementById('viz');
+
+  vizEl.addEventListener('pointerdown', function(e) {
+    if (e.target.tagName === 'SELECT' || e.target.tagName === 'OPTION') return;
+    dragging = true;
+    velocity = 0;
+    lastAngle = getAngle(e.clientX, e.clientY);
+    if (animFrame) cancelAnimationFrame(animFrame);
+    vizEl.setPointerCapture(e.pointerId);
+  });
+
+  vizEl.addEventListener('pointermove', function(e) {
+    if (!dragging) return;
+    const angle = getAngle(e.clientX, e.clientY);
+    let delta = angle - lastAngle;
+    if (delta > 180) delta -= 360;
+    if (delta < -180) delta += 360;
+    velocity = delta;
+    rotation += delta;
+    lastAngle = angle;
+    applyRotation();
+  });
+
+  function endDrag() {
+    if (!dragging) return;
+    dragging = false;
+    animFrame = requestAnimationFrame(drift);
+  }
+
+  vizEl.addEventListener('pointerup', endDrag);
+  vizEl.addEventListener('pointercancel', endDrag);
 
   // Initial render
   render('standard');
