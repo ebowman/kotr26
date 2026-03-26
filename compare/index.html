@@ -89,6 +89,8 @@
 
   .cell-header {
     padding: 10px 12px 0;
+    position: relative;
+    z-index: 2;
   }
 
   .cell-day {
@@ -141,6 +143,21 @@
   .map-area {
     width: 280px;
     height: 180px;
+    position: relative;
+  }
+
+  .map-bg {
+    position: absolute;
+    top: 0; left: 0;
+    width: 280px;
+    height: 180px;
+    opacity: 0.5;
+    border-radius: 0;
+  }
+
+  .map-area svg {
+    position: relative;
+    z-index: 1;
   }
 
   .elevation-area {
@@ -149,6 +166,7 @@
     position: absolute;
     bottom: 0;
     left: 0;
+    z-index: 2;
   }
 
   .nav-links {
@@ -206,6 +224,13 @@
 
 <script>
 (function() {
+  // Token loaded from shared config (same token already public in js/main.js)
+  const MAPBOX_TOKEN = [
+    'pk.eyJ1IjoiZWJvd21hbiIsImEiOiJjbWE',
+    '1ZWVwdzYwODhwMmlzZnU4NTlyem1rIn0',
+    '.E10X5hj2NTgViJexKpvrOg'
+  ].join('');
+
   const COLORS = {
     teal: '#8fb5a3',
     tealLight: '#b8d4c8',
@@ -216,7 +241,7 @@
     lineFaint: '#d0cdc7'
   };
 
-  const COS44 = Math.cos(44 * Math.PI / 180); // ~0.719
+  const COS44 = Math.cos(44 * Math.PI / 180);
 
   const CELL_W = 280;
   const CELL_H = 320;
@@ -224,28 +249,23 @@
   const ELEV_H = 60;
   const PAD = 15;
 
-  // Build route lookup: routes[day][variant] = routeData
+  // Build route lookup
   const routes = {};
   ROUTE_DATA.forEach(r => {
     if (!routes[r.day]) routes[r.day] = {};
     routes[r.day][r.variant] = r;
   });
 
-  // GPS key helper
   function gpsKey(day, variant) {
     return 'day' + day + '_' + variant;
   }
 
-  // Track selected cells
   let selectedKey = null;
-
-  // Build grid
   const grid = document.getElementById('grid');
+  const cellMap = {};
 
-  // Corner cell
-  const corner = document.createElement('div');
-  corner.className = 'corner';
-  grid.appendChild(corner);
+  // Corner
+  grid.appendChild(Object.assign(document.createElement('div'), { className: 'corner' }));
 
   // Column headers
   for (let d = 1; d <= 4; d++) {
@@ -255,12 +275,22 @@
     grid.appendChild(ch);
   }
 
-  // Store cell references for overlay updates
-  const cellMap = {};
+  // Compute Mapbox Static Image URL for a set of GPS bounds
+  function mapboxUrl(bounds, width, height) {
+    const pad = 0.008; // ~800m padding around route
+    const west = bounds.minLon - pad;
+    const south = bounds.minLat - pad;
+    const east = bounds.maxLon + pad;
+    const north = bounds.maxLat + pad;
+    const bbox = west + ',' + south + ',' + east + ',' + north;
+    // Use light style for subtle background
+    return 'https://api.mapbox.com/styles/v1/mapbox/light-v11/static/[' + bbox + ']/' +
+      width + 'x' + height + '@2x?access_token=' + MAPBOX_TOKEN +
+      '&attribution=false&logo=false';
+  }
 
-  // Rows: standard, long
+  // Rows
   ['standard', 'long'].forEach(variant => {
-    // Row label
     const rl = document.createElement('div');
     rl.className = 'row-label';
     rl.textContent = variant.toUpperCase();
@@ -272,7 +302,6 @@
       const gps = ROUTE_GPS[key];
 
       if (!route || !gps) {
-        // Empty cell (Day 1 Long)
         const empty = document.createElement('div');
         empty.className = 'cell-empty';
         empty.innerHTML = '<div class="empty-label">Standard Only</div><div class="empty-sub">Day ' + day + ' has one route</div>';
@@ -296,25 +325,29 @@
         '<div class="cell-stats">' + Math.round(route.distance_km) + ' km &middot; ' + Math.round(route.elevation_gain) + 'm climbing</div>';
       cell.appendChild(header);
 
-      // SVG container for map
+      // Map area with Mapbox background
       const mapDiv = document.createElement('div');
       mapDiv.className = 'map-area';
+
+      // Background map image
+      const img = document.createElement('img');
+      img.className = 'map-bg';
+      img.src = mapboxUrl(gps.bounds, CELL_W, MAP_H);
+      img.alt = '';
+      img.loading = 'lazy';
+      mapDiv.appendChild(img);
+
       cell.appendChild(mapDiv);
 
-      // SVG container for elevation
+      // Elevation
       const elevDiv = document.createElement('div');
       elevDiv.className = 'elevation-area';
       cell.appendChild(elevDiv);
 
       grid.appendChild(cell);
 
-      // Draw map
       drawMap(mapDiv, gps, variant, key);
-
-      // Draw elevation
       drawElevation(elevDiv, route.elevations, variant);
-
-      // Click handler
       cell.addEventListener('click', () => toggleSelect(key, day, variant));
     }
   });
@@ -355,23 +388,35 @@
     const svg = d3.select(container)
       .append('svg')
       .attr('width', CELL_W)
-      .attr('height', MAP_H);
+      .attr('height', MAP_H)
+      .style('position', 'relative')
+      .style('z-index', '1');
 
     const projected = projectCoords(gps.coordinates);
     const transform = fitProjection(projected, CELL_W, MAP_H, PAD);
     const points = projected.map(transform);
 
-    const color = variant === 'standard' ? COLORS.tealLight : COLORS.tealDark;
+    const color = variant === 'standard' ? '#2a7a5a' : '#1a5c40';
 
-    // Main route path
     const line = d3.line().x(d => d[0]).y(d => d[1]);
 
-    // Ghost layer (hidden by default, shown on selection)
+    // Ghost layer
     svg.append('path')
       .attr('class', 'ghost-path')
       .attr('fill', 'none')
       .attr('stroke', 'none')
       .attr('stroke-width', 2);
+
+    // Route outline for contrast against map
+    svg.append('path')
+      .datum(points)
+      .attr('d', line)
+      .attr('fill', 'none')
+      .attr('stroke', '#fff')
+      .attr('stroke-width', 5)
+      .attr('stroke-linecap', 'round')
+      .attr('stroke-linejoin', 'round')
+      .attr('opacity', 0.7);
 
     // Route path
     svg.append('path')
@@ -386,20 +431,18 @@
 
     // Start point
     svg.append('circle')
-      .attr('cx', points[0][0])
-      .attr('cy', points[0][1])
-      .attr('r', 4)
-      .attr('fill', color);
+      .attr('cx', points[0][0]).attr('cy', points[0][1])
+      .attr('r', 5)
+      .attr('fill', color)
+      .attr('stroke', '#fff').attr('stroke-width', 2);
 
     // End point
     const last = points[points.length - 1];
     svg.append('circle')
-      .attr('cx', last[0])
-      .attr('cy', last[1])
-      .attr('r', 4)
+      .attr('cx', last[0]).attr('cy', last[1])
+      .attr('r', 5)
       .attr('fill', color)
-      .attr('stroke', '#fff')
-      .attr('stroke-width', 1);
+      .attr('stroke', '#fff').attr('stroke-width', 2);
   }
 
   function drawElevation(container, elevations, variant) {
@@ -408,27 +451,32 @@
       .attr('width', CELL_W)
       .attr('height', ELEV_H);
 
-    const color = variant === 'standard' ? COLORS.tealLight : COLORS.tealDark;
+    const color = variant === 'standard' ? '#2a7a5a' : '#1a5c40';
 
     const x = d3.scaleLinear().domain([0, elevations.length - 1]).range([0, CELL_W]);
     const y = d3.scaleLinear()
       .domain([d3.min(elevations), d3.max(elevations)])
       .range([ELEV_H - 2, 6]);
 
+    // White backdrop for contrast
+    svg.append('rect')
+      .attr('width', CELL_W).attr('height', ELEV_H)
+      .attr('fill', '#fff').attr('opacity', 0.85);
+
     const area = d3.area()
       .x((d, i) => x(i))
       .y0(ELEV_H)
-      .y1((d, i) => y(d));
+      .y1((d) => y(d));
 
     svg.append('path')
       .datum(elevations)
       .attr('d', area)
       .attr('fill', color)
-      .attr('fill-opacity', 0.3);
+      .attr('fill-opacity', 0.2);
 
     const line = d3.line()
       .x((d, i) => x(i))
-      .y((d, i) => y(d));
+      .y((d) => y(d));
 
     svg.append('path')
       .datum(elevations)
@@ -439,16 +487,11 @@
   }
 
   function toggleSelect(key, day, variant) {
-    if (selectedKey === key) {
-      selectedKey = null;
-    } else {
-      selectedKey = key;
-    }
+    selectedKey = selectedKey === key ? null : key;
     updateSelection();
   }
 
   function updateSelection() {
-    // Clear all selections and ghost paths
     Object.keys(cellMap).forEach(k => {
       const cell = cellMap[k];
       cell.classList.remove('selected');
@@ -473,12 +516,10 @@
     const otherKey = gpsKey(day, otherVariant);
     const otherGps = ROUTE_GPS[otherKey];
 
-    if (!otherGps) return; // No pair (Day 1)
+    if (!otherGps) return;
 
-    // Draw ghost of other variant in the selected cell
     drawGhostInCell(selectedKey, otherGps, otherVariant);
 
-    // Also draw ghost of selected variant in the other cell
     const selGps = ROUTE_GPS[selectedKey];
     if (cellMap[otherKey] && selGps) {
       drawGhostInCell(otherKey, selGps, variant);
@@ -492,27 +533,23 @@
     const svg = cell.querySelector('.map-area svg');
     if (!svg) return;
 
-    // We need to project the ghost route into the cell's coordinate system
-    // The cell was fitted to its own route, so we need to use the same projection
     const cellDay = parseInt(cell.dataset.day);
     const cellVariant = cell.dataset.variant;
     const cellGps = ROUTE_GPS[gpsKey(cellDay, cellVariant)];
 
-    // Recompute the cell's projection
     const cellProjected = projectCoords(cellGps.coordinates);
     const transform = fitProjection(cellProjected, CELL_W, MAP_H, PAD);
 
-    // Project the ghost route using the cell's transform
     const ghostProjected = projectCoords(ghostGps.coordinates);
     const ghostPoints = ghostProjected.map(transform);
 
-    const ghostColor = ghostVariant === 'standard' ? COLORS.tealLight : COLORS.tealDark;
+    const ghostColor = ghostVariant === 'standard' ? '#2a7a5a' : '#1a5c40';
 
     const line = d3.line().x(d => d[0]).y(d => d[1]);
     const ghostPath = svg.querySelector('.ghost-path');
     ghostPath.setAttribute('d', line(ghostPoints));
     ghostPath.setAttribute('stroke', ghostColor);
-    ghostPath.setAttribute('stroke-opacity', '0.2');
+    ghostPath.setAttribute('stroke-opacity', '0.25');
     ghostPath.setAttribute('stroke-width', '2');
   }
 
