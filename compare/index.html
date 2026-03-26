@@ -151,7 +151,7 @@
     top: 0; left: 0;
     width: 280px;
     height: 180px;
-    opacity: 0.5;
+    opacity: 0.75;
     border-radius: 0;
   }
 
@@ -284,7 +284,7 @@
     const north = bounds.maxLat + pad;
     const bbox = west + ',' + south + ',' + east + ',' + north;
     // Use light style for subtle background
-    return 'https://api.mapbox.com/styles/v1/mapbox/light-v11/static/[' + bbox + ']/' +
+    return 'https://api.mapbox.com/styles/v1/mapbox/outdoors-v12/static/[' + bbox + ']/' +
       width + 'x' + height + '@2x?access_token=' + MAPBOX_TOKEN +
       '&attribution=false&logo=false';
   }
