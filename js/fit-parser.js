@@ -10,82 +10,17 @@ const FitParser = (function() {
 
     // FIT File constants
     const FIT_HEADER_SIZE = 14;
-    const FIT_PROTOCOL_VERSION_MAJOR = 2;
-    const FIT_PROFILE_VERSION_MAJOR = 21;
 
     // Semicircle conversion factor for GPS coordinates
     const SEMICIRCLE_TO_DEGREE = 180.0 / Math.pow(2, 31);
 
-    // Global FIT Message Types
+    // FIT Message Types (only those we parse)
     const MESSAGE_TYPES = {
-        FILE_ID: 0,
-        CAPABILITIES: 1,
-        DEVICE_SETTINGS: 2,
-        USER_PROFILE: 3,
-        HRM_PROFILE: 4,
-        SDM_PROFILE: 5,
-        BIKE_PROFILE: 6,
-        ZONES_TARGET: 7,
-        HR_ZONE: 8,
-        POWER_ZONE: 9,
-        MET_ZONE: 10,
-        SPORT: 12,
-        GOAL: 15,
         SESSION: 18,
         LAP: 19,
         RECORD: 20,
         EVENT: 21,
-        DEVICE_INFO: 23,
-        WORKOUT: 26,
-        WORKOUT_STEP: 27,
-        SCHEDULE: 28,
-        WEIGHT_SCALE: 30,
-        COURSE: 31,
-        COURSE_POINT: 32,
-        TOTALS: 33,
-        ACTIVITY: 34,
-        SOFTWARE: 35,
-        FILE_CAPABILITIES: 37,
-        MESG_CAPABILITIES: 38,
-        FIELD_CAPABILITIES: 39,
-        FILE_CREATOR: 49,
-        BLOOD_PRESSURE: 51,
-        SPEED_ZONE: 53,
-        MONITORING: 55,
-        TRAINING_FILE: 72,
-        HRV: 78,
-        LENGTH: 101,
-        MONITORING_INFO: 103,
-        PAD: 105,
-        SLAVE_DEVICE: 106,
-        CONNECTIVITY: 127,
-        WEATHER_CONDITIONS: 128,
-        WEATHER_ALERT: 129,
-        GPS_METADATA: 160,
-        CAMERA_EVENT: 161,
-        TIMESTAMP_CORRELATION: 162,
-        GYROSCOPE_DATA: 164,
-        ACCELEROMETER_DATA: 165,
-        THREE_D_SENSOR_CALIBRATION: 167,
-        VIDEO_FRAME: 169,
-        OBDII_DATA: 174,
-        NMEA_SENTENCE: 177,
-        AVIATION_ATTITUDE: 178,
-        VIDEO: 184,
-        VIDEO_TITLE: 185,
-        VIDEO_DESCRIPTION: 186,
-        VIDEO_CLIP: 187,
-        OHR_SETTINGS: 188,
-        EXD_SCREEN_CONFIGURATION: 200,
-        EXD_DATA_FIELD_CONFIGURATION: 201,
-        EXD_DATA_CONCEPT_CONFIGURATION: 202,
-        FIELD_DESCRIPTION: 206,
-        DEVELOPER_DATA_ID: 207,
-        MAGNETOMETER_DATA: 208,
-        BAROMETER_DATA: 209,
-        ONE_D_SENSOR_CALIBRATION: 210,
-        DIVE_SUMMARY: 268,
-        CLIMB_PRO: 317
+        DEVICE_INFO: 23
     };
 
     // Base types for FIT data fields
@@ -108,22 +43,6 @@ const FitParser = (function() {
         0x0E: { name: 'sint64', size: 8, invalid: 0x7FFFFFFFFFFFFFFF },
         0x0F: { name: 'uint64', size: 8, invalid: 0xFFFFFFFFFFFFFFFF },
         0x10: { name: 'uint64z', size: 8, invalid: 0 }
-    };
-
-    // Record field definitions (message type 20)
-    const RECORD_FIELDS = {
-        253: 'timestamp',
-        0: 'position_lat',
-        1: 'position_long',
-        2: 'altitude',
-        3: 'heart_rate',
-        4: 'cadence',
-        5: 'distance',
-        6: 'speed',
-        7: 'power',
-        13: 'temperature',
-        73: 'enhanced_speed',
-        78: 'enhanced_altitude'
     };
 
     /**
@@ -260,15 +179,6 @@ const FitParser = (function() {
                 fields
             };
 
-            // Debug: log record message definitions
-            if (globalMessageNumber === MESSAGE_TYPES.RECORD) {
-                console.log('Record message definition - localMsgType:', localMessageType, 'littleEndian:', isLittleEndian);
-                console.log('Fields:', JSON.stringify(fields.map(f => ({
-                    num: f.fieldDefNum,
-                    size: f.fieldSize,
-                    type: '0x' + f.baseType.toString(16)
-                }))));
-            }
         }
 
         /**
@@ -382,11 +292,6 @@ const FitParser = (function() {
         parseRecordMessage(data) {
             const record = {};
 
-            // Debug: log first few records to see raw data
-            if (this.records.length < 3) {
-                console.log('Raw record data:', data);
-            }
-
             // Timestamp
             if (data[253] !== undefined) {
                 record.timestamp = data[253];
@@ -399,16 +304,6 @@ const FitParser = (function() {
             }
             if (data[1] !== undefined && data[1] !== 0x7FFFFFFF) {
                 record.longitude = data[1] * SEMICIRCLE_TO_DEGREE;
-            }
-
-            // Debug first record with coordinates
-            if (this.records.length < 3 && record.latitude !== undefined) {
-                console.log('Parsed coords:', {
-                    rawLat: data[0],
-                    rawLng: data[1],
-                    lat: record.latitude,
-                    lng: record.longitude
-                });
             }
 
             // Altitude (scaled, in meters with 5m offset and 5 scale)
@@ -670,7 +565,12 @@ const FitParser = (function() {
      * @param {string} name - Route name
      * @returns {string} GPX XML string
      */
+    function escapeXml(str) {
+        return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
     function routeToGPX(routeData, name = 'KOTR Route') {
+        name = escapeXml(name);
         const points = routeData.coordinates.map(coord => {
             const [lon, lat, ele] = coord;
             return `      <trkpt lat="${lat}" lon="${lon}">

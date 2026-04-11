@@ -174,22 +174,6 @@ class SimpleGPXParser {
 }
 
 // ---------------------------------------------------------------------------
-// Encode a Float32Array as a base64 string (for embedding in JS)
-// ---------------------------------------------------------------------------
-function float32ToBase64(values) {
-    const f32 = new Float32Array(values);
-    const bytes = Buffer.from(f32.buffer);
-    return bytes.toString('base64');
-}
-
-/**
- * Return a JS expression that decodes a base64 string into a Float32Array.
- */
-function float32DecoderExpr(base64) {
-    return `(function(){var b=atob("${base64}");var a=new Float32Array(new ArrayBuffer(b.length));var d=new DataView(a.buffer);for(var i=0;i<b.length;i++)d.setUint8(i,b.charCodeAt(i));return a;})()`;
-}
-
-// ---------------------------------------------------------------------------
 // Parse a route file and return GPS records [{latitude, longitude, altitude}]
 // ---------------------------------------------------------------------------
 function parseRouteFile(filePath) {

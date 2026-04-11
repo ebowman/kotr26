@@ -44,7 +44,7 @@
                 label: 'STANDARD',
                 routeFile: 'KOTR_Avignon_Standard_D2.fit',
                 distance: 80,
-                elevation: 540,
+                elevation: 543,
                 difficulty: 2,
                 difficultyLabel: 'Moderate',
                 duration: '~3-4 hours'
@@ -70,8 +70,8 @@
             standard: {
                 label: 'LUBERON',
                 routeFile: 'KOTR_Avignon_D3_Standard.fit',
-                distance: 100,
-                elevation: 1020,
+                distance: 101,
+                elevation: 1024,
                 difficulty: 3,
                 difficultyLabel: 'Challenging',
                 duration: '~4-5 hours'
@@ -100,7 +100,7 @@
                 label: 'STANDARD',
                 routeFile: 'KOTR_Avignon_D4_Standard.fit',
                 distance: 85,
-                elevation: 330,
+                elevation: 326,
                 difficulty: 2,
                 difficultyLabel: 'Moderate',
                 duration: '~3-4 hours'
@@ -495,7 +495,7 @@
     // ========================================================================
 
     const EVENT_DATE = new Date('2026-05-28T00:00:00');
-    const VENTOUX_ELEVATION = 2230; // meters of climbing for Ventoux route
+    const VENTOUX_ELEVATION = 2178; // meters of climbing for Ventoux route (from DEM)
 
     /**
      * Training phases based on weeks until event
@@ -832,7 +832,7 @@
                 <span class="callout-icon">\u{1F3D4}\u{FE0F}</span>
                 <div class="callout-content">
                     <h4>Preparing for Mont Ventoux</h4>
-                    <p>The Ventoux climb features ${VENTOUX_ELEVATION.toLocaleString()}m of climbing over 131km.
+                    <p>The Ventoux climb features ${VENTOUX_ELEVATION.toLocaleString()}m of climbing over 140km.
                     Focus on sustained threshold efforts of 20-30 minutes to simulate the 21.5km ascent at 7.5% average gradient.
                     If possible, find a local climb of 45+ minutes to practice pacing and nutrition strategy.</p>
                 </div>
@@ -1935,7 +1935,6 @@
         // Render the training countdown section
         renderTrainingCountdown();
 
-        console.log('KOTR 2026 initialized');
     }
 
     // Run on DOM ready
