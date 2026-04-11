@@ -889,9 +889,6 @@
     /**
      * Update training countdown when profile changes
      */
-    function updateTrainingCountdown() {
-        renderTrainingCountdown();
-    }
 
     // ========================================================================
     // State
@@ -899,7 +896,6 @@
 
     // State
     let map = null;
-    let routeLayers = [];
     let selectedVariants = {
         2: 'standard',
         3: 'standard',
@@ -1157,9 +1153,6 @@
     /**
      * Update the comparison table (called when profile changes)
      */
-    function updateComparisonTable() {
-        renderComparisonTable();
-    }
 
     // ========================================================================
     // Trip Summary Bar
@@ -1614,11 +1607,6 @@
     }
 
     /**
-     * Route analysis cache
-     */
-    const routeAnalysisCache = new Map();
-
-    /**
      * Storage key for profile setup prompt dismissal
      */
     const PROFILE_PROMPT_DISMISSED_KEY = 'kotr-profile-prompt-dismissed';
@@ -1919,8 +1907,8 @@
                 updateRouteAnalysis();
                 updateTripSummary();
                 updateProfilePromptVisibility();
-                updateComparisonTable();
-                updateTrainingCountdown();
+                renderComparisonTable();
+                renderTrainingCountdown();
             });
 
             // Initial analysis update

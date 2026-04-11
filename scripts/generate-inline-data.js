@@ -255,7 +255,6 @@ function main() {
         // --- data-inline.js entries ---
         const chartElevations = downsample(elevations, 200);
         const chartElevationsRounded = chartElevations.map(v => Math.round(v * 10) / 10);
-        const base64Elev = float32ToBase64(chartElevationsRounded);
 
         routeDataEntries.push({
             day: route.day,

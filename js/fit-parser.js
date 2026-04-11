@@ -532,7 +532,7 @@ const FitParser = (function() {
             if (demResponse.ok) {
                 const demData = await demResponse.json();
                 if (demData.elevations && demData.elevations.length === routeData.coordinates.length) {
-                    console.log(`Loaded DEM elevation data for ${url}`);
+                    console.debug(`Loaded DEM elevation data for ${url}`);
 
                     // Replace GPS elevation with DEM elevation
                     for (let i = 0; i < routeData.coordinates.length; i++) {
@@ -552,7 +552,7 @@ const FitParser = (function() {
                 routeData.elevationSource = 'gps';
             }
         } catch (e) {
-            console.log(`No DEM data available for ${url}, using GPS elevation`);
+            console.debug(`No DEM data available for ${url}, using GPS elevation`);
             routeData.elevationSource = 'gps';
         }
 

@@ -803,7 +803,7 @@
             if (!this.position) {
                 this.position = { ...target };
                 if (window.FLYOVER_DEBUG) {
-                    console.log('[SPRING] Teleported to target (position was null) target=(' +
+                    console.debug('[SPRING] Teleported to target (position was null) target=(' +
                         target.lng.toFixed(4) + ',' + target.lat.toFixed(4) + ')');
                 }
                 return this.position;
@@ -852,7 +852,7 @@
             this.position = position ? { ...position } : null;
             this.velocity = { lng: 0, lat: 0, alt: 0 };
             if (window.CAMERA_CHAOS_DEBUG) {
-                console.log('[SPRING] Teleported to:', position);
+                console.debug('[SPRING] Teleported to:', position);
             }
         }
 
@@ -987,7 +987,7 @@
                 // Outlier detected - use much slower adaptation
                 effectiveAlpha = this.alpha * this.reducedAlphaFactor;
                 if (window.CAMERA_CHAOS_DEBUG) {
-                    console.log(`[TERRAIN FILTER] Outlier detected: delta=${delta.toFixed(1)}m, using reduced alpha=${effectiveAlpha.toFixed(3)}`);
+                    console.debug(`[TERRAIN FILTER] Outlier detected: delta=${delta.toFixed(1)}m, using reduced alpha=${effectiveAlpha.toFixed(3)}`);
                 }
             }
 
@@ -1152,7 +1152,7 @@
             if (window.CAMERA_CHAOS_DEBUG) {
                 const springLag = this.calculateDistance(idealTarget, smoothedPos);
                 if (springLag > 50) {
-                    console.log(`[UNIFIED] Spring lag: ${springLag.toFixed(1)}m, state=${this.state}`);
+                    console.debug(`[UNIFIED] Spring lag: ${springLag.toFixed(1)}m, state=${this.state}`);
                 }
             }
 
@@ -1183,7 +1183,7 @@
 
             if (!hasValidPosition) {
                 if (window.CAMERA_CHAOS_DEBUG) {
-                    console.log(`[UNIFIED] Skipping transition (no valid position): ${this.currentMode} -> ${newMode}`);
+                    console.debug(`[UNIFIED] Skipping transition (no valid position): ${this.currentMode} -> ${newMode}`);
                 }
                 // Just change mode, let springs initialize from next target
                 this.currentMode = newMode;
@@ -1191,7 +1191,7 @@
             }
 
             if (window.CAMERA_CHAOS_DEBUG) {
-                console.log(`[UNIFIED] Starting transition: ${this.currentMode} -> ${newMode}`);
+                console.debug(`[UNIFIED] Starting transition: ${this.currentMode} -> ${newMode}`);
             }
 
             this.transition = {
@@ -1228,7 +1228,7 @@
                 this.pitchSpring.velocity = 0;
 
                 if (window.CAMERA_CHAOS_DEBUG) {
-                    console.log(`[UNIFIED] Transition complete`);
+                    console.debug(`[UNIFIED] Transition complete`);
                 }
 
                 return target;
@@ -1275,13 +1275,13 @@
                 this.transition = null;
 
                 if (window.CAMERA_CHAOS_DEBUG) {
-                    console.log(`[UNIFIED] Teleport on seek: ${seekDistanceM.toFixed(0)}m`);
+                    console.debug(`[UNIFIED] Teleport on seek: ${seekDistanceM.toFixed(0)}m`);
                 }
             } else if (seekDistanceM > this.config.smallSeekThreshold) {
                 // Medium seek - reset terrain filter but let springs catch up
                 this.terrainFilter.reset();
                 if (window.CAMERA_CHAOS_DEBUG) {
-                    console.log(`[UNIFIED] Medium seek: ${seekDistanceM.toFixed(0)}m - spring catching up`);
+                    console.debug(`[UNIFIED] Medium seek: ${seekDistanceM.toFixed(0)}m - spring catching up`);
                 }
             }
             // Small seeks: spring naturally catches up, no special handling
@@ -1314,7 +1314,7 @@
             if (enabled && !this.positionSpring.position) {
                 this.positionSpring.reset(null);
             }
-            console.log(`[UNIFIED] Controller ${enabled ? 'enabled' : 'disabled'}`);
+            console.debug(`[UNIFIED] Controller ${enabled ? 'enabled' : 'disabled'}`);
         }
 
         /**
@@ -1974,7 +1974,7 @@
         // Show capture modal
         showPanicCaptureModal(json, capturedState);
 
-        console.log('[PANIC] Camera state captured:', capturedState.frameCaptured, 'frames,',
+        console.debug('[PANIC] Camera state captured:', capturedState.frameCaptured, 'frames,',
             (capturedState.durationMs / 1000).toFixed(1), 'seconds');
     }
 
@@ -2208,7 +2208,7 @@
                 const dLat = (dotPoint.lat - smoothedDotPoint.lat) * 111320;
                 const riderLag = Math.sqrt(dLng * dLng + dLat * dLat);
                 if (riderLag > 10) {
-                    console.log('[SEEK DEBUG] RIDER LAG: ' + Math.round(riderLag) + 'm');
+                    console.debug('[SEEK DEBUG] RIDER LAG: ' + Math.round(riderLag) + 'm');
                 }
             }
         }
@@ -2269,7 +2269,7 @@
                         const dLat = (idealCameraPos.lat - smoothedPos.lat) * 111320;
                         const springLag = Math.sqrt(dLng * dLng + dLat * dLat);
                         if (springLag > 10) {
-                            console.log('[SEEK DEBUG] SPRING LAG: ' + Math.round(springLag) + 'm');
+                            console.debug('[SEEK DEBUG] SPRING LAG: ' + Math.round(springLag) + 'm');
                         }
                     }
 
@@ -2281,7 +2281,7 @@
                             const dLng = (idealCameraPos.lng - smoothedPos.lng) * 111320 * Math.cos(idealCameraPos.lat * Math.PI / 180);
                             const dLat = (idealCameraPos.lat - smoothedPos.lat) * 111320;
                             const springLag = Math.sqrt(dLng * dLng + dLat * dLat);
-                            console.log(`[CHAOS CHASE] km=${currentKm.toFixed(2)} | forwardBearing=${forwardBearing.toFixed(1)}° | ` +
+                            console.debug(`[CHAOS CHASE] km=${currentKm.toFixed(2)} | forwardBearing=${forwardBearing.toFixed(1)}° | ` +
                                 `behindBearing=${behindBearing.toFixed(1)}° | offsetBehind=${offsetBehind.toFixed(0)}m | ` +
                                 `idealAlt=${idealCameraPos.alt.toFixed(0)}m | smoothedAlt=${smoothedPos.alt.toFixed(0)}m | ` +
                                 `springLag=${springLag.toFixed(0)}m | springVel=(${spring.velocity.lng.toFixed(6)},${spring.velocity.lat.toFixed(6)},${spring.velocity.alt.toFixed(2)})`);
@@ -2754,7 +2754,7 @@
                 // Terrain just became available - start faster smoothing period
                 window._terrainCache.terrainAvailableFrames = 30; // ~0.5 sec at 60fps
                 if (window.FLYOVER_DEBUG) {
-                    console.log('[TERRAIN] Data became available, enabling faster smoothing');
+                    console.debug('[TERRAIN] Data became available, enabling faster smoothing');
                 }
             } else if (hadTerrainBefore && !hasTerrainNow) {
                 // TERRAIN JUST BECAME UNAVAILABLE
@@ -2765,7 +2765,7 @@
                     // Store this as the terrain-unavailable floor
                     window._terrainCache.terrainUnavailableFloor = window._terrainCache.lastCameraAlt;
                     if (window.FLYOVER_DEBUG) {
-                        console.log('[TERRAIN] Data became unavailable, using floor altitude:', window._terrainCache.terrainUnavailableFloor.toFixed(1));
+                        console.debug('[TERRAIN] Data became unavailable, using floor altitude:', window._terrainCache.terrainUnavailableFloor.toFixed(1));
                     }
                 }
             } else if (hasTerrainNow) {
@@ -2953,7 +2953,7 @@
             window._cameraLogCount++;
             // Log every 60th frame to reduce noise
             if (window._cameraLogCount % 60 === 0) {
-                console.log('[CAMERA]', {
+                console.debug('[CAMERA]', {
                     mode: mode,
                     dotAlt: dotPoint.alt.toFixed(1),
                     terrainAtCamera: terrainElevation !== null ? terrainElevation.toFixed(1) : 'null',
@@ -3206,7 +3206,7 @@
             predictiveCameraController.lastSamples = null;
             predictiveCameraController.lastMode = null;
             if (window.FLYOVER_DEBUG) {
-                console.log('[RESET] Predictive camera controller reset');
+                console.debug('[RESET] Predictive camera controller reset');
             }
         }
 
@@ -3273,7 +3273,7 @@
         }
 
         if (window.FLYOVER_DEBUG) {
-            console.log('[INIT SMOOTHING] Initialized to state:', {
+            console.debug('[INIT SMOOTHING] Initialized to state:', {
                 lng: cameraState.lng.toFixed(4),
                 lat: cameraState.lat.toFixed(4),
                 alt: cameraState.alt.toFixed(0),
@@ -3338,7 +3338,7 @@
         // Log transition start
         if (window.FLYOVER_DEBUG) {
             const distKm = (progress * totalDistance).toFixed(1);
-            console.log(`[MODE_SWITCH] Starting transition at km=${distKm} from=${currentCameraMode} to=${newMode} ` +
+            console.debug(`[MODE_SWITCH] Starting transition at km=${distKm} from=${currentCameraMode} to=${newMode} ` +
                 `startState: alt=${transitionStartState.alt.toFixed(0)} bearing=${transitionStartState.bearing.toFixed(0)} ` +
                 `pitch=${transitionStartState.pitch.toFixed(1)} zoom=${zoomLevel.toFixed(2)}`);
         }
@@ -3574,10 +3574,10 @@
 
         try {
             // Parse FIT file
-            console.log('Loading route file:', routeFile);
+            console.debug('Loading route file:', routeFile);
             const loader = routeFile.endsWith('.gpx') ? GpxParser.loadGpxFile : FitParser.loadFitFile;
             routeData = await loader(`routes/${routeFile}`);
-            console.log('Route data loaded:', {
+            console.debug('Route data loaded:', {
                 points: routeData.coordinates?.length,
                 distance: routeData.distance,
                 elevation: routeData.elevationGain,
@@ -3593,7 +3593,7 @@
             const coords2D = routeData.coordinates.map(c => [c[0], c[1]]);
             routeLine = turf.lineString(coords2D);
             totalDistance = turf.length(routeLine, { units: 'kilometers' });
-            console.log('Total distance:', totalDistance, 'km');
+            console.debug('Total distance:', totalDistance, 'km');
 
             // Generate smoothed camera path
             cameraPath = generateCameraPath(routeData.coordinates);
@@ -3656,7 +3656,7 @@
         // Enable debug mode if requested
         if (params.get('debug') === '1') {
             window.FLYOVER_DEBUG = true;
-            console.log('Debug mode enabled via URL parameter');
+            console.debug('Debug mode enabled via URL parameter');
         }
 
         // Set position from km parameter
@@ -3665,7 +3665,7 @@
             const km = parseFloat(kmParam);
             if (!isNaN(km) && km >= 0 && km <= totalDistance) {
                 progress = km / totalDistance;
-                console.log(`Position set to ${km.toFixed(2)} km (${(progress * 100).toFixed(1)}%) via URL parameter`);
+                console.debug(`Position set to ${km.toFixed(2)} km (${(progress * 100).toFixed(1)}%) via URL parameter`);
             }
         }
 
@@ -3675,7 +3675,7 @@
             const pos = parseFloat(posParam);
             if (!isNaN(pos) && pos >= 0 && pos <= 1) {
                 progress = pos;
-                console.log(`Position set to ${(progress * 100).toFixed(1)}% (${(progress * totalDistance).toFixed(2)} km) via URL parameter`);
+                console.debug(`Position set to ${(progress * 100).toFixed(1)}% (${(progress * totalDistance).toFixed(2)} km) via URL parameter`);
             }
         }
 
@@ -3698,7 +3698,7 @@
                 targetCameraMode = targetMode;
                 modeTransitionProgress = 1;
                 updateCameraModeUI(targetMode);
-                console.log(`Camera mode set to ${modeParam} via URL parameter`);
+                console.debug(`Camera mode set to ${modeParam} via URL parameter`);
             }
         }
 
@@ -3715,10 +3715,10 @@
         const predictiveParam = params.get('predictive');
         if (predictiveParam === '0' || predictiveParam === 'false') {
             window.PREDICTIVE_CAMERA_DISABLED = true;
-            console.log('Predictive camera DISABLED via URL parameter. Using legacy reactive camera.');
+            console.debug('Predictive camera DISABLED via URL parameter. Using legacy reactive camera.');
         } else if (predictiveParam === '1' || predictiveParam === 'true') {
             window.PREDICTIVE_CAMERA_DISABLED = false;
-            console.log('Predictive camera ENABLED via URL parameter.');
+            console.debug('Predictive camera ENABLED via URL parameter.');
         }
 
         // Auto-start playback if requested
@@ -5040,7 +5040,7 @@
                 // Animated seek already positioned the camera correctly and initialized smoothing
                 animatedSeekState.justCompleted = false;
                 if (window.FLYOVER_DEBUG) {
-                    console.log('[TOGGLE PLAY] Skipping user override setup - animated seek just completed');
+                    console.debug('[TOGGLE PLAY] Skipping user override setup - animated seek just completed');
                 }
             } else if (window._terrainCache &&
                 (window._terrainCache.lastCameraAlt === null || window._terrainCache.lastBearing === null)) {
@@ -5195,8 +5195,8 @@
         };
 
         if (window.FLYOVER_DEBUG) {
-            console.log(`[ANIMATED SEEK] Starting: ${(oldProgress * totalDistance).toFixed(1)}km → ${(targetProgress * totalDistance).toFixed(1)}km (${seekDistanceKm.toFixed(1)}km)`);
-            console.log(`[ANIMATED SEEK] Zoom to ${zoomedOutAlt.toFixed(0)}m alt, durations: ${scaledZoomOutDuration.toFixed(0)}ms / ${scaledPanDuration.toFixed(0)}ms / ${scaledZoomInDuration.toFixed(0)}ms`);
+            console.debug(`[ANIMATED SEEK] Starting: ${(oldProgress * totalDistance).toFixed(1)}km → ${(targetProgress * totalDistance).toFixed(1)}km (${seekDistanceKm.toFixed(1)}km)`);
+            console.debug(`[ANIMATED SEEK] Zoom to ${zoomedOutAlt.toFixed(0)}m alt, durations: ${scaledZoomOutDuration.toFixed(0)}ms / ${scaledPanDuration.toFixed(0)}ms / ${scaledZoomInDuration.toFixed(0)}ms`);
         }
 
         // Start animation loop
@@ -5392,7 +5392,7 @@
                     settlingFramesRemaining = SETTLING_DURATION;
 
                     if (window.FLYOVER_DEBUG) {
-                        console.log(`[ANIMATED SEEK] Complete at ${(progress * totalDistance).toFixed(1)}km`);
+                        console.debug(`[ANIMATED SEEK] Complete at ${(progress * totalDistance).toFixed(1)}km`);
                     }
 
                     // Restore playback state if it was playing before seek
@@ -5456,7 +5456,7 @@
         _seekDistance = seekDistanceKm * 1000;
 
         if (_seekDistance > 1000 && window.FLYOVER_DEBUG) {
-            console.log(`[SEEK] Distance: ${seekDistanceKm.toFixed(1)}km`);
+            console.debug(`[SEEK] Distance: ${seekDistanceKm.toFixed(1)}km`);
         }
 
         // UNIFIED CAMERA: Notify controller about seek
@@ -5832,7 +5832,7 @@
             // Debug logging
             if (window.CAMERA_CHAOS_DEBUG) {
                 const km = (progress * totalDistance).toFixed(1);
-                console.log(`[UNIFIED APPLY] km=${km} alt=${state.alt.toFixed(0)} bearing=${state.bearing.toFixed(0)} pitch=${state.pitch.toFixed(1)}`);
+                console.debug(`[UNIFIED APPLY] km=${km} alt=${state.alt.toFixed(0)} bearing=${state.bearing.toFixed(0)} pitch=${state.pitch.toFixed(1)}`);
             }
         } catch (error) {
             console.error('[UNIFIED] Error applying camera state:', error);
@@ -5892,7 +5892,7 @@
                 // Debug logging for predictive camera (can be enabled via console)
                 if (window.PREDICTIVE_CAMERA_DEBUG && predictiveData.samples) {
                     const distToTarget = haversineDistance(dotPoint, predictedTarget);
-                    console.log('[PREDICTIVE]', {
+                    console.debug('[PREDICTIVE]', {
                         samples: predictiveData.samples.length,
                         lookAheadM: Math.round(predictiveData.samples[predictiveData.samples.length - 1]?.distanceAhead || 0),
                         distToTargetM: Math.round(distToTarget),
@@ -6058,7 +6058,7 @@
             // Detailed transition logging
             if (window.FLYOVER_DEBUG) {
                 const distKm = (progress * totalDistance).toFixed(1);
-                console.log(`[TRANSITION] km=${distKm} t=${t.toFixed(3)} progress=${modeTransitionProgress.toFixed(3)} ` +
+                console.debug(`[TRANSITION] km=${distKm} t=${t.toFixed(3)} progress=${modeTransitionProgress.toFixed(3)} ` +
                     `from=${currentCameraMode} to=${targetCameraMode} ` +
                     `startAlt=${transitionStartState.alt.toFixed(0)} targetAlt=${targetState.alt.toFixed(0)} finalAlt=${finalState.alt.toFixed(0)} ` +
                     `startBearing=${transitionStartState.bearing.toFixed(0)} targetBearing=${targetState.bearing.toFixed(0)} finalBearing=${finalState.bearing.toFixed(0)}`);
@@ -6205,7 +6205,7 @@
 
                 if (needsSmoothing) {
                     if (isAdaptive) {
-                        console.log('[ADAPTIVE SMOOTHING] pos:', posDelta.toFixed(0), 'm, limit:', maxPosDelta.toFixed(0), 'm');
+                        console.debug('[ADAPTIVE SMOOTHING] pos:', posDelta.toFixed(0), 'm, limit:', maxPosDelta.toFixed(0), 'm');
                     } else {
                         console.warn('[EMERGENCY SMOOTHING] pos:', posDelta.toFixed(0), 'm, alt:', Math.abs(altDelta).toFixed(0), 'm');
                     }
@@ -6227,7 +6227,7 @@
                     if (altDiff > 20 || bearingDiff > 5 || posDelta > 50) {
                         _jitterLogCount++;
                         if (_jitterLogCount % 5 === 1) {
-                            console.log('[JITTER]', {
+                            console.debug('[JITTER]', {
                                 altDelta: altDiff.toFixed(0),
                                 bearingDelta: bearingDiff.toFixed(1),
                                 posDelta: posDelta.toFixed(0),
@@ -6248,7 +6248,7 @@
                         const dLng = (state.lng - lookAtPoint.lng) * Math.cos(state.lat * Math.PI / 180) * 111320;
                         const dLat = (state.lat - lookAtPoint.lat) * 111320;
                         const camToRider = Math.sqrt(dLng * dLng + dLat * dLat);
-                        console.log('[SEEK DEBUG] t=' + Math.round(timeSinceSeek) + 'ms' +
+                        console.debug('[SEEK DEBUG] t=' + Math.round(timeSinceSeek) + 'ms' +
                             ' | camToRider: ' + Math.round(camToRider) + 'm' +
                             ' | alt: ' + Math.round(state.alt) + 'm' +
                             ' | settling: ' + settlingFramesRemaining);
@@ -6319,7 +6319,7 @@
                 const hasSignificantChange = Math.abs(bearingDelta) > 5 || Math.abs(altDelta) > 20 || posDelta > 30;
 
                 if (inProblemZone || hasSignificantChange) {
-                    console.log(`[CHAOS] km=${currentKm.toFixed(2)} | bearing=${state.bearing.toFixed(1)}° (Δ${bearingDelta.toFixed(1)}) | ` +
+                    console.debug(`[CHAOS] km=${currentKm.toFixed(2)} | bearing=${state.bearing.toFixed(1)}° (Δ${bearingDelta.toFixed(1)}) | ` +
                         `alt=${state.alt.toFixed(0)}m (Δ${altDelta.toFixed(0)}) | posDelta=${posDelta.toFixed(1)}m | ` +
                         `terrain=${terrainAtCam !== null ? terrainAtCam.toFixed(0) : 'null'}m | zoom=${zoomLevel.toFixed(1)}`);
                 }
@@ -6386,7 +6386,7 @@
                     const overallScore = (posScore + altScore + bearingScore) / 3;
 
                     const modeNames = { 0: 'CHASE', 1: 'BIRDS_EYE', 2: 'SIDE_VIEW', 3: 'CINEMATIC' };
-                    console.log(`[SMOOTHNESS] ${modeNames[sm.mode] || sm.mode}: ` +
+                    console.debug(`[SMOOTHNESS] ${modeNames[sm.mode] || sm.mode}: ` +
                         `Overall=${overallScore.toFixed(1)}% ` +
                         `(pos=${posScore.toFixed(1)}% stddev=${posStats.stddev.toFixed(3)}m, ` +
                         `alt=${altScore.toFixed(1)}% stddev=${altStats.stddev.toFixed(3)}m, ` +
@@ -6692,8 +6692,8 @@
     // Debug API exposed to window for development
     window.flyoverDebug = {
         // Enable/disable debug logging
-        enable: () => { window.FLYOVER_DEBUG = true; console.log('Flyover debug enabled'); },
-        disable: () => { window.FLYOVER_DEBUG = false; console.log('Flyover debug disabled'); },
+        enable: () => { window.FLYOVER_DEBUG = true; console.debug('Flyover debug enabled'); },
+        disable: () => { window.FLYOVER_DEBUG = false; console.debug('Flyover debug disabled'); },
 
         // Get current state
         getState: () => ({
@@ -6711,57 +6711,57 @@
         // Uses seekToPosition() to properly trigger adaptive smoothing
         seekTo: (pos) => {
             seekToPosition(pos);
-            console.log(`Seeked to ${(progress * 100).toFixed(1)}% (${(progress * totalDistance).toFixed(2)} km)`);
+            console.debug(`Seeked to ${(progress * 100).toFixed(1)}% (${(progress * totalDistance).toFixed(2)} km)`);
         },
 
         // Seek to a specific distance in km
         // Uses seekToPosition() to properly trigger adaptive smoothing
         seekToKm: (km) => {
             seekToPosition(km / totalDistance);
-            console.log(`Seeked to ${km.toFixed(2)} km (${(progress * 100).toFixed(1)}%)`);
+            console.debug(`Seeked to ${km.toFixed(2)} km (${(progress * 100).toFixed(1)}%)`);
         },
 
         // Animated seek to a specific distance in km (Google Earth style)
         animatedSeekToKm: (km) => {
             animatedSeekTo(km / totalDistance);
-            console.log(`Animated seek to ${km.toFixed(2)} km`);
+            console.debug(`Animated seek to ${km.toFixed(2)} km`);
         },
 
         // Animated seek controls
         animatedSeek: {
             enable: () => {
                 ANIMATED_SEEK_CONFIG.enabled = true;
-                console.log('[ANIMATED SEEK] Enabled');
+                console.debug('[ANIMATED SEEK] Enabled');
             },
             disable: () => {
                 ANIMATED_SEEK_CONFIG.enabled = false;
-                console.log('[ANIMATED SEEK] Disabled - using instant teleport');
+                console.debug('[ANIMATED SEEK] Disabled - using instant teleport');
             },
             status: () => {
-                console.log('=== ANIMATED SEEK CONFIG ===');
-                console.log(`Enabled: ${ANIMATED_SEEK_CONFIG.enabled}`);
-                console.log(`Min distance: ${ANIMATED_SEEK_CONFIG.minDistanceM}m`);
-                console.log(`Zoom out duration: ${ANIMATED_SEEK_CONFIG.zoomOutDuration}ms`);
-                console.log(`Pan duration: ${ANIMATED_SEEK_CONFIG.panDuration}ms`);
-                console.log(`Zoom in duration: ${ANIMATED_SEEK_CONFIG.zoomInDuration}ms`);
-                console.log(`Zoom out multiplier: ${ANIMATED_SEEK_CONFIG.zoomOutAltMultiplier}x`);
-                console.log(`Max zoom out alt: ${ANIMATED_SEEK_CONFIG.maxZoomOutAlt}m`);
-                console.log(`Current state: ${animatedSeekState.phase}`);
+                console.debug('=== ANIMATED SEEK CONFIG ===');
+                console.debug(`Enabled: ${ANIMATED_SEEK_CONFIG.enabled}`);
+                console.debug(`Min distance: ${ANIMATED_SEEK_CONFIG.minDistanceM}m`);
+                console.debug(`Zoom out duration: ${ANIMATED_SEEK_CONFIG.zoomOutDuration}ms`);
+                console.debug(`Pan duration: ${ANIMATED_SEEK_CONFIG.panDuration}ms`);
+                console.debug(`Zoom in duration: ${ANIMATED_SEEK_CONFIG.zoomInDuration}ms`);
+                console.debug(`Zoom out multiplier: ${ANIMATED_SEEK_CONFIG.zoomOutAltMultiplier}x`);
+                console.debug(`Max zoom out alt: ${ANIMATED_SEEK_CONFIG.maxZoomOutAlt}m`);
+                console.debug(`Current state: ${animatedSeekState.phase}`);
                 return ANIMATED_SEEK_CONFIG;
             },
             setDurations: (zoomOut, pan, zoomIn) => {
                 if (zoomOut !== undefined) ANIMATED_SEEK_CONFIG.zoomOutDuration = zoomOut;
                 if (pan !== undefined) ANIMATED_SEEK_CONFIG.panDuration = pan;
                 if (zoomIn !== undefined) ANIMATED_SEEK_CONFIG.zoomInDuration = zoomIn;
-                console.log(`Durations set: zoomOut=${ANIMATED_SEEK_CONFIG.zoomOutDuration}ms, pan=${ANIMATED_SEEK_CONFIG.panDuration}ms, zoomIn=${ANIMATED_SEEK_CONFIG.zoomInDuration}ms`);
+                console.debug(`Durations set: zoomOut=${ANIMATED_SEEK_CONFIG.zoomOutDuration}ms, pan=${ANIMATED_SEEK_CONFIG.panDuration}ms, zoomIn=${ANIMATED_SEEK_CONFIG.zoomInDuration}ms`);
             },
             setZoomMultiplier: (mult) => {
                 ANIMATED_SEEK_CONFIG.zoomOutAltMultiplier = mult;
-                console.log(`Zoom out multiplier set to ${mult}x`);
+                console.debug(`Zoom out multiplier set to ${mult}x`);
             },
             setMinDistance: (meters) => {
                 ANIMATED_SEEK_CONFIG.minDistanceM = meters;
-                console.log(`Min distance for animation set to ${meters}m`);
+                console.debug(`Min distance for animation set to ${meters}m`);
             },
         },
 
@@ -6770,16 +6770,16 @@
             const modes = { chase: CameraModes.CHASE, birds_eye: CameraModes.BIRDS_EYE, side_view: CameraModes.SIDE_VIEW, cinematic: CameraModes.CINEMATIC };
             if (modes[mode]) {
                 transitionToMode(modes[mode]);
-                console.log(`Switched to ${mode} mode`);
+                console.debug(`Switched to ${mode} mode`);
             } else {
-                console.log('Available modes: chase, birds_eye, side_view, cinematic');
+                console.debug('Available modes: chase, birds_eye, side_view, cinematic');
             }
         },
 
         // Query terrain at a point
         queryTerrain: (lng, lat) => {
             const elev = map.queryTerrainElevation([lng, lat]);
-            console.log(`Terrain at [${lng}, ${lat}]: ${elev !== null ? elev.toFixed(1) + 'm' : 'null'}`);
+            console.debug(`Terrain at [${lng}, ${lat}]: ${elev !== null ? elev.toFixed(1) + 'm' : 'null'}`);
             return elev;
         },
 
@@ -6801,7 +6801,7 @@
                 updateCamera(0.016);
                 freeNavigationEnabled = true;
             }
-            console.log(`Zoom set to ${Math.round(zoomLevel * 100)}%`);
+            console.debug(`Zoom set to ${Math.round(zoomLevel * 100)}%`);
         },
 
         // Watchdog status and controls
@@ -6818,7 +6818,7 @@
             }),
             reset: () => {
                 resetCameraCaches();
-                console.log('Camera caches reset by watchdog');
+                console.debug('Camera caches reset by watchdog');
             }
         },
 
@@ -6847,13 +6847,13 @@
             simulateSeek: (distanceKm) => {
                 _seekTimestamp = performance.now();
                 _seekDistance = distanceKm * 1000;
-                console.log(`Simulated ${distanceKm}km seek - adaptive smoothing engaged`);
+                console.debug(`Simulated ${distanceKm}km seek - adaptive smoothing engaged`);
             },
             // Reset adaptive smoothing state
             reset: () => {
                 _seekTimestamp = 0;
                 _seekDistance = 0;
-                console.log('Adaptive smoothing state reset');
+                console.debug('Adaptive smoothing state reset');
             }
         },
 
@@ -6877,11 +6877,11 @@
                     lastAlt: null,
                     lastPos: null
                 };
-                console.log('[CHAOS DIAG] Enabled - will log every frame. Use flyoverDebug.cameraChaosDiag.report() to see summary');
+                console.debug('[CHAOS DIAG] Enabled - will log every frame. Use flyoverDebug.cameraChaosDiag.report() to see summary');
             },
             disable: () => {
                 window.CAMERA_CHAOS_DEBUG = false;
-                console.log('[CHAOS DIAG] Disabled');
+                console.debug('[CHAOS DIAG] Disabled');
             },
             // Get current debug data
             getData: () => window._chaosDebugData,
@@ -6889,17 +6889,17 @@
             report: () => {
                 const d = window._chaosDebugData;
                 if (!d) {
-                    console.log('No chaos debug data - run enable() first');
+                    console.debug('No chaos debug data - run enable() first');
                     return;
                 }
-                console.log('=== CAMERA CHAOS DIAGNOSIS REPORT ===');
-                console.log(`Frames analyzed: ${d.frameCount}`);
-                console.log(`Max bearing delta: ${d.maxBearingDelta.toFixed(2)}°/frame`);
-                console.log(`Max altitude delta: ${d.maxAltDelta.toFixed(2)}m/frame`);
-                console.log(`Max position delta: ${d.maxPosDelta.toFixed(2)}m/frame`);
-                console.log('Recent bearing history (last 20):', d.bearingHistory.slice(-20));
-                console.log('Recent altitude history (last 20):', d.altHistory.slice(-20));
-                console.log('Recent terrain history (last 20):', d.terrainHistory.slice(-20));
+                console.debug('=== CAMERA CHAOS DIAGNOSIS REPORT ===');
+                console.debug(`Frames analyzed: ${d.frameCount}`);
+                console.debug(`Max bearing delta: ${d.maxBearingDelta.toFixed(2)}°/frame`);
+                console.debug(`Max altitude delta: ${d.maxAltDelta.toFixed(2)}m/frame`);
+                console.debug(`Max position delta: ${d.maxPosDelta.toFixed(2)}m/frame`);
+                console.debug('Recent bearing history (last 20):', d.bearingHistory.slice(-20));
+                console.debug('Recent altitude history (last 20):', d.altHistory.slice(-20));
+                console.debug('Recent terrain history (last 20):', d.terrainHistory.slice(-20));
                 return d;
             },
             // Clear collected data
@@ -6919,7 +6919,7 @@
                         lastAlt: null,
                         lastPos: null
                     };
-                    console.log('[CHAOS DIAG] Data cleared');
+                    console.debug('[CHAOS DIAG] Data cleared');
                 }
             }
         },
@@ -6930,46 +6930,46 @@
             enable: () => {
                 const controller = getUnifiedCameraController();
                 controller.setEnabled(true);
-                console.log('[UNIFIED] Controller enabled - camera now using single spring system');
-                console.log('Note: To use the new unified camera loop, also call flyoverDebug.unified.enable()');
+                console.debug('[UNIFIED] Controller enabled - camera now using single spring system');
+                console.debug('Note: To use the new unified camera loop, also call flyoverDebug.unified.enable()');
             },
             disable: () => {
                 const controller = getUnifiedCameraController();
                 controller.setEnabled(false);
-                console.log('[UNIFIED] Controller disabled - using legacy smoothing');
+                console.debug('[UNIFIED] Controller disabled - using legacy smoothing');
             },
             status: () => {
                 const controller = getUnifiedCameraController();
                 const info = controller.getDebugInfo();
-                console.log('=== UNIFIED CAMERA CONTROLLER STATUS ===');
-                console.log(`Enabled: ${info.enabled}`);
-                console.log(`State: ${info.state}`);
-                console.log(`Mode: ${info.mode}`);
-                console.log(`Spring position:`, info.springPosition);
-                console.log(`Spring velocity:`, info.springVelocity);
-                console.log(`Bearing: ${info.bearing?.toFixed(1) ?? 'null'}° (vel: ${info.bearingVelocity?.toFixed(1) ?? 'null'}°/s)`);
-                console.log(`Pitch: ${info.pitch?.toFixed(1) ?? 'null'}°`);
-                console.log(`Terrain (filtered): ${info.terrainFiltered?.toFixed(1) ?? 'null'}m`);
-                console.log(`Terrain (raw): ${info.terrainRaw?.toFixed(1) ?? 'null'}m`);
+                console.debug('=== UNIFIED CAMERA CONTROLLER STATUS ===');
+                console.debug(`Enabled: ${info.enabled}`);
+                console.debug(`State: ${info.state}`);
+                console.debug(`Mode: ${info.mode}`);
+                console.debug(`Spring position:`, info.springPosition);
+                console.debug(`Spring velocity:`, info.springVelocity);
+                console.debug(`Bearing: ${info.bearing?.toFixed(1) ?? 'null'}° (vel: ${info.bearingVelocity?.toFixed(1) ?? 'null'}°/s)`);
+                console.debug(`Pitch: ${info.pitch?.toFixed(1) ?? 'null'}°`);
+                console.debug(`Terrain (filtered): ${info.terrainFiltered?.toFixed(1) ?? 'null'}m`);
+                console.debug(`Terrain (raw): ${info.terrainRaw?.toFixed(1) ?? 'null'}m`);
                 if (info.transition) {
-                    console.log(`Transition: ${(info.transition.progress * 100).toFixed(0)}% to ${info.transition.targetMode}`);
+                    console.debug(`Transition: ${(info.transition.progress * 100).toFixed(0)}% to ${info.transition.targetMode}`);
                 }
                 return info;
             },
             reset: () => {
                 const controller = getUnifiedCameraController();
                 controller.reset();
-                console.log('[UNIFIED] Controller state reset');
+                console.debug('[UNIFIED] Controller state reset');
             },
             setTeleportThreshold: (meters) => {
                 const controller = getUnifiedCameraController();
                 controller.config.teleportThreshold = meters;
-                console.log(`[UNIFIED] Teleport threshold set to ${meters}m`);
+                console.debug(`[UNIFIED] Teleport threshold set to ${meters}m`);
             },
             setSpringOmega: (omega) => {
                 const controller = getUnifiedCameraController();
                 controller.positionSpring.omega = omega;
-                console.log(`[UNIFIED] Spring omega set to ${omega}`);
+                console.debug(`[UNIFIED] Spring omega set to ${omega}`);
             }
         },
 
@@ -6980,31 +6980,31 @@
                 window._USE_UNIFIED_CAMERA = true;
                 const controller = getUnifiedCameraController();
                 controller.setEnabled(true);
-                console.log('=== UNIFIED CAMERA SYSTEM ENABLED ===');
-                console.log('Camera now uses single spring-based smoothing.');
-                console.log('All 8+ legacy smoothing layers bypassed.');
-                console.log('Use flyoverDebug.unified.status() to monitor state.');
+                console.debug('=== UNIFIED CAMERA SYSTEM ENABLED ===');
+                console.debug('Camera now uses single spring-based smoothing.');
+                console.debug('All 8+ legacy smoothing layers bypassed.');
+                console.debug('Use flyoverDebug.unified.status() to monitor state.');
             },
             disable: () => {
                 window._USE_UNIFIED_CAMERA = false;
                 const controller = getUnifiedCameraController();
                 controller.setEnabled(false);
-                console.log('=== UNIFIED CAMERA SYSTEM DISABLED ===');
-                console.log('Camera now uses legacy multi-layer smoothing.');
+                console.debug('=== UNIFIED CAMERA SYSTEM DISABLED ===');
+                console.debug('Camera now uses legacy multi-layer smoothing.');
             },
             status: () => {
                 const enabled = window._USE_UNIFIED_CAMERA === true;
                 const controller = getUnifiedCameraController();
                 const info = controller.getDebugInfo();
-                console.log('=== UNIFIED CAMERA SYSTEM STATUS ===');
-                console.log(`System active: ${enabled}`);
-                console.log(`Controller enabled: ${info.enabled}`);
-                console.log(`State machine: ${info.state}`);
-                console.log(`Camera mode: ${info.mode}`);
+                console.debug('=== UNIFIED CAMERA SYSTEM STATUS ===');
+                console.debug(`System active: ${enabled}`);
+                console.debug(`Controller enabled: ${info.enabled}`);
+                console.debug(`State machine: ${info.state}`);
+                console.debug(`Camera mode: ${info.mode}`);
                 if (info.springPosition) {
-                    console.log(`Position: (${info.springPosition.lng?.toFixed(4)}, ${info.springPosition.lat?.toFixed(4)}, ${info.springPosition.alt?.toFixed(0)}m)`);
+                    console.debug(`Position: (${info.springPosition.lng?.toFixed(4)}, ${info.springPosition.lat?.toFixed(4)}, ${info.springPosition.alt?.toFixed(0)}m)`);
                 }
-                console.log(`Bearing: ${info.bearing?.toFixed(1)}° | Pitch: ${info.pitch?.toFixed(1)}°`);
+                console.debug(`Bearing: ${info.bearing?.toFixed(1)}° | Pitch: ${info.pitch?.toFixed(1)}°`);
                 return { systemActive: enabled, ...info };
             },
             toggle: () => {
@@ -7027,36 +7027,36 @@
             status: () => {
                 const recorder = getStateRecorder();
                 const stats = recorder.getStats();
-                console.log('=== STATE RECORDER STATUS ===');
-                console.log(`Enabled: ${stats.isEnabled}`);
-                console.log(`Frames recorded: ${stats.frameCount}`);
-                console.log(`Buffered frames: ${stats.bufferedFrames} / ${stats.bufferCapacity} (${stats.bufferUsagePercent}%)`);
-                console.log(`Buffered duration: ${stats.bufferedDurationSec}s`);
+                console.debug('=== STATE RECORDER STATUS ===');
+                console.debug(`Enabled: ${stats.isEnabled}`);
+                console.debug(`Frames recorded: ${stats.frameCount}`);
+                console.debug(`Buffered frames: ${stats.bufferedFrames} / ${stats.bufferCapacity} (${stats.bufferUsagePercent}%)`);
+                console.debug(`Buffered duration: ${stats.bufferedDurationSec}s`);
                 return stats;
             },
             // Enable recording
             enable: () => {
                 const recorder = getStateRecorder();
                 recorder.setEnabled(true);
-                console.log('[RECORDER] Recording enabled');
+                console.debug('[RECORDER] Recording enabled');
             },
             // Disable recording
             disable: () => {
                 const recorder = getStateRecorder();
                 recorder.setEnabled(false);
-                console.log('[RECORDER] Recording disabled');
+                console.debug('[RECORDER] Recording disabled');
             },
             // Clear recorded data
             clear: () => {
                 const recorder = getStateRecorder();
                 recorder.clear();
-                console.log('[RECORDER] Buffer cleared');
+                console.debug('[RECORDER] Buffer cleared');
             },
             // Export last N seconds
             export: (seconds = 30) => {
                 const recorder = getStateRecorder();
                 const data = recorder.export(seconds);
-                console.log(`[RECORDER] Exported ${data.frameCaptured} frames (${(data.durationMs / 1000).toFixed(1)}s)`);
+                console.debug(`[RECORDER] Exported ${data.frameCaptured} frames (${(data.durationMs / 1000).toFixed(1)}s)`);
                 return data;
             },
             // Get raw buffer (for debugging)
@@ -7065,6 +7065,6 @@
             }
         }
     };
-    console.log('Flyover debug API available: window.flyoverDebug (try .enable() for logging)');
-    console.log('Panic button available: Press P or Ctrl+Shift+P to capture camera state');
+    console.debug('Flyover debug API available: window.flyoverDebug (try .enable() for logging)');
+    console.debug('Panic button available: Press P or Ctrl+Shift+P to capture camera state');
 })();

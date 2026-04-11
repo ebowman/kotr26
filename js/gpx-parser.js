@@ -141,7 +141,7 @@ const GpxParser = (function() {
             if (demResponse.ok) {
                 const demData = await demResponse.json();
                 if (demData.elevations && demData.elevations.length === routeData.coordinates.length) {
-                    console.log(`Loaded DEM elevation data for ${url}`);
+                    console.debug(`Loaded DEM elevation data for ${url}`);
 
                     for (let i = 0; i < routeData.coordinates.length; i++) {
                         routeData.coordinates[i][2] = demData.elevations[i];
@@ -159,7 +159,7 @@ const GpxParser = (function() {
                 routeData.elevationSource = 'gps';
             }
         } catch (e) {
-            console.log(`No DEM data available for ${url}, using GPS elevation`);
+            console.debug(`No DEM data available for ${url}, using GPS elevation`);
             routeData.elevationSource = 'gps';
         }
 
