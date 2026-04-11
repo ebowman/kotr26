@@ -139,6 +139,7 @@
 
     // Auto-hide UI state
     let autoHideTimeout = null;
+    let uiPinned = false; // When true, UI stays visible during playback
     const AUTO_HIDE_DELAY = 3000; // ms before hiding UI during playback
 
     // Camera watchdog state - detects and fixes stuck/jittering camera
@@ -4416,6 +4417,12 @@
             fullscreenBtn.addEventListener('click', toggleFullscreen);
         }
 
+        // Pin UI button
+        const pinBtn = document.getElementById('btn-pin-ui');
+        if (pinBtn) {
+            pinBtn.addEventListener('click', toggleUiPin);
+        }
+
         // Map interaction detection for user override
         // Use direct DOM events on map canvas for reliable detection
         const mapCanvas = map.getCanvas();
@@ -4950,11 +4957,31 @@
             autoHideTimeout = null;
         }
 
-        // Only set new timer if playing
-        if (isPlaying) {
+        // Only set new timer if playing and not pinned
+        if (isPlaying && !uiPinned) {
             autoHideTimeout = setTimeout(() => {
                 hideUI();
             }, AUTO_HIDE_DELAY);
+        }
+    }
+
+    /**
+     * Toggle UI pin state
+     */
+    function toggleUiPin() {
+        uiPinned = !uiPinned;
+        const pinBtn = document.getElementById('btn-pin-ui');
+        if (pinBtn) {
+            pinBtn.classList.toggle('active', uiPinned);
+            pinBtn.title = uiPinned ? 'Unpin controls (always visible)' : 'Pin controls (auto-hides)';
+        }
+        if (uiPinned) {
+            // Cancel any pending hide
+            if (autoHideTimeout) {
+                clearTimeout(autoHideTimeout);
+                autoHideTimeout = null;
+            }
+            showUI();
         }
     }
 
