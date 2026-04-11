@@ -121,23 +121,41 @@
     window.KOTR_ROUTES = ROUTES;
 
     // ========================================================================
-    // Countdown
+    // Countdown — live to 14:00 CEST May 29 (first ride rollout)
     // ========================================================================
-    (function updateCountdown() {
+    (function initCountdown() {
         const el = document.getElementById('countdown');
         if (!el) return;
-        const eventStart = new Date('2026-05-28T00:00:00');
-        const eventEnd = new Date('2026-06-01T23:59:59');
-        const now = new Date();
-        if (now > eventEnd) {
-            el.textContent = '';
-        } else if (now >= eventStart) {
-            const dayOfEvent = Math.floor((now - eventStart) / 86400000) + 1;
-            el.textContent = 'Day ' + dayOfEvent + ' \u2014 riding now';
-        } else {
-            const days = Math.ceil((eventStart - now) / 86400000);
-            el.textContent = days + (days === 1 ? ' day' : ' days') + ' to go';
+        // May 29 2026 14:00 CEST = 12:00 UTC
+        const rollout = new Date('2026-05-29T12:00:00Z');
+        const eventEnd = new Date('2026-06-01T23:59:59Z');
+
+        function tick() {
+            const now = new Date();
+            if (now >= eventEnd) {
+                el.textContent = '';
+                return;
+            }
+            if (now >= rollout) {
+                el.textContent = 'Wheels are rolling';
+                return;
+            }
+            const diff = rollout - now;
+            const d = Math.floor(diff / 86400000);
+            const h = Math.floor((diff % 86400000) / 3600000);
+            const m = Math.floor((diff % 3600000) / 60000);
+            const s = Math.floor((diff % 60000) / 1000);
+            const pad = n => String(n).padStart(2, '0');
+
+            if (d > 0) {
+                el.textContent = d + (d === 1 ? ' day ' : ' days ') + pad(h) + ':' + pad(m) + ':' + pad(s);
+            } else {
+                el.textContent = pad(h) + ':' + pad(m) + ':' + pad(s);
+            }
         }
+
+        tick();
+        setInterval(tick, 1000);
     })();
 
     // ========================================================================

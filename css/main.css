@@ -123,10 +123,11 @@ body {
 }
 
 .hero .countdown {
-    font-size: 0.95rem;
-    opacity: 0.7;
-    letter-spacing: 0.5px;
+    font-size: clamp(1.1rem, 2.5vw, 1.4rem);
+    opacity: 0.9;
+    letter-spacing: 1px;
     margin-bottom: var(--space-lg);
+    font-variant-numeric: tabular-nums;
 }
 
 .charity-badge {
