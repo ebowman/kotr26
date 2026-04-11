@@ -20,13 +20,13 @@ const path = require('path');
 // Route configuration
 // ---------------------------------------------------------------------------
 const ROUTES = [
-    { day: 1, variant: 'standard', label: 'Day 1 - Warm Up', date: '2026-05-29', file: 'KOTR_D1_Warm up ride.gpx' },
-    { day: 2, variant: 'standard', label: 'Day 2 - Standard', date: '2026-05-30', file: 'KOTR_Avignon_Standard_D2.fit' },
-    { day: 2, variant: 'long', label: 'Day 2 - Long', date: '2026-05-30', file: 'KOTR_D2_NW_Long.gpx' },
-    { day: 3, variant: 'standard', label: 'Day 3 - Luberon', date: '2026-05-31', file: 'KOTR_Avignon_D3_Standard.fit' },
-    { day: 3, variant: 'long', label: 'Day 3 - Mont Ventoux', date: '2026-05-31', file: 'KOTR_D3_Long (Mont Ventoux).gpx' },
-    { day: 4, variant: 'standard', label: 'Day 4 - Standard', date: '2026-06-01', file: 'KOTR_Avignon_D4_Standard.fit' },
-    { day: 4, variant: 'long', label: 'Day 4 - Luberon Long', date: '2026-06-01', file: 'KOTR_D4_Luberon Long.gpx' },
+    { day: 1, variant: 'standard', label: 'Warm Up Ride', date: 'May 29', file: 'KOTR_D1_Warm up ride.gpx' },
+    { day: 2, variant: 'standard', label: 'Wine Country (Standard)', date: 'May 30', file: 'KOTR_Avignon_Standard_D2.fit' },
+    { day: 2, variant: 'long', label: 'NW Long', date: 'May 30', file: 'KOTR_D2_NW_Long.gpx' },
+    { day: 3, variant: 'standard', label: 'Luberon Villages', date: 'May 31', file: 'KOTR_Avignon_D3_Standard.fit' },
+    { day: 3, variant: 'long', label: 'Mont Ventoux!', date: 'May 31', file: 'KOTR_D3_Long (Mont Ventoux).gpx' },
+    { day: 4, variant: 'standard', label: 'Final (Standard)', date: 'Jun 1', file: 'KOTR_Avignon_D4_Standard.fit' },
+    { day: 4, variant: 'long', label: 'Luberon Long', date: 'Jun 1', file: 'KOTR_D4_Luberon Long.gpx' },
 ];
 
 const ROUTES_DIR = path.resolve(__dirname, '..', 'routes');
@@ -281,7 +281,13 @@ function main() {
             distance_km: Math.round(distanceKm * 10) / 10,
             elevation_gain: stats.elevationGain,
             elevation_max: stats.maxElevation,
-            _elevations_base64: base64Elev,
+            _elevation_min: stats.minElevation,
+            _elevations_plain: chartElevationsRounded,
+            _course_points: [
+                { name: records[0] ? route.label : 'Start', type: 'generic', dist: 0 },
+                { name: records[records.length - 1] ? route.label : 'End', type: 'generic', dist: Math.round(distanceKm * 1000 * 10) / 10 },
+            ],
+            _start: { lat: records[0].latitude, lon: records[0].longitude },
         });
 
         // --- gps-inline.js ---
@@ -318,6 +324,15 @@ function main() {
     }
 
     // -----------------------------------------------------------------------
+    // Load POI data (pass through as-is)
+    // -----------------------------------------------------------------------
+    const poiDataPath = path.join(PROJECT_ROOT, 'radial', 'poi-data.json');
+    let poiData = {};
+    if (fs.existsSync(poiDataPath)) {
+        poiData = JSON.parse(fs.readFileSync(poiDataPath, 'utf8'));
+    }
+
+    // -----------------------------------------------------------------------
     // Write output files
     // -----------------------------------------------------------------------
 
@@ -326,27 +341,32 @@ function main() {
     fs.writeFileSync(profilesPath, JSON.stringify(elevationProfiles, null, 2));
     console.log(`Wrote ${profilesPath}`);
 
-    // 2. Build data-inline JS content (shared across compare, skyline, pace, radial)
+    // 2. Build data-inline JS content matching the format the visualization pages expect:
+    //    const ROUTE_DATA = [...];
+    //    const POI_DATA = {...};
+    //    Using plain number arrays for elevations (not base64 Float32Array)
     const dataInlineEntries = routeDataEntries.map(entry => {
-        const obj = {
+        return JSON.stringify({
             day: entry.day,
             variant: entry.variant,
             label: entry.label,
             date: entry.date,
             distance_km: entry.distance_km,
+            distance_mi: Math.round(entry.distance_km * 0.621371 * 10) / 10,
             elevation_gain: entry.elevation_gain,
             elevation_max: entry.elevation_max,
-        };
-        // Build the JSON by hand so we can inject the raw JS expression for elevations
-        const jsonPart = JSON.stringify(obj);
-        // Remove trailing } and append the elevations property with the decoder expression
-        return jsonPart.slice(0, -1) + ',"elevations":' + float32DecoderExpr(entry._elevations_base64) + '}';
+            elevation_min: entry._elevation_min,
+            elevations: entry._elevations_plain,
+            course_points: entry._course_points,
+            start: entry._start,
+        });
     });
 
-    const dataInlineContent = 'window.ROUTE_DATA = [' + dataInlineEntries.join(',') + '];\n';
+    const dataInlineContent = 'const ROUTE_DATA = [' + dataInlineEntries.join(',') + '];\n\n'
+        + 'const POI_DATA = ' + JSON.stringify(poiData) + ';\n';
 
     // 3. Build gps-inline JS content
-    const gpsInlineContent = 'window.ROUTE_GPS = ' + JSON.stringify(routeGPS) + ';\n';
+    const gpsInlineContent = 'const ROUTE_GPS = ' + JSON.stringify(routeGPS) + ';\n';
 
     // Write compare/data-inline.js and compare/gps-inline.js
     const compareDIPath = path.join(PROJECT_ROOT, 'compare', 'data-inline.js');
