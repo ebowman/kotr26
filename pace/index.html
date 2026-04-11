@@ -584,6 +584,24 @@ document.getElementById('ftp-slider').addEventListener('input', function() {
 });
 document.getElementById('variant-select').addEventListener('change', buildAll);
 
+// Load rider profile from localStorage (shared with main page)
+try {
+    const stored = localStorage.getItem('kotr-rider-profile');
+    if (stored) {
+        const profile = JSON.parse(stored);
+        if (profile.weight) {
+            const ws = document.getElementById('weight-slider');
+            ws.value = Math.max(+ws.min, Math.min(+ws.max, profile.weight));
+            document.getElementById('weight-value').textContent = ws.value + ' kg';
+        }
+        if (profile.ftp) {
+            const fs = document.getElementById('ftp-slider');
+            fs.value = Math.max(+fs.min, Math.min(+fs.max, profile.ftp));
+            document.getElementById('ftp-value').textContent = fs.value + ' W';
+        }
+    }
+} catch(e) { /* ignore localStorage errors */ }
+
 // Initial render
 buildAll();
 </script>
