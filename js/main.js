@@ -121,6 +121,26 @@
     window.KOTR_ROUTES = ROUTES;
 
     // ========================================================================
+    // Countdown
+    // ========================================================================
+    (function updateCountdown() {
+        const el = document.getElementById('countdown');
+        if (!el) return;
+        const eventStart = new Date('2026-05-28T00:00:00');
+        const eventEnd = new Date('2026-06-01T23:59:59');
+        const now = new Date();
+        if (now > eventEnd) {
+            el.textContent = '';
+        } else if (now >= eventStart) {
+            const dayOfEvent = Math.floor((now - eventStart) / 86400000) + 1;
+            el.textContent = 'Day ' + dayOfEvent + ' \u2014 riding now';
+        } else {
+            const days = Math.ceil((eventStart - now) / 86400000);
+            el.textContent = days + (days === 1 ? ' day' : ' days') + ' to go';
+        }
+    })();
+
+    // ========================================================================
     // Route Card Rendering
     // ========================================================================
 
