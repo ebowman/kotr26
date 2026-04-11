@@ -25,10 +25,10 @@
             name: 'Shake Out the Travel Legs',
             description: 'Ease into the adventure with a gentle spin through Provencal countryside.',
             type: 'warmup',
-            fitFile: 'KOTR_Avignon_D1.fit',
+            routeFile: 'KOTR_D1_Warm up ride.gpx',
             // Stats from FIT/DEM calculation
-            distance: 45,
-            elevation: 100,
+            distance: 48,
+            elevation: 147,
             difficulty: 1,
             difficultyLabel: 'Easy',
             duration: '~2 hours'
@@ -42,7 +42,7 @@
             type: 'choice',
             standard: {
                 label: 'STANDARD',
-                fitFile: 'KOTR_Avignon_Standard_D2.fit',
+                routeFile: 'KOTR_Avignon_Standard_D2.fit',
                 distance: 80,
                 elevation: 540,
                 difficulty: 2,
@@ -51,9 +51,9 @@
             },
             long: {
                 label: 'LONG',
-                fitFile: 'KOTR_Avignon_Long_D2.fit',
-                distance: 106,
-                elevation: 910,
+                routeFile: 'KOTR_D2_NW_Long.gpx',
+                distance: 105,
+                elevation: 709,
                 difficulty: 3,
                 difficultyLabel: 'Challenging',
                 duration: '~4-5 hours'
@@ -69,7 +69,7 @@
             featured: true,
             standard: {
                 label: 'LUBERON',
-                fitFile: 'KOTR_Avignon_D3_Standard.fit',
+                routeFile: 'KOTR_Avignon_D3_Standard.fit',
                 distance: 100,
                 elevation: 1020,
                 difficulty: 3,
@@ -79,14 +79,14 @@
             long: {
                 label: 'MONT VENTOUX',
                 labelIcon: '&#127956;', // Mountain emoji HTML entity
-                fitFile: 'KOTR_Ventoux_D3_Long.fit',
-                distance: 131,
-                elevation: 2230,
+                routeFile: 'KOTR_D3_Long (Mont Ventoux).gpx',
+                distance: 140,
+                elevation: 2178,
                 difficulty: 4,
                 difficultyLabel: 'Epic',
                 duration: '~6-7 hours',
                 special: true,
-                specialNote: 'Beast of Provence - Summit 1,909m'
+                specialNote: 'Beast of Provence - Summit 1,897m'
             }
         },
         day4: {
@@ -98,7 +98,7 @@
             type: 'choice',
             standard: {
                 label: 'STANDARD',
-                fitFile: 'KOTR_Avignon_D4_Standard.fit',
+                routeFile: 'KOTR_Avignon_D4_Standard.fit',
                 distance: 85,
                 elevation: 330,
                 difficulty: 2,
@@ -107,11 +107,11 @@
             },
             long: {
                 label: 'LONG',
-                fitFile: 'KOTR_Avignon_D4_Long.fit',
-                distance: 95,
-                elevation: 410,
-                difficulty: 2,
-                difficultyLabel: 'Moderate',
+                routeFile: 'KOTR_D4_Luberon Long.gpx',
+                distance: 91,
+                elevation: 683,
+                difficulty: 3,
+                difficultyLabel: 'Challenging',
                 duration: '~3.5-4.5 hours'
             }
         }
@@ -178,16 +178,16 @@
      * @param {number} distance - Route distance in km
      * @param {number} elevation - Total elevation gain in meters
      * @param {number} difficulty - Difficulty level 1-4
-     * @param {string} fitFile - FIT file name for flyover link
+     * @param {string} routeFile - FIT file name for flyover link
      * @returns {string} HTML string with SVG elevation profile
      */
-    function generateElevationProfileSVG(distance, elevation, difficulty, fitFile) {
+    function generateElevationProfileSVG(distance, elevation, difficulty, routeFile) {
         const width = 200;
         const height = 40;
         const padding = 2;
 
         // Try to use real elevation data from cache
-        const realProfile = elevationProfilesCache && elevationProfilesCache[fitFile];
+        const realProfile = elevationProfilesCache && elevationProfilesCache[routeFile];
         const points = [];
 
         if (realProfile && realProfile.elevations && realProfile.elevations.length > 0) {
@@ -251,7 +251,7 @@
         const strokeColor = strokeColors[difficulty - 1];
 
         return `
-            <div class="mini-elevation-profile" data-difficulty="${difficulty}" data-route="${fitFile}" title="Click for 3D flyover">
+            <div class="mini-elevation-profile" data-difficulty="${difficulty}" data-route="${routeFile}" title="Click for 3D flyover">
                 <svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none">
                     <path class="elevation-fill" d="${fillPath}" fill="url(#${gradientId})" />
                     <path class="elevation-line" d="${linePath}" fill="none" stroke="${strokeColor}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
@@ -288,7 +288,7 @@
             config.distance,
             config.elevation,
             config.difficulty,
-            config.fitFile
+            config.routeFile
         );
 
         return `
@@ -317,10 +317,10 @@
                 ${elevationProfile}
                 <p class="route-description">${config.description}</p>
                 <div class="card-actions">
-                    <button class="btn btn-flyover" data-route="${config.fitFile}">
+                    <button class="btn btn-flyover" data-route="${config.routeFile}">
                         <span class="icon">&#127916;</span> 3D Flyover
                     </button>
-                    <button class="btn btn-download" data-route="${config.fitFile}">
+                    <button class="btn btn-download" data-route="${config.routeFile}">
                         <span class="icon">&#128229;</span> GPX
                     </button>
                 </div>
@@ -341,7 +341,7 @@
             option.distance,
             option.elevation,
             option.difficulty,
-            option.fitFile
+            option.routeFile
         );
 
         let html = `
@@ -359,10 +359,10 @@
                 ${elevationProfile}
                 ${option.specialNote ? `<div class="special-note">${option.specialNote}</div>` : ''}
                 <div class="option-actions">
-                    <button class="btn btn-sm btn-flyover" data-route="${option.fitFile}">
+                    <button class="btn btn-sm btn-flyover" data-route="${option.routeFile}">
                         <span class="icon">&#127916;</span> 3D Flyover
                     </button>
-                    <button class="btn btn-sm btn-download" data-route="${option.fitFile}">
+                    <button class="btn btn-sm btn-download" data-route="${option.routeFile}">
                         <span class="icon">&#128229;</span> GPX
                     </button>
                 </div>
@@ -1293,11 +1293,11 @@
             const day = config.day;
 
             if (config.type === 'warmup') {
-                files.push(config.fitFile);
+                files.push(config.routeFile);
             } else {
                 const variant = selectedVariants[day] || 'standard';
                 const selected = config[variant] || config.standard;
-                files.push(selected.fitFile);
+                files.push(selected.routeFile);
             }
         });
 
@@ -1322,8 +1322,9 @@
                 // Download each file sequentially
                 for (const file of files) {
                     try {
-                        const routeData = await FitParser.loadFitFile(`routes/${file}`);
-                        const gpxFilename = file.replace('.fit', '.gpx');
+                        const loader = file.endsWith('.gpx') ? GpxParser.loadGpxFile : FitParser.loadFitFile;
+                        const routeData = await loader(`routes/${file}`);
+                        const gpxFilename = file.endsWith('.gpx') ? file : file.replace('.fit', '.gpx');
                         FitParser.downloadGPX(routeData, gpxFilename);
 
                         // Small delay between downloads to prevent browser blocking
@@ -1493,11 +1494,13 @@
         btn.disabled = true;
 
         try {
-            // Load and parse FIT file
-            const routeData = await FitParser.loadFitFile(`routes/${routeFile.split('/').pop()}`);
+            // Load and parse route file (FIT or GPX)
+            const file = routeFile.split('/').pop();
+            const loader = file.endsWith('.gpx') ? GpxParser.loadGpxFile : FitParser.loadFitFile;
+            const routeData = await loader(`routes/${file}`);
 
             // Download as GPX
-            const gpxFilename = routeFile.replace('.fit', '.gpx').split('/').pop();
+            const gpxFilename = file.endsWith('.gpx') ? file : file.replace('.fit', '.gpx');
             FitParser.downloadGPX(routeData, gpxFilename);
         } catch (error) {
             console.error('Failed to download route:', error);

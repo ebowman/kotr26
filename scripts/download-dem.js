@@ -80,6 +80,27 @@ class SimpleFitParser {
     }
 }
 
+// ============= Simple GPX Parser =============
+class SimpleGPXParser {
+    parse(xmlText) {
+        // Use a simple regex-based approach for Node.js (no DOM)
+        const records = [];
+        const trkptRegex = /<trkpt\s+lat="([^"]+)"\s+lon="([^"]+)"[^>]*>([\s\S]*?)<\/trkpt>/g;
+        const eleRegex = /<ele>([^<]+)<\/ele>/;
+        let match;
+        while ((match = trkptRegex.exec(xmlText)) !== null) {
+            const lat = parseFloat(match[1]);
+            const lon = parseFloat(match[2]);
+            const eleMatch = match[3].match(eleRegex);
+            const altitude = eleMatch ? parseFloat(eleMatch[1]) : 0;
+            if (!isNaN(lat) && !isNaN(lon)) {
+                records.push({ latitude: lat, longitude: lon, altitude });
+            }
+        }
+        return records;
+    }
+}
+
 // ============= Mapbox DEM =============
 function lonLatToPixelInTile(lon, lat, zoom, tileSize = 512) {
     const scale = Math.pow(2, zoom);
@@ -129,11 +150,12 @@ async function getElevationFromDEM(lon, lat, zoom = 14) {
 }
 
 // ============= Main Processing =============
-async function processRoute(fitFilePath, force = false) {
-    const routeName = path.basename(fitFilePath, '.fit');
-    const demFilePath = fitFilePath.replace('.fit', '.dem.json');
+async function processRoute(routeFilePath, force = false) {
+    const ext = path.extname(routeFilePath).toLowerCase();
+    const routeName = path.basename(routeFilePath, ext);
+    const demFilePath = routeFilePath.replace(/\.(fit|gpx)$/i, '.dem.json');
 
-    console.log(`\nProcessing: ${routeName}`);
+    console.log(`\nProcessing: ${routeName} (${ext})`);
 
     // Check if DEM file already exists
     if (fs.existsSync(demFilePath) && !force) {
@@ -141,10 +163,20 @@ async function processRoute(fitFilePath, force = false) {
         return;
     }
 
-    // Parse FIT file
-    const buffer = fs.readFileSync(fitFilePath);
-    const parser = new SimpleFitParser();
-    const records = parser.parse(buffer);
+    // Parse route file based on extension
+    let records;
+    if (ext === '.fit') {
+        const buffer = fs.readFileSync(routeFilePath);
+        const parser = new SimpleFitParser();
+        records = parser.parse(buffer);
+    } else if (ext === '.gpx') {
+        const xmlText = fs.readFileSync(routeFilePath, 'utf8');
+        const parser = new SimpleGPXParser();
+        records = parser.parse(xmlText);
+    } else {
+        console.log(`  Unsupported format: ${ext}, skipping...`);
+        return;
+    }
 
     console.log(`  Parsed ${records.length} GPS points`);
 
@@ -258,14 +290,14 @@ async function main() {
     if (force) console.log('(Force mode: re-downloading all files)\n');
 
     const routesDir = 'routes';
-    const fitFiles = fs.readdirSync(routesDir)
-        .filter(f => f.endsWith('.fit'))
+    const routeFiles = fs.readdirSync(routesDir)
+        .filter(f => f.endsWith('.fit') || f.endsWith('.gpx'))
         .map(f => path.join(routesDir, f));
 
-    console.log(`Found ${fitFiles.length} FIT files`);
+    console.log(`Found ${routeFiles.length} route files (.fit + .gpx)`);
 
-    for (const fitFile of fitFiles) {
-        await processRoute(fitFile, force);
+    for (const routeFile of routeFiles) {
+        await processRoute(routeFile, force);
     }
 
     console.log('\n✓ All routes processed!');

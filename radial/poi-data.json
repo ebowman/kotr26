@@ -1,0 +1,723 @@
+{
+  "day1_standard": [
+    {
+      "name": "Saint-Gabriel-Croix de Noves",
+      "lat": 43.9266,
+      "lon": 4.84455,
+      "dist": 0,
+      "type": "place"
+    },
+    {
+      "name": "Durance-Cantarel",
+      "lat": 43.92219,
+      "lon": 4.83185,
+      "dist": 2778,
+      "type": "place"
+    },
+    {
+      "name": "Ch\u00e2teaurenard",
+      "lat": 43.90408,
+      "lon": 4.81559,
+      "dist": 6455,
+      "type": "place"
+    },
+    {
+      "name": "Eyragues",
+      "lat": 43.85883,
+      "lon": 4.83277,
+      "dist": 13608,
+      "type": "place"
+    },
+    {
+      "name": "Noves",
+      "lat": 43.84151,
+      "lon": 4.87929,
+      "dist": 19449,
+      "type": "place"
+    },
+    {
+      "name": "Saint-Andiol",
+      "lat": 43.83796,
+      "lon": 4.92636,
+      "dist": 24764,
+      "type": "place"
+    },
+    {
+      "name": "Ch\u00e2teaurenard",
+      "lat": 43.89202,
+      "lon": 4.86113,
+      "dist": 37304,
+      "type": "place"
+    },
+    {
+      "name": "Durance-Cantarel",
+      "lat": 43.91732,
+      "lon": 4.81591,
+      "dist": 44057,
+      "type": "place"
+    },
+    {
+      "name": "Saint-Gabriel-Croix de Noves",
+      "lat": 43.92223,
+      "lon": 4.8338,
+      "dist": 45701,
+      "type": "place"
+    }
+  ],
+  "day2_standard": [
+    {
+      "name": "Saint-Gabriel-Croix de Noves",
+      "lat": 43.92677,
+      "lon": 4.8441,
+      "dist": 0,
+      "type": "place"
+    },
+    {
+      "name": "Magnanen-Teinturiers",
+      "lat": 43.94251,
+      "lon": 4.80901,
+      "dist": 4014,
+      "type": "place"
+    },
+    {
+      "name": "Les Angles",
+      "lat": 43.94667,
+      "lon": 4.78523,
+      "dist": 7995,
+      "type": "place"
+    },
+    {
+      "name": "Aramon",
+      "lat": 43.90635,
+      "lon": 4.70786,
+      "dist": 16059,
+      "type": "place"
+    },
+    {
+      "name": "Vallabr\u00e8gues",
+      "lat": 43.88011,
+      "lon": 4.6288,
+      "dist": 24099,
+      "type": "place"
+    },
+    {
+      "name": "Montfrin",
+      "lat": 43.86975,
+      "lon": 4.59453,
+      "dist": 28049,
+      "type": "place"
+    },
+    {
+      "name": "Meynes",
+      "lat": 43.88219,
+      "lon": 4.57146,
+      "dist": 32126,
+      "type": "place"
+    },
+    {
+      "name": "Sernhac",
+      "lat": 43.91098,
+      "lon": 4.55662,
+      "dist": 36140,
+      "type": "place"
+    },
+    {
+      "name": "Remoulins",
+      "lat": 43.9416,
+      "lon": 4.5522,
+      "dist": 40168,
+      "type": "place"
+    },
+    {
+      "name": "Castillon-du-Gard",
+      "lat": 43.95483,
+      "lon": 4.55281,
+      "dist": 44128,
+      "type": "place"
+    },
+    {
+      "name": "Valligui\u00e8res",
+      "lat": 44.00549,
+      "lon": 4.58781,
+      "dist": 52211,
+      "type": "place"
+    },
+    {
+      "name": "Rochefort-du-Gard",
+      "lat": 43.98117,
+      "lon": 4.65723,
+      "dist": 60254,
+      "type": "place"
+    },
+    {
+      "name": "Les Angles",
+      "lat": 43.95853,
+      "lon": 4.74373,
+      "dist": 68288,
+      "type": "place"
+    },
+    {
+      "name": "Bellecroix-Pont d'Avignon",
+      "lat": 43.95588,
+      "lon": 4.78398,
+      "dist": 72296,
+      "type": "place"
+    },
+    {
+      "name": "Magnanen-Teinturiers",
+      "lat": 43.94284,
+      "lon": 4.80858,
+      "dist": 76324,
+      "type": "place"
+    },
+    {
+      "name": "Saint-Gabriel-Croix de Noves",
+      "lat": 43.92678,
+      "lon": 4.84397,
+      "dist": 80332,
+      "type": "place"
+    }
+  ],
+  "day2_long": [
+    {
+      "name": "Durance-Cantarel",
+      "lat": 43.92657,
+      "lon": 4.84548,
+      "dist": 31,
+      "type": "place"
+    },
+    {
+      "name": "La Balance-Raspail",
+      "lat": 43.94936,
+      "lon": 4.80147,
+      "dist": 6425,
+      "type": "place"
+    },
+    {
+      "name": "Les Angles",
+      "lat": 43.93678,
+      "lon": 4.75264,
+      "dist": 12643,
+      "type": "place"
+    },
+    {
+      "name": "Aramon",
+      "lat": 43.90488,
+      "lon": 4.70668,
+      "dist": 17943,
+      "type": "place"
+    },
+    {
+      "name": "Montfrin",
+      "lat": 43.87061,
+      "lon": 4.60676,
+      "dist": 28555,
+      "type": "place"
+    },
+    {
+      "name": "Meynes",
+      "lat": 43.88278,
+      "lon": 4.57095,
+      "dist": 33942,
+      "type": "place"
+    },
+    {
+      "name": "Bezouce",
+      "lat": 43.8776,
+      "lon": 4.50968,
+      "dist": 38276,
+      "type": "place"
+    },
+    {
+      "name": "L\u00e9denon",
+      "lat": 43.89577,
+      "lon": 4.52698,
+      "dist": 38939,
+      "type": "place"
+    },
+    {
+      "name": "Cabri\u00e8res",
+      "lat": 43.90333,
+      "lon": 4.49012,
+      "dist": 44222,
+      "type": "place"
+    },
+    {
+      "name": "Collias",
+      "lat": 43.93412,
+      "lon": 4.47388,
+      "dist": 49539,
+      "type": "place"
+    },
+    {
+      "name": "Saint-Maximin",
+      "lat": 44.00095,
+      "lon": 4.45108,
+      "dist": 60473,
+      "type": "place"
+    },
+    {
+      "name": "Flaux",
+      "lat": 44.01951,
+      "lon": 4.49428,
+      "dist": 66135,
+      "type": "place"
+    },
+    {
+      "name": "Valligui\u00e8res",
+      "lat": 44.0122,
+      "lon": 4.54542,
+      "dist": 71514,
+      "type": "place"
+    },
+    {
+      "name": "Rochefort-du-Gard",
+      "lat": 43.99144,
+      "lon": 4.64766,
+      "dist": 82205,
+      "type": "place"
+    },
+    {
+      "name": "Les Angles",
+      "lat": 43.96064,
+      "lon": 4.75253,
+      "dist": 93287,
+      "type": "place"
+    },
+    {
+      "name": "La Balance-Raspail",
+      "lat": 43.94727,
+      "lon": 4.79994,
+      "dist": 98492,
+      "type": "place"
+    },
+    {
+      "name": "Durance-Cantarel",
+      "lat": 43.92656,
+      "lon": 4.84547,
+      "dist": 104854,
+      "type": "place"
+    }
+  ],
+  "day3_standard": [
+    {
+      "name": "Saint-Gabriel-Croix de Noves",
+      "lat": 43.92677,
+      "lon": 4.84411,
+      "dist": 0,
+      "type": "place"
+    },
+    {
+      "name": "Durance-Cantarel",
+      "lat": 43.90241,
+      "lon": 4.88703,
+      "dist": 5014,
+      "type": "place"
+    },
+    {
+      "name": "Caumont-sur-Durance",
+      "lat": 43.88922,
+      "lon": 4.92784,
+      "dist": 10076,
+      "type": "place"
+    },
+    {
+      "name": "Velorgues-Petit Palais",
+      "lat": 43.89749,
+      "lon": 5.04823,
+      "dist": 20174,
+      "type": "place"
+    },
+    {
+      "name": "Robion",
+      "lat": 43.87374,
+      "lon": 5.08211,
+      "dist": 25192,
+      "type": "place"
+    },
+    {
+      "name": "Gordes",
+      "lat": 43.88859,
+      "lon": 5.18136,
+      "dist": 35297,
+      "type": "place"
+    },
+    {
+      "name": "Venasque",
+      "lat": 43.98627,
+      "lon": 5.17893,
+      "dist": 50434,
+      "type": "place"
+    },
+    {
+      "name": "Le Beaucet",
+      "lat": 43.985,
+      "lon": 5.11529,
+      "dist": 60521,
+      "type": "place"
+    },
+    {
+      "name": "Saumane-de-Vaucluse",
+      "lat": 43.95468,
+      "lon": 5.10426,
+      "dist": 65558,
+      "type": "place"
+    },
+    {
+      "name": "Velorgues-Petit Palais",
+      "lat": 43.88009,
+      "lon": 5.08329,
+      "dist": 75606,
+      "type": "place"
+    },
+    {
+      "name": "Caumont-sur-Durance",
+      "lat": 43.89609,
+      "lon": 4.98804,
+      "dist": 85740,
+      "type": "place"
+    },
+    {
+      "name": "Durance-Cantarel",
+      "lat": 43.90226,
+      "lon": 4.88738,
+      "dist": 95826,
+      "type": "place"
+    },
+    {
+      "name": "Saint-Gabriel-Croix de Noves",
+      "lat": 43.92677,
+      "lon": 4.84412,
+      "dist": 100878,
+      "type": "place"
+    }
+  ],
+  "day3_long": [
+    {
+      "name": "Saint-Gabriel-Croix de Noves",
+      "lat": 43.92645,
+      "lon": 4.84453,
+      "dist": 12,
+      "type": "place"
+    },
+    {
+      "name": "Ved\u00e8ne",
+      "lat": 43.9537,
+      "lon": 4.89324,
+      "dist": 6093,
+      "type": "place"
+    },
+    {
+      "name": "Le Thor",
+      "lat": 43.96582,
+      "lon": 4.96733,
+      "dist": 14032,
+      "type": "place"
+    },
+    {
+      "name": "Pernes-les-Fontaines",
+      "lat": 43.98967,
+      "lon": 5.03704,
+      "dist": 22762,
+      "type": "place"
+    },
+    {
+      "name": "Mazan",
+      "lat": 44.06255,
+      "lon": 5.13279,
+      "dist": 36047,
+      "type": "place"
+    },
+    {
+      "name": "Crillon-le-Brave",
+      "lat": 44.11088,
+      "lon": 5.1609,
+      "dist": 42619,
+      "type": "place"
+    },
+    {
+      "name": "B\u00e9doin",
+      "lat": 44.12039,
+      "lon": 5.22568,
+      "dist": 49246,
+      "type": "place"
+    },
+    {
+      "name": "Beaumont-du-Ventoux",
+      "lat": 44.17616,
+      "lon": 5.27429,
+      "dist": 68942,
+      "type": "place"
+    },
+    {
+      "name": "Malauc\u00e8ne",
+      "lat": 44.1643,
+      "lon": 5.15972,
+      "dist": 82069,
+      "type": "place"
+    },
+    {
+      "name": "Caromb",
+      "lat": 44.12279,
+      "lon": 5.10986,
+      "dist": 96801,
+      "type": "place"
+    },
+    {
+      "name": "Mazan",
+      "lat": 44.0692,
+      "lon": 5.12378,
+      "dist": 103434,
+      "type": "place"
+    },
+    {
+      "name": "Pernes-les-Fontaines",
+      "lat": 44.02315,
+      "lon": 5.1012,
+      "dist": 109814,
+      "type": "place"
+    },
+    {
+      "name": "Le Thor",
+      "lat": 43.96592,
+      "lon": 4.969,
+      "dist": 125766,
+      "type": "place"
+    },
+    {
+      "name": "Campveire",
+      "lat": 43.94901,
+      "lon": 4.89839,
+      "dist": 133253,
+      "type": "place"
+    },
+    {
+      "name": "Saint-Gabriel-Croix de Noves",
+      "lat": 43.92634,
+      "lon": 4.84451,
+      "dist": 139855,
+      "type": "place"
+    }
+  ],
+  "day4_standard": [
+    {
+      "name": "Saint-Gabriel-Croix de Noves",
+      "lat": 43.92683,
+      "lon": 4.84462,
+      "dist": 0,
+      "type": "place"
+    },
+    {
+      "name": "Synagogue-Bonaventure",
+      "lat": 43.9516,
+      "lon": 4.81954,
+      "dist": 4227,
+      "type": "place"
+    },
+    {
+      "name": "Barthelasse-Piot \u00c9tendu",
+      "lat": 43.96204,
+      "lon": 4.81388,
+      "dist": 8419,
+      "type": "place"
+    },
+    {
+      "name": "Abbaye-La Motte",
+      "lat": 43.99517,
+      "lon": 4.82278,
+      "dist": 12681,
+      "type": "place"
+    },
+    {
+      "name": "Chaffunes",
+      "lat": 44.01737,
+      "lon": 4.82749,
+      "dist": 16914,
+      "type": "place"
+    },
+    {
+      "name": "Ch\u00e2teauneuf-du-Pape",
+      "lat": 44.05392,
+      "lon": 4.79255,
+      "dist": 25350,
+      "type": "place"
+    },
+    {
+      "name": "Gironde-Cabrieres-Boisfeuillet-Lampourde",
+      "lat": 44.07485,
+      "lon": 4.76815,
+      "dist": 29592,
+      "type": "place"
+    },
+    {
+      "name": "Caderousse",
+      "lat": 44.09697,
+      "lon": 4.7462,
+      "dist": 33818,
+      "type": "place"
+    },
+    {
+      "name": "Codolet",
+      "lat": 44.12248,
+      "lon": 4.69304,
+      "dist": 42289,
+      "type": "place"
+    },
+    {
+      "name": "Laudun-l'Ardoise",
+      "lat": 44.10452,
+      "lon": 4.66063,
+      "dist": 46525,
+      "type": "place"
+    },
+    {
+      "name": "Saint-Laurent-des-Arbres",
+      "lat": 44.05298,
+      "lon": 4.69824,
+      "dist": 59220,
+      "type": "place"
+    },
+    {
+      "name": "Tavel",
+      "lat": 44.01883,
+      "lon": 4.69826,
+      "dist": 63416,
+      "type": "place"
+    },
+    {
+      "name": "Pujaut",
+      "lat": 44.00767,
+      "lon": 4.74159,
+      "dist": 67670,
+      "type": "place"
+    },
+    {
+      "name": "Abbaye-La Motte",
+      "lat": 43.96509,
+      "lon": 4.79649,
+      "dist": 76101,
+      "type": "place"
+    },
+    {
+      "name": "La Balance-Raspail",
+      "lat": 43.94282,
+      "lon": 4.8026,
+      "dist": 80367,
+      "type": "place"
+    },
+    {
+      "name": "Saint-Gabriel-Croix de Noves",
+      "lat": 43.92634,
+      "lon": 4.84451,
+      "dist": 84582,
+      "type": "place"
+    }
+  ],
+  "day4_long": [
+    {
+      "name": "Saint-Gabriel-Croix de Noves",
+      "lat": 43.92602,
+      "lon": 4.84386,
+      "dist": 0,
+      "type": "place"
+    },
+    {
+      "name": "Avignon",
+      "lat": 43.89679,
+      "lon": 4.90352,
+      "dist": 6525,
+      "type": "place"
+    },
+    {
+      "name": "Caumont-sur-Durance",
+      "lat": 43.89581,
+      "lon": 4.97062,
+      "dist": 13051,
+      "type": "place"
+    },
+    {
+      "name": "L'Isle-sur-la-Sorgue",
+      "lat": 43.91426,
+      "lon": 5.04557,
+      "dist": 19576,
+      "type": "place"
+    },
+    {
+      "name": "L'Isle-sur-la-Sorgue",
+      "lat": 43.90283,
+      "lon": 5.09564,
+      "dist": 26101,
+      "type": "place"
+    },
+    {
+      "name": "Cabri\u00e8res-d'Avignon",
+      "lat": 43.88734,
+      "lon": 5.15786,
+      "dist": 32627,
+      "type": "place"
+    },
+    {
+      "name": "Goult",
+      "lat": 43.87759,
+      "lon": 5.22876,
+      "dist": 39152,
+      "type": "place"
+    },
+    {
+      "name": "Goult",
+      "lat": 43.84348,
+      "lon": 5.24943,
+      "dist": 45678,
+      "type": "place"
+    },
+    {
+      "name": "M\u00e9nerbes",
+      "lat": 43.83314,
+      "lon": 5.23791,
+      "dist": 52203,
+      "type": "place"
+    },
+    {
+      "name": "Opp\u00e8de",
+      "lat": 43.83701,
+      "lon": 5.17219,
+      "dist": 58728,
+      "type": "place"
+    },
+    {
+      "name": "Robion",
+      "lat": 43.86546,
+      "lon": 5.11431,
+      "dist": 65254,
+      "type": "place"
+    },
+    {
+      "name": "Cavaillon",
+      "lat": 43.86448,
+      "lon": 5.03901,
+      "dist": 71779,
+      "type": "place"
+    },
+    {
+      "name": "Caumont-sur-Durance",
+      "lat": 43.8813,
+      "lon": 4.96703,
+      "dist": 78304,
+      "type": "place"
+    },
+    {
+      "name": "Avignon",
+      "lat": 43.89679,
+      "lon": 4.90352,
+      "dist": 84830,
+      "type": "place"
+    },
+    {
+      "name": "Saint-Gabriel-Croix de Noves",
+      "lat": 43.92602,
+      "lon": 4.84386,
+      "dist": 91355,
+      "type": "place"
+    }
+  ]
+}

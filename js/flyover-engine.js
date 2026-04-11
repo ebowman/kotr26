@@ -3574,7 +3574,8 @@
         try {
             // Parse FIT file
             console.log('Loading route file:', routeFile);
-            routeData = await FitParser.loadFitFile(`routes/${routeFile}`);
+            const loader = routeFile.endsWith('.gpx') ? GpxParser.loadGpxFile : FitParser.loadFitFile;
+            routeData = await loader(`routes/${routeFile}`);
             console.log('Route data loaded:', {
                 points: routeData.coordinates?.length,
                 distance: routeData.distance,
@@ -3814,7 +3815,7 @@
      */
     function updateRouteInfo(routeFile) {
         // Extract route name from filename
-        let name = routeFile.replace('.fit', '').replace(/_/g, ' ');
+        let name = routeFile.replace(/\.(fit|gpx)$/, '').replace(/_/g, ' ');
 
         // Special handling for known routes
         if (routeFile.includes('Ventoux')) {

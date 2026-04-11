@@ -167,6 +167,23 @@
     bottom: 0;
     left: 0;
     z-index: 2;
+    cursor: crosshair;
+  }
+
+  .elev-tooltip {
+    position: absolute;
+    bottom: 64px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(45,45,45,0.9);
+    color: #f5f3ef;
+    font-size: 11px;
+    padding: 4px 8px;
+    border-radius: 4px;
+    white-space: nowrap;
+    pointer-events: none;
+    z-index: 3;
+    display: none;
   }
 
   .nav-links {
@@ -346,8 +363,9 @@
 
       grid.appendChild(cell);
 
-      drawMap(mapDiv, gps, variant, key);
-      drawElevation(elevDiv, route.elevations, variant);
+      const mapResult = drawMap(mapDiv, gps, variant, key);
+      const elevResult = drawElevation(elevDiv, route.elevations, variant);
+      wireScrubber(elevDiv, elevResult, mapResult, route, cell);
       cell.addEventListener('click', () => toggleSelect(key, day, variant));
     }
   });
@@ -443,6 +461,16 @@
       .attr('r', 5)
       .attr('fill', color)
       .attr('stroke', '#fff').attr('stroke-width', 2);
+
+    // Scrubber bob (hidden until elevation hover)
+    const bob = svg.append('circle')
+      .attr('r', 7)
+      .attr('fill', '#e63946')
+      .attr('stroke', '#fff').attr('stroke-width', 2.5)
+      .style('display', 'none')
+      .style('filter', 'drop-shadow(0 1px 3px rgba(0,0,0,0.4))');
+
+    return { points, bob };
   }
 
   function drawElevation(container, elevations, variant) {
@@ -484,6 +512,104 @@
       .attr('fill', 'none')
       .attr('stroke', color)
       .attr('stroke-width', 1.5);
+
+    // Cursor line for scrubber
+    const cursor = svg.append('line')
+      .attr('y1', 0).attr('y2', ELEV_H)
+      .attr('stroke', '#e63946').attr('stroke-width', 1.5)
+      .style('display', 'none');
+
+    // Elevation dot on the profile line
+    const elevDot = svg.append('circle')
+      .attr('r', 4)
+      .attr('fill', '#e63946')
+      .attr('stroke', '#fff').attr('stroke-width', 1.5)
+      .style('display', 'none');
+
+    return { cursor, elevDot, xScale: x, yScale: y };
+  }
+
+  function wireScrubber(elevDiv, elevResult, mapResult, route, cell) {
+    const { cursor, elevDot, xScale, yScale } = elevResult;
+    const { points, bob } = mapResult;
+    const elevations = route.elevations;
+    const numPts = points.length;
+    const numElevs = elevations.length;
+
+    // Tooltip element
+    const tip = document.createElement('div');
+    tip.className = 'elev-tooltip';
+    cell.appendChild(tip);
+
+    let isDragging = false;
+
+    function updatePosition(mx) {
+      // mx is pixel position within the elevation SVG (0 to CELL_W)
+      const frac = Math.max(0, Math.min(1, mx / CELL_W));
+
+      // Move cursor on elevation profile
+      const elevIdx = Math.round(frac * (numElevs - 1));
+      const px = xScale(elevIdx);
+      cursor.attr('x1', px).attr('x2', px).style('display', null);
+      elevDot
+        .attr('cx', px)
+        .attr('cy', yScale(elevations[elevIdx]))
+        .style('display', null);
+
+      // Move bob on map
+      const mapIdx = Math.round(frac * (numPts - 1));
+      const pt = points[mapIdx];
+      bob.attr('cx', pt[0]).attr('cy', pt[1]).style('display', null);
+
+      // Tooltip
+      const distKm = (frac * route.distance_km).toFixed(1);
+      const elev = Math.round(elevations[elevIdx]);
+      tip.textContent = distKm + ' km · ' + elev + 'm';
+      tip.style.display = 'block';
+      tip.style.left = Math.max(40, Math.min(CELL_W - 40, px)) + 'px';
+    }
+
+    function hide() {
+      cursor.style('display', 'none');
+      elevDot.style('display', 'none');
+      bob.style('display', 'none');
+      tip.style.display = 'none';
+      isDragging = false;
+    }
+
+    const el = elevDiv;
+
+    el.addEventListener('pointerdown', function(e) {
+      isDragging = true;
+      el.setPointerCapture(e.pointerId);
+      const rect = el.getBoundingClientRect();
+      updatePosition(e.clientX - rect.left);
+      e.preventDefault();
+    });
+
+    el.addEventListener('pointermove', function(e) {
+      if (!isDragging) return;
+      const rect = el.getBoundingClientRect();
+      updatePosition(e.clientX - rect.left);
+    });
+
+    el.addEventListener('pointerup', function() {
+      isDragging = false;
+    });
+
+    el.addEventListener('pointercancel', function() {
+      hide();
+    });
+
+    el.addEventListener('mousemove', function(e) {
+      if (isDragging) return; // pointer events handle drag
+      const rect = el.getBoundingClientRect();
+      updatePosition(e.clientX - rect.left);
+    });
+
+    el.addEventListener('mouseleave', function() {
+      if (!isDragging) hide();
+    });
   }
 
   function toggleSelect(key, day, variant) {
