@@ -521,7 +521,7 @@
     // ========================================================================
 
     const EVENT_DATE = new Date('2026-05-28T00:00:00');
-    const VENTOUX_ELEVATION = 2178; // meters of climbing for Ventoux route (from DEM)
+    const VENTOUX_ELEVATION = ROUTES.day3.long.elevation;
 
     /**
      * Training phases based on weeks until event

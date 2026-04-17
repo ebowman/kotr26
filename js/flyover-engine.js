@@ -4927,47 +4927,47 @@
         updateProgress();
     }
 
-    /**
-     * Show UI elements (progress widget and help panel)
-     */
+    // Track UI visibility locally so showUI/hideUI can no-op when the state
+    // already matches. Before this, document-level mousemove (hundreds/sec
+    // during map pan) dirty-rewrote classList unconditionally.
+    let uiVisible = true;
+
     function showUI() {
+        if (uiVisible) return;
+        uiVisible = true;
         const progressWidget = document.getElementById('unified-progress-widget');
         const shortcutsHelp = document.getElementById('shortcuts-help');
-
         if (progressWidget) progressWidget.classList.remove('auto-hidden');
         if (shortcutsHelp) shortcutsHelp.classList.remove('auto-hidden');
     }
 
-    /**
-     * Hide UI elements (progress widget and help panel)
-     */
     function hideUI() {
+        if (!uiVisible) return;
+        uiVisible = false;
         const progressWidget = document.getElementById('unified-progress-widget');
         const shortcutsHelp = document.getElementById('shortcuts-help');
-
         if (progressWidget) progressWidget.classList.add('auto-hidden');
         if (shortcutsHelp) shortcutsHelp.classList.add('auto-hidden');
     }
 
-    /**
-     * Reset auto-hide timer - call on user interaction
-     */
+    // Coalesce mousemove storms: only schedule the hide timer once per rAF,
+    // skip re-arming if the deadline hasn't meaningfully moved. Show-on-move
+    // is now a boolean guard so class toggling is free when already visible.
+    let autoHideRescheduleQueued = false;
     function resetAutoHideTimer() {
-        // Always show UI immediately on interaction
         showUI();
-
-        // Clear existing timer
-        if (autoHideTimeout) {
-            clearTimeout(autoHideTimeout);
-            autoHideTimeout = null;
-        }
-
-        // Only set new timer if playing and not pinned
-        if (isPlaying && !uiPinned) {
-            autoHideTimeout = setTimeout(() => {
-                hideUI();
-            }, AUTO_HIDE_DELAY);
-        }
+        if (autoHideRescheduleQueued) return;
+        autoHideRescheduleQueued = true;
+        requestAnimationFrame(() => {
+            autoHideRescheduleQueued = false;
+            if (autoHideTimeout) {
+                clearTimeout(autoHideTimeout);
+                autoHideTimeout = null;
+            }
+            if (isPlaying && !uiPinned) {
+                autoHideTimeout = setTimeout(hideUI, AUTO_HIDE_DELAY);
+            }
+        });
     }
 
     /**
