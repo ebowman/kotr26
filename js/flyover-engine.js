@@ -3812,8 +3812,10 @@
 
             const name = window.KOTR_POI.polishPoiName(poi.name, poi.type);
             const km = poi.dist != null ? poi.dist.toFixed(1) + ' km' : '';
+            // Flyover body color is white (dark theme), Mapbox popup background
+            // is white — inherited text would be invisible. Set explicit color.
             const parts = [];
-            if (name) parts.push('<strong>' + escapeHtml(name) + '</strong>');
+            if (name) parts.push('<strong style="color:#1a1a1a;">' + escapeHtml(name) + '</strong>');
             if (km) parts.push('<span style="color:#666;font-size:12px;">' + km + '</span>');
             const popup = new mapboxgl.Popup({ offset: 18, closeButton: false })
                 .setHTML(parts.join('<br>'));
