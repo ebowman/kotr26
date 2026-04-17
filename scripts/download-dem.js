@@ -13,6 +13,7 @@ const path = require('path');
 const { PNG } = require('pngjs');
 
 const { MAPBOX_TOKEN, ELEV_GAIN_THRESHOLD_M, ELEV_SMOOTH_HALF_WINDOW } = require('../js/config.js');
+const GEO = require('../js/geo.js');
 const SEMICIRCLE_TO_DEGREE = 180 / Math.pow(2, 31);
 
 // ============= Simple FIT Parser =============
@@ -201,59 +202,13 @@ async function processRoute(routeFilePath, force = false) {
 
     console.log(`  Fetched ${records.length}/${records.length} elevations (${tileCache.size} tiles cached)`);
 
-    // Moving-average smoother (half-window on each side).
-    const smoothed = [];
-    const halfWindow = ELEV_SMOOTH_HALF_WINDOW;
-    for (let i = 0; i < demElevations.length; i++) {
-        let sum = 0;
-        let count = 0;
-        for (let j = Math.max(0, i - halfWindow); j <= Math.min(demElevations.length - 1, i + halfWindow); j++) {
-            sum += demElevations[j];
-            count++;
-        }
-        smoothed.push(sum / count);
-    }
+    const smoothed = GEO.smoothElevations(demElevations, ELEV_SMOOTH_HALF_WINDOW);
+    const { gain: elevGain, loss: elevLoss } = GEO.walkElevationGain(smoothed, ELEV_GAIN_THRESHOLD_M);
 
-    // Strava-style gain/loss: walk extrema, count only segments exceeding threshold.
-    let elevGain = 0, elevLoss = 0;
     let minElev = Infinity, maxElev = -Infinity;
-    const THRESHOLD = ELEV_GAIN_THRESHOLD_M;
-
-    // Find local extrema (peaks and valleys) and sum significant changes
-    let lastExtreme = smoothed[0];
-    let wasClimbing = smoothed.length > 1 ? smoothed[1] > smoothed[0] : false;
-
-    for (let i = 0; i < demElevations.length; i++) {
-        const rawElev = demElevations[i];
-
-        // Track raw min/max from original data
-        if (rawElev < minElev) minElev = rawElev;
-        if (rawElev > maxElev) maxElev = rawElev;
-
-        if (i > 0) {
-            const isClimbing = smoothed[i] > smoothed[i - 1];
-
-            // Direction change detected - we found a local extremum
-            if (isClimbing !== wasClimbing) {
-                const change = smoothed[i - 1] - lastExtreme;
-                if (Math.abs(change) >= THRESHOLD) {
-                    if (change > 0) {
-                        elevGain += change;
-                    } else {
-                        elevLoss += Math.abs(change);
-                    }
-                    lastExtreme = smoothed[i - 1];
-                }
-                wasClimbing = isClimbing;
-            }
-        }
-    }
-
-    // Handle final segment
-    const finalChange = smoothed[smoothed.length - 1] - lastExtreme;
-    if (Math.abs(finalChange) >= THRESHOLD) {
-        if (finalChange > 0) elevGain += finalChange;
-        else elevLoss += Math.abs(finalChange);
+    for (const e of demElevations) {
+        if (e < minElev) minElev = e;
+        if (e > maxElev) maxElev = e;
     }
 
     // Create DEM data file

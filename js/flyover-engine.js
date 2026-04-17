@@ -6496,9 +6496,10 @@
         checkVentouxSummit(dotPoint);
     }
 
-    // Build a cumulative-gain array indexed by coordinate index, using the same
-    // Strava-style algorithm as fit-parser.js. Runs once at route load; callers
-    // index directly for O(1) lookup.
+    // Build a cumulative-gain array indexed by coordinate index. Runs once at
+    // route load; callers (updateDotAndUI) index directly for O(1) lookup.
+    // Smoothing is shared with the parsers via window.KOTR_GEO; the walk is
+    // local because we need the running total at every index, not just the end.
     function buildCumulativeGain(coords) {
         const n = coords.length;
         const cum = new Float32Array(n);
@@ -6506,24 +6507,10 @@
 
         const halfWindow = (window.KOTR_CONFIG && window.KOTR_CONFIG.ELEV_SMOOTH_HALF_WINDOW) || 5;
         const THRESHOLD = (window.KOTR_CONFIG && window.KOTR_CONFIG.ELEV_GAIN_THRESHOLD_M) || 3.5;
+        const smoothed = window.KOTR_GEO.smoothElevations(coords.map(c => c[2] || 0), halfWindow);
 
-        // Smooth elevations once.
-        const smoothed = new Float32Array(n);
-        for (let i = 0; i < n; i++) {
-            let sum = 0, count = 0;
-            const lo = Math.max(0, i - halfWindow);
-            const hi = Math.min(n - 1, i + halfWindow);
-            for (let j = lo; j <= hi; j++) {
-                sum += coords[j][2] || 0;
-                count++;
-            }
-            smoothed[i] = sum / count;
-        }
-
-        // Walk extrema, accumulating gain where threshold is met. cum[i] also
-        // includes any in-progress climb at i (the old function's "handle
-        // final segment" step) so mid-route lookups match what a one-shot
-        // call over coords[0..i] would have returned.
+        // cum[i] includes any in-progress climb at i so mid-route lookups match
+        // what a one-shot walk over coords[0..i] would return.
         let running = 0;
         let lastExtreme = smoothed[0];
         let wasClimbing = smoothed[1] > smoothed[0];

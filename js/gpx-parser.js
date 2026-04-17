@@ -52,53 +52,27 @@ const GpxParser = (function() {
                          doc.getElementsByTagName('name')[0];
         const name = nameNode ? nameNode.textContent : 'Unknown Route';
 
-        // Calculate distance using Haversine
+        const GEO = (typeof window !== 'undefined' ? window.KOTR_GEO : require('./geo.js'));
+        const CFG = (typeof window !== 'undefined' ? window.KOTR_CONFIG : {});
+        const halfWindow = CFG.ELEV_SMOOTH_HALF_WINDOW || 5;
+        const threshold = CFG.ELEV_GAIN_THRESHOLD_M || 3.5;
+
         let totalDistance = 0;
         for (let i = 1; i < coordinates.length; i++) {
-            totalDistance += haversineDistance(
+            totalDistance += GEO.haversineKm(
                 coordinates[i - 1][1], coordinates[i - 1][0],
                 coordinates[i][1], coordinates[i][0]
             );
         }
 
-        // Smooth elevations and calculate stats (same algorithm as fit-parser.js)
-        const halfWindow = (typeof window !== 'undefined' && window.KOTR_CONFIG && window.KOTR_CONFIG.ELEV_SMOOTH_HALF_WINDOW) || 5;
-        const rawElevations = coordinates.map(c => c[2]);
-        const smoothed = smoothElevations(rawElevations, halfWindow);
-
-        let totalElevationGain = 0;
-        let minElevation = Infinity;
-        let maxElevation = -Infinity;
-
-        const THRESHOLD = (typeof window !== 'undefined' && window.KOTR_CONFIG && window.KOTR_CONFIG.ELEV_GAIN_THRESHOLD_M) || 3.5;
-        let lastExtreme = smoothed[0];
-        let wasClimbing = smoothed.length > 1 ? smoothed[1] > smoothed[0] : false;
-
-        for (let i = 0; i < coordinates.length; i++) {
-            const elevation = coordinates[i][2];
-            if (elevation < minElevation) minElevation = elevation;
-            if (elevation > maxElevation) maxElevation = elevation;
-
-            if (i > 0) {
-                const isClimbing = smoothed[i] > smoothed[i - 1];
-                if (isClimbing !== wasClimbing) {
-                    const change = smoothed[i - 1] - lastExtreme;
-                    if (change >= THRESHOLD) {
-                        totalElevationGain += change;
-                    }
-                    if (Math.abs(change) >= THRESHOLD) {
-                        lastExtreme = smoothed[i - 1];
-                    }
-                    wasClimbing = isClimbing;
-                }
-            }
+        let minElevation = Infinity, maxElevation = -Infinity;
+        for (const c of coordinates) {
+            if (c[2] < minElevation) minElevation = c[2];
+            if (c[2] > maxElevation) maxElevation = c[2];
         }
 
-        // Handle final segment
-        const finalChange = smoothed[smoothed.length - 1] - lastExtreme;
-        if (finalChange >= THRESHOLD) {
-            totalElevationGain += finalChange;
-        }
+        const smoothed = GEO.smoothElevations(coordinates.map(c => c[2]), halfWindow);
+        const { gain: totalElevationGain } = GEO.walkElevationGain(smoothed, threshold);
 
         // Calculate bounds
         const bounds = calculateBounds(coordinates);
@@ -165,43 +139,6 @@ const GpxParser = (function() {
         return routeData;
     }
 
-    // Moving-average smoother. halfWindow = points on each side (effective
-    // window = 2*halfWindow + 1). Matches fit-parser.js.
-    function smoothElevations(elevations, halfWindow) {
-        const smoothed = [];
-        for (let i = 0; i < elevations.length; i++) {
-            let sum = 0;
-            let count = 0;
-            for (let j = Math.max(0, i - halfWindow); j <= Math.min(elevations.length - 1, i + halfWindow); j++) {
-                sum += elevations[j];
-                count++;
-            }
-            smoothed.push(sum / count);
-        }
-        return smoothed;
-    }
-
-    /**
-     * Haversine distance formula (returns km)
-     */
-    function haversineDistance(lat1, lon1, lat2, lon2) {
-        const R = 6371;
-        const dLat = toRad(lat2 - lat1);
-        const dLon = toRad(lon2 - lon1);
-        const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-            Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
-            Math.sin(dLon / 2) * Math.sin(dLon / 2);
-        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-        return R * c;
-    }
-
-    function toRad(deg) {
-        return deg * (Math.PI / 180);
-    }
-
-    /**
-     * Calculate geographic bounds
-     */
     function calculateBounds(coordinates) {
         if (coordinates.length === 0) return null;
         let minLng = Infinity, maxLng = -Infinity;

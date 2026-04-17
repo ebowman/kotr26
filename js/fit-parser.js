@@ -358,60 +358,27 @@ const FitParser = (function() {
                 .map(r => [r.longitude, r.latitude, r.altitude != null ? r.altitude : 0]);
 
             const halfWindow = (window.KOTR_CONFIG && window.KOTR_CONFIG.ELEV_SMOOTH_HALF_WINDOW) || 5;
-            const smoothedElevations = this.smoothElevations(
+            const threshold = (window.KOTR_CONFIG && window.KOTR_CONFIG.ELEV_GAIN_THRESHOLD_M) || 3.5;
+            const smoothedElevations = window.KOTR_GEO.smoothElevations(
                 coordinates.map(c => c[2]),
                 halfWindow
             );
 
-            // Calculate total stats using industry-standard algorithm
-            // Track direction changes and only count segments that exceed threshold
-            // This matches how Strava and other apps calculate elevation gain
-            let totalDistance = 0;
-            let totalElevationGain = 0;
             let minElevation = Infinity;
             let maxElevation = -Infinity;
-
-            // Threshold for counting a climb/descent (calibrated to match Strava)
-            const THRESHOLD = (window.KOTR_CONFIG && window.KOTR_CONFIG.ELEV_GAIN_THRESHOLD_M) || 3.5;
-            let lastExtreme = smoothedElevations[0];
-            let wasClimbing = smoothedElevations.length > 1 ?
-                smoothedElevations[1] > smoothedElevations[0] : false;
-
-            for (let i = 0; i < coordinates.length; i++) {
-                const elevation = coordinates[i][2]; // Use raw for min/max
-
-                if (elevation < minElevation) minElevation = elevation;
-                if (elevation > maxElevation) maxElevation = elevation;
-
-                if (i > 0) {
-                    const isClimbing = smoothedElevations[i] > smoothedElevations[i - 1];
-
-                    // Direction change detected - we found a local extremum
-                    if (isClimbing !== wasClimbing) {
-                        const change = smoothedElevations[i - 1] - lastExtreme;
-                        if (change >= THRESHOLD) {
-                            totalElevationGain += change;
-                        }
-                        if (Math.abs(change) >= THRESHOLD) {
-                            lastExtreme = smoothedElevations[i - 1];
-                        }
-                        wasClimbing = isClimbing;
-                    }
-                }
+            for (const c of coordinates) {
+                if (c[2] < minElevation) minElevation = c[2];
+                if (c[2] > maxElevation) maxElevation = c[2];
             }
 
-            // Handle final segment
-            const finalChange = smoothedElevations[smoothedElevations.length - 1] - lastExtreme;
-            if (finalChange >= THRESHOLD) {
-                totalElevationGain += finalChange;
-            }
+            const { gain: totalElevationGain } = window.KOTR_GEO.walkElevationGain(smoothedElevations, threshold);
 
-            // Get distance from last record or calculate
+            // Prefer the distance field FIT already records; fall back to haversine.
+            let totalDistance = 0;
             const lastRecord = this.records[this.records.length - 1];
             if (lastRecord && lastRecord.distance) {
                 totalDistance = lastRecord.distance;
             } else {
-                // Calculate using Haversine formula
                 totalDistance = this.calculateTotalDistance(coordinates);
             }
 
@@ -432,13 +399,10 @@ const FitParser = (function() {
             };
         }
 
-        /**
-         * Calculate total distance using Haversine formula
-         */
         calculateTotalDistance(coordinates) {
             let total = 0;
             for (let i = 1; i < coordinates.length; i++) {
-                total += this.haversineDistance(
+                total += window.KOTR_GEO.haversineKm(
                     coordinates[i - 1][1], coordinates[i - 1][0],
                     coordinates[i][1], coordinates[i][0]
                 );
@@ -446,44 +410,20 @@ const FitParser = (function() {
             return total;
         }
 
-        /**
-         * Haversine distance formula
-         */
+        // Kept as instance methods only because older code paths may still call
+        // them — delegate to the shared module.
         haversineDistance(lat1, lon1, lat2, lon2) {
-            const R = 6371; // Earth's radius in km
-            const dLat = this.toRad(lat2 - lat1);
-            const dLon = this.toRad(lon2 - lon1);
-            const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-                Math.cos(this.toRad(lat1)) * Math.cos(this.toRad(lat2)) *
-                Math.sin(dLon / 2) * Math.sin(dLon / 2);
-            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-            return R * c;
+            return window.KOTR_GEO.haversineKm(lat1, lon1, lat2, lon2);
         }
 
         toRad(deg) {
-            return deg * (Math.PI / 180);
+            return window.KOTR_GEO.toRad(deg);
         }
 
-        // Moving-average smoother. halfWindow = points on each side; effective
-        // window is 2*halfWindow + 1. Kept simple rather than FIR-optimal because
-        // the caller only needs it for the gain threshold walk.
         smoothElevations(elevations, halfWindow) {
-            const smoothed = [];
-            for (let i = 0; i < elevations.length; i++) {
-                let sum = 0;
-                let count = 0;
-                for (let j = Math.max(0, i - halfWindow); j <= Math.min(elevations.length - 1, i + halfWindow); j++) {
-                    sum += elevations[j];
-                    count++;
-                }
-                smoothed.push(sum / count);
-            }
-            return smoothed;
+            return window.KOTR_GEO.smoothElevations(elevations, halfWindow);
         }
 
-        /**
-         * Calculate geographic bounds
-         */
         calculateBounds(coordinates) {
             if (coordinates.length === 0) {
                 return null;
