@@ -253,7 +253,9 @@ const FitParser = (function() {
             const typeEnum = data[5];
             const category = COURSE_POINT_CATEGORY[typeEnum] || 'nav';
             if (!POI_VISIBLE.has(category)) return; // drop navigation cues
-            const cp = { category, typeEnum };
+            // Shape matches the generator's viz-data.js output — `type` and
+            // `dist` are the canonical field names across both paths.
+            const cp = { type: category, typeEnum };
             if (data[2] !== undefined && data[2] !== 0x7FFFFFFF) {
                 cp.lat = data[2] * SEMICIRCLE_TO_DEGREE;
             }
@@ -261,7 +263,7 @@ const FitParser = (function() {
                 cp.lon = data[3] * SEMICIRCLE_TO_DEGREE;
             }
             if (data[4] !== undefined && data[4] !== 0xFFFFFFFF) {
-                cp.distance_km = data[4] / 100000;
+                cp.dist = Math.round((data[4] / 100000) * 10) / 10;
             }
             if (typeof data[6] === 'string') cp.name = data[6];
             this.coursePoints.push(cp);

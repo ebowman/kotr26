@@ -381,8 +381,77 @@ const ElevationProfile = (function() {
             // Draw line
             this.renderLine(ctx, chartWidth, chartHeight, padding);
 
+            // Draw POI markers (food / toilet / caution) on top of the profile
+            // but below the current-position dot so the dot always wins.
+            this.renderPoiMarkers(ctx, chartWidth, chartHeight, padding);
+
             // Draw current position marker
             this.renderPositionMarker(ctx, chartWidth, chartHeight, padding);
+        }
+
+        renderPoiMarkers(ctx, chartWidth, chartHeight, padding) {
+            const pois = this.routeData && this.routeData.pois;
+            if (!pois || !pois.length) return;
+            const POI = (typeof window !== 'undefined' && window.KOTR_POI) || null;
+            if (!POI) return;
+
+            const visible = POI.displayable(pois);
+            const elevRange = this.maxElevation - this.minElevation;
+            if (!isFinite(elevRange) || elevRange <= 0) return;
+
+            ctx.save();
+            ctx.font = '14px system-ui, -apple-system, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+
+            for (const poi of visible) {
+                const km = poi.dist != null ? poi.dist : null;
+                if (km == null || !isFinite(km)) continue;
+                const x = padding.left + (km / this.totalDistance) * chartWidth;
+                if (x < padding.left || x > padding.left + chartWidth) continue;
+
+                // Interpolate elevation at this distance so the icon sits on
+                // the terrain line rather than floating in space.
+                const elev = this.elevationAtDistance(km);
+                const y = padding.top + chartHeight -
+                    ((elev - this.minElevation) / elevRange) * chartHeight;
+
+                ctx.fillStyle = POI.getColor(poi.type);
+                ctx.strokeStyle = POI.getColor(poi.type);
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(x, y);
+                ctx.lineTo(x, y - 16);
+                ctx.stroke();
+
+                // Icon background circle for legibility over colorful gradient.
+                ctx.beginPath();
+                ctx.arc(x, y - 22, 10, 0, Math.PI * 2);
+                ctx.fillStyle = '#fff';
+                ctx.fill();
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+
+                ctx.fillStyle = '#000';
+                ctx.fillText(POI.getIcon(poi.type), x, y - 22);
+            }
+            ctx.restore();
+        }
+
+        elevationAtDistance(km) {
+            if (!this.distanceData.length) return this.minElevation;
+            // Binary search the cumulative-distance array.
+            let lo = 0, hi = this.distanceData.length - 1;
+            if (km <= this.distanceData[lo]) return this.elevationData[lo];
+            if (km >= this.distanceData[hi]) return this.elevationData[hi];
+            while (lo < hi - 1) {
+                const mid = (lo + hi) >> 1;
+                if (this.distanceData[mid] < km) lo = mid;
+                else hi = mid;
+            }
+            const d0 = this.distanceData[lo], d1 = this.distanceData[hi];
+            const t = (km - d0) / (d1 - d0 || 1);
+            return this.elevationData[lo] + t * (this.elevationData[hi] - this.elevationData[lo]);
         }
 
         /**

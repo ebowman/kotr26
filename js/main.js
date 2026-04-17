@@ -313,25 +313,11 @@
         const strokeColors = ['#22C55E', '#EAB308', '#F97316', '#EF4444'];
         const strokeColor = strokeColors[difficulty - 1];
 
-        // POI markers (food / toilet / caution) — skip generic start/end.
-        let poiMarkers = '';
-        if (realProfile && Array.isArray(realProfile.pois) && window.KOTR_POI) {
-            const visible = window.KOTR_POI.displayable(realProfile.pois);
-            const totalKm = realProfile.pois.length && realProfile.pois[realProfile.pois.length - 1].dist || distance;
-            for (const poi of visible) {
-                const x = padding + Math.min(1, (poi.dist || 0) / totalKm) * (width - 2 * padding);
-                const icon = window.KOTR_POI.getIcon(poi.type);
-                const label = window.KOTR_POI.polishPoiName(poi.name, poi.type);
-                poiMarkers += `<text x="${x.toFixed(1)}" y="${(height - 1).toFixed(1)}" class="poi-icon" text-anchor="middle" font-size="9"><title>${label} · ${poi.dist}km</title>${icon}</text>`;
-            }
-        }
-
         return `
             <div class="mini-elevation-profile" data-difficulty="${difficulty}" data-route="${routeFile}" title="Click for 3D flyover">
-                <svg viewBox="0 0 ${width} ${height + 10}" preserveAspectRatio="none">
+                <svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none">
                     <path class="elevation-fill" d="${fillPath}" fill="url(#${gradientId})" />
                     <path class="elevation-line" d="${linePath}" fill="none" stroke="${strokeColor}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
-                    ${poiMarkers}
                 </svg>
             </div>
         `;

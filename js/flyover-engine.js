@@ -3783,6 +3783,47 @@
                 'circle-pitch-scale': 'viewport'       // Constant size regardless of zoom
             }
         });
+
+        addPoiMarkersToMap();
+    }
+
+    // Track the Mapbox markers we've added so teardown/re-init can remove them.
+    let poiMarkers = [];
+
+    function addPoiMarkersToMap() {
+        // Clean up any existing markers (re-init case).
+        poiMarkers.forEach(m => m.remove());
+        poiMarkers = [];
+
+        if (!routeData || !routeData.pois || !window.KOTR_POI) return;
+        const visible = window.KOTR_POI.displayable(routeData.pois);
+
+        for (const poi of visible) {
+            if (poi.lat == null || poi.lon == null) continue;
+            const el = document.createElement('div');
+            el.className = 'flyover-poi-marker';
+            el.style.cssText =
+                'width:28px;height:28px;border-radius:50%;background:' + window.KOTR_POI.getColor(poi.type) +
+                ';color:#fff;display:flex;align-items:center;justify-content:center;font-size:15px;' +
+                'box-shadow:0 2px 6px rgba(0,0,0,0.35);cursor:pointer;border:2px solid #fff;';
+            el.textContent = window.KOTR_POI.getIcon(poi.type);
+
+            const name = window.KOTR_POI.polishPoiName(poi.name, poi.type);
+            const km = poi.dist != null ? poi.dist.toFixed(1) + ' km' : '';
+            const popup = new mapboxgl.Popup({ offset: 18, closeButton: false })
+                .setHTML('<strong>' + escapeHtml(name) + '</strong>' + (km ? '<br><span style="color:#666;font-size:12px;">' + km + '</span>' : ''));
+
+            poiMarkers.push(
+                new mapboxgl.Marker({ element: el, anchor: 'center' })
+                    .setLngLat([poi.lon, poi.lat])
+                    .setPopup(popup)
+                    .addTo(map)
+            );
+        }
+    }
+
+    function escapeHtml(s) {
+        return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     }
 
     /**
@@ -3820,22 +3861,18 @@
      * Update route info in UI
      */
     function updateRouteInfo(routeFile) {
-        // Extract route name from filename
-        let name = routeFile.replace(/\.(fit|gpx)$/, '').replace(/_/g, ' ');
-
-        // Special handling for known routes
-        if (routeFile.includes('Ventoux')) {
-            name = 'Day 3 - Mont Ventoux';
-        } else if (routeFile.includes('D1')) {
-            name = 'Day 1 - Avignon Exploration';
-        } else if (routeFile.includes('D2')) {
-            name = 'Day 2 - Wine Country';
-        } else if (routeFile.includes('D3')) {
-            name = 'Day 3 - Luberon Villages';
-        } else if (routeFile.includes('D4')) {
-            name = 'Day 4 - Final Celebration';
-        }
-
+        // Canonical titles for the 7 new .fit files. Falls back to a
+        // prettified filename if an unknown route is loaded.
+        const TITLES = {
+            'KOTR_D1.fit':       'Day 1 - Shake Out the Travel Legs',
+            'KOTR_D2_Short.fit': 'Day 2 - NW Provence (Short)',
+            'KOTR_D2_Long.fit':  'Day 2 - NW Provence (Long)',
+            'KOTR_D3_Short.fit': 'Day 3 - Mazan Loop',
+            'KOTR_D3_Long.fit':  'Day 3 - Mont Ventoux',
+            'KOTR_D4_Short.fit': 'Day 4 - Luberon Loop (Short)',
+            'KOTR_D4_Long.fit':  'Day 4 - Luberon Loop (Long)',
+        };
+        const name = TITLES[routeFile] || routeFile.replace(/\.(fit|gpx)$/, '').replace(/_/g, ' ');
         document.getElementById('route-title').textContent = name;
     }
 
