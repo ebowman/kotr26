@@ -3799,7 +3799,9 @@
         const visible = window.KOTR_POI.displayable(routeData.pois);
 
         for (const poi of visible) {
-            if (poi.lat == null || poi.lon == null) continue;
+            // Guard against missing / NaN coordinates — some course_points
+            // arrive with only distance + name and no position fix.
+            if (!isFinite(poi.lat) || !isFinite(poi.lon)) continue;
             const el = document.createElement('div');
             el.className = 'flyover-poi-marker';
             el.style.cssText =
