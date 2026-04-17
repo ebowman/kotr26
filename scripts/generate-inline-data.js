@@ -20,13 +20,13 @@ const path = require('path');
 // Route configuration
 // ---------------------------------------------------------------------------
 const ROUTES = [
-    { day: 1, variant: 'standard', label: 'Warm Up Ride', date: 'May 29', file: 'KOTR_D1_Warm up ride.gpx' },
-    { day: 2, variant: 'standard', label: 'Wine Country (Standard)', date: 'May 30', file: 'KOTR_Avignon_Standard_D2.fit' },
-    { day: 2, variant: 'long', label: 'NW Long', date: 'May 30', file: 'KOTR_D2_NW_Long.gpx' },
-    { day: 3, variant: 'standard', label: 'Luberon Villages', date: 'May 31', file: 'KOTR_Avignon_D3_Standard.fit' },
-    { day: 3, variant: 'long', label: 'Mont Ventoux!', date: 'May 31', file: 'KOTR_D3_Long (Mont Ventoux).gpx' },
-    { day: 4, variant: 'standard', label: 'Final (Standard)', date: 'Jun 1', file: 'KOTR_Avignon_D4_Standard.fit' },
-    { day: 4, variant: 'long', label: 'Luberon Long', date: 'Jun 1', file: 'KOTR_D4_Luberon Long.gpx' },
+    { day: 1, variant: 'standard', label: 'Shake Out the Travel Legs', date: 'May 29', file: 'KOTR_D1.fit' },
+    { day: 2, variant: 'standard', label: 'NW Provence – Short', date: 'May 30', file: 'KOTR_D2_Short.fit' },
+    { day: 2, variant: 'long',     label: 'NW Provence – Long',  date: 'May 30', file: 'KOTR_D2_Long.fit' },
+    { day: 3, variant: 'standard', label: 'Mazan Loop',          date: 'May 31', file: 'KOTR_D3_Short.fit' },
+    { day: 3, variant: 'long',     label: 'Mont Ventoux',        date: 'May 31', file: 'KOTR_D3_Long.fit' },
+    { day: 4, variant: 'standard', label: 'Luberon Loop – Short', date: 'Jun 1', file: 'KOTR_D4_Short.fit' },
+    { day: 4, variant: 'long',     label: 'Luberon Loop – Long',  date: 'Jun 1', file: 'KOTR_D4_Long.fit' },
 ];
 
 const ROUTES_DIR = path.resolve(__dirname, '..', 'routes');

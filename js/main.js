@@ -24,10 +24,9 @@
             name: 'Shake Out the Travel Legs',
             description: 'Ease into the adventure with a gentle spin through Provencal countryside.',
             type: 'warmup',
-            routeFile: 'KOTR_D1_Warm up ride.gpx',
-            // Stats from FIT/DEM calculation
+            routeFile: 'KOTR_D1.fit',
             distance: 48,
-            elevation: 147,
+            elevation: 150,
             difficulty: 1,
             difficultyLabel: 'Easy',
             duration: '~2 hours'
@@ -37,22 +36,22 @@
             date: '2026-05-30',
             dateDisplay: 'May 30',
             name: 'Find Your Rhythm',
-            description: null, // No description for multi-option days
+            description: null,
             type: 'choice',
             standard: {
-                label: 'STANDARD',
-                routeFile: 'KOTR_Avignon_Standard_D2.fit',
-                distance: 80,
-                elevation: 543,
+                label: 'NW PROVENCE – SHORT',
+                routeFile: 'KOTR_D2_Short.fit',
+                distance: 82,
+                elevation: 428,
                 difficulty: 2,
                 difficultyLabel: 'Moderate',
                 duration: '~3-4 hours'
             },
             long: {
-                label: 'LONG',
-                routeFile: 'KOTR_D2_NW_Long.gpx',
+                label: 'NW PROVENCE – LONG',
+                routeFile: 'KOTR_D2_Long.fit',
                 distance: 105,
-                elevation: 709,
+                elevation: 703,
                 difficulty: 3,
                 difficultyLabel: 'Challenging',
                 duration: '~4-5 hours'
@@ -67,20 +66,20 @@
             type: 'epic',
             featured: true,
             standard: {
-                label: 'LUBERON',
-                routeFile: 'KOTR_Avignon_D3_Standard.fit',
-                distance: 101,
-                elevation: 1024,
-                difficulty: 3,
-                difficultyLabel: 'Challenging',
-                duration: '~4-5 hours'
+                label: 'MAZAN LOOP',
+                routeFile: 'KOTR_D3_Short.fit',
+                distance: 81,
+                elevation: 369,
+                difficulty: 2,
+                difficultyLabel: 'Moderate',
+                duration: '~3-4 hours'
             },
             long: {
                 label: 'MONT VENTOUX',
-                labelIcon: '&#127956;', // Mountain emoji HTML entity
-                routeFile: 'KOTR_D3_Long (Mont Ventoux).gpx',
+                labelIcon: '&#127956;',
+                routeFile: 'KOTR_D3_Long.fit',
                 distance: 140,
-                elevation: 2178,
+                elevation: 2189,
                 difficulty: 4,
                 difficultyLabel: 'Epic',
                 duration: '~6-7 hours',
@@ -96,19 +95,19 @@
             description: null,
             type: 'choice',
             standard: {
-                label: 'STANDARD',
-                routeFile: 'KOTR_Avignon_D4_Standard.fit',
-                distance: 85,
-                elevation: 326,
+                label: 'LUBERON LOOP – SHORT',
+                routeFile: 'KOTR_D4_Short.fit',
+                distance: 78,
+                elevation: 400,
                 difficulty: 2,
                 difficultyLabel: 'Moderate',
                 duration: '~3-4 hours'
             },
             long: {
-                label: 'LONG',
-                routeFile: 'KOTR_D4_Luberon Long.gpx',
-                distance: 91,
-                elevation: 683,
+                label: 'LUBERON LOOP – LONG',
+                routeFile: 'KOTR_D4_Long.fit',
+                distance: 92,
+                elevation: 713,
                 difficulty: 3,
                 difficultyLabel: 'Challenging',
                 duration: '~3.5-4.5 hours'
