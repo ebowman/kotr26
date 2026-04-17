@@ -3812,8 +3812,11 @@
 
             const name = window.KOTR_POI.polishPoiName(poi.name, poi.type);
             const km = poi.dist != null ? poi.dist.toFixed(1) + ' km' : '';
+            const parts = [];
+            if (name) parts.push('<strong>' + escapeHtml(name) + '</strong>');
+            if (km) parts.push('<span style="color:#666;font-size:12px;">' + km + '</span>');
             const popup = new mapboxgl.Popup({ offset: 18, closeButton: false })
-                .setHTML('<strong>' + escapeHtml(name) + '</strong>' + (km ? '<br><span style="color:#666;font-size:12px;">' + km + '</span>' : ''));
+                .setHTML(parts.join('<br>'));
 
             poiMarkers.push(
                 new mapboxgl.Marker({ element: el, anchor: 'center' })
