@@ -16,12 +16,14 @@ FILES="index.html flyover.html compare/index.html skyline/index.html pace/index.
 for f in $FILES; do
     [ -f "$f" ] || continue
     perl -pi -e "
-        # Local CSS: href=\"css/...\"
-        s/(href=\"css\/[^\"?]+)(\?v=[^\"]*)?/\$1?v=$HASH/g;
-        # Local JS: src=\"js/...\"
-        s/(src=\"js\/[^\"?]+)(\?v=[^\"]*)?/\$1?v=$HASH/g;
-        # data-inline.js
-        s/(src=\"data-inline\.js)(\?v=[^\"]*)?/\$1?v=$HASH/g;
+        # Local CSS: href=\"css/...\" or href=\"../css/...\"
+        s/(href=\"\.?\.?\/?css\/[^\"?]+)(\?v=[^\"]*)?/\$1?v=$HASH/g;
+        # Local JS: src=\"js/...\" or src=\"../js/...\"
+        s/(src=\"\.?\.?\/?js\/[^\"?]+)(\?v=[^\"]*)?/\$1?v=$HASH/g;
+        # Local sibling inline JS: data-inline.js, gps-inline.js
+        s/(src=\"(?:data-inline|gps-inline)\.js)(\?v=[^\"]*)?/\$1?v=$HASH/g;
+        # Shared inline-data JS: ../routes/viz-data.js
+        s/(src=\"\.\.\/routes\/[^\"?]+)(\?v=[^\"]*)?/\$1?v=$HASH/g;
     " "$f"
     echo "  $f"
 done

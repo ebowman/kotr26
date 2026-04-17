@@ -3584,6 +3584,11 @@
                 bounds: routeData.bounds
             });
 
+            // Precompute cumulative elevation gain per coordinate index so
+            // updateDotAndUI (called every rAF tick) is an O(1) lookup instead
+            // of an O(N) smoothing+threshold walk.
+            routeData._cumGain = buildCumulativeGain(routeData.coordinates);
+
             // Check if we have valid coordinates
             if (!routeData.coordinates || routeData.coordinates.length === 0) {
                 throw new Error('No coordinates found in route file');
@@ -6491,65 +6496,56 @@
         checkVentouxSummit(dotPoint);
     }
 
-    /**
-     * Calculate cumulative elevation gain up to a position (0-1)
-     * Uses the same Strava-style algorithm as fit-parser.js for consistency:
-     * - Smooths elevations with 5-point moving average
-     * - Uses 3.5m threshold to filter GPS noise
-     * - Only counts direction changes that exceed threshold
-     */
-    function calculateElevationGainToPosition(position) {
-        if (!routeData || !routeData.coordinates) return 0;
+    // Build a cumulative-gain array indexed by coordinate index, using the same
+    // Strava-style algorithm as fit-parser.js. Runs once at route load; callers
+    // index directly for O(1) lookup.
+    function buildCumulativeGain(coords) {
+        const n = coords.length;
+        const cum = new Float32Array(n);
+        if (n < 2) return cum;
 
-        const coords = routeData.coordinates;
-        const targetIndex = Math.floor(position * (coords.length - 1));
-        if (targetIndex < 1) return 0;
+        const halfWindow = (window.KOTR_CONFIG && window.KOTR_CONFIG.ELEV_SMOOTH_HALF_WINDOW) || 5;
+        const THRESHOLD = (window.KOTR_CONFIG && window.KOTR_CONFIG.ELEV_GAIN_THRESHOLD_M) || 3.5;
 
-        // Extract elevations
-        const elevations = coords.slice(0, targetIndex + 1).map(c => c[2] || 0);
-
-        // Smooth elevations using 5-point moving average (same as fit-parser)
-        const windowSize = 5;
-        const smoothed = [];
-        for (let i = 0; i < elevations.length; i++) {
-            let sum = 0;
-            let count = 0;
-            for (let j = Math.max(0, i - windowSize); j <= Math.min(elevations.length - 1, i + windowSize); j++) {
-                sum += elevations[j];
+        // Smooth elevations once.
+        const smoothed = new Float32Array(n);
+        for (let i = 0; i < n; i++) {
+            let sum = 0, count = 0;
+            const lo = Math.max(0, i - halfWindow);
+            const hi = Math.min(n - 1, i + halfWindow);
+            for (let j = lo; j <= hi; j++) {
+                sum += coords[j][2] || 0;
                 count++;
             }
-            smoothed.push(sum / count);
+            smoothed[i] = sum / count;
         }
 
-        // Apply Strava-style threshold algorithm
-        const THRESHOLD = 3.5;
-        let totalGain = 0;
+        // Walk extrema, accumulating gain where threshold is met. cum[i] also
+        // includes any in-progress climb at i (the old function's "handle
+        // final segment" step) so mid-route lookups match what a one-shot
+        // call over coords[0..i] would have returned.
+        let running = 0;
         let lastExtreme = smoothed[0];
-        let wasClimbing = smoothed.length > 1 ? smoothed[1] > smoothed[0] : false;
-
-        for (let i = 1; i < smoothed.length; i++) {
+        let wasClimbing = smoothed[1] > smoothed[0];
+        for (let i = 1; i < n; i++) {
             const isClimbing = smoothed[i] > smoothed[i - 1];
-
-            // Direction change detected - we found a local extremum
             if (isClimbing !== wasClimbing) {
                 const change = smoothed[i - 1] - lastExtreme;
-                if (change >= THRESHOLD) {
-                    totalGain += change;
-                }
-                if (Math.abs(change) >= THRESHOLD) {
-                    lastExtreme = smoothed[i - 1];
-                }
+                if (change >= THRESHOLD) running += change;
+                if (Math.abs(change) >= THRESHOLD) lastExtreme = smoothed[i - 1];
                 wasClimbing = isClimbing;
             }
+            const partial = smoothed[i] - lastExtreme;
+            cum[i] = running + (partial >= THRESHOLD ? partial : 0);
         }
+        return cum;
+    }
 
-        // Handle final segment
-        const finalChange = smoothed[smoothed.length - 1] - lastExtreme;
-        if (finalChange >= THRESHOLD) {
-            totalGain += finalChange;
-        }
-
-        return totalGain;
+    function calculateElevationGainToPosition(position) {
+        if (!routeData || !routeData._cumGain) return 0;
+        const cum = routeData._cumGain;
+        const targetIndex = Math.floor(position * (cum.length - 1));
+        return cum[Math.max(0, Math.min(cum.length - 1, targetIndex))];
     }
 
     /**

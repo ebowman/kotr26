@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>KOTR 2026 - Time-in-Saddle Simulation</title>
     <script src="https://d3js.org/d3.v7.min.js"></script>
-    <script src="../js/config.js?v=b54dfb4"></script>
-    <script src="../js/rider-profile.js?v=b54dfb4"></script>
+    <script src="../js/config.js?v=f7389c0"></script>
+    <script src="../js/rider-profile.js?v=f7389c0"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -226,7 +226,7 @@
     Supporting <a href="https://www.justgiving.com/page/eric-bowman-kotr26">M&eacute;decins Sans Fronti&egrave;res</a>
 </div>
 
-<script src="data-inline.js?v=67b135d"></script>
+<script src="../routes/viz-data.js?v=f7389c0"></script>
 <script>
 // ── Physics model ──────────────────────────────────────────────────
 const PHYSICS = {
@@ -597,15 +597,24 @@ function persistProfile() {
     }, 200);
 }
 
+// rAF-coalesce buildAll so rapid slider dragging doesn't trigger 30+
+// full chart rebuilds per second (each is 7 × 3 physics sims + D3 re-render).
+let buildPending = false;
+function scheduleBuild() {
+    if (buildPending) return;
+    buildPending = true;
+    requestAnimationFrame(() => { buildPending = false; buildAll(); });
+}
+
 weightSlider.addEventListener('input', function() {
     document.getElementById('weight-value').textContent = this.value + ' kg';
     persistProfile();
-    buildAll();
+    scheduleBuild();
 });
 ftpSlider.addEventListener('input', function() {
     document.getElementById('ftp-value').textContent = this.value + ' W';
     persistProfile();
-    buildAll();
+    scheduleBuild();
 });
 variantSelect.addEventListener('change', buildAll);
 
