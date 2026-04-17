@@ -975,22 +975,23 @@
 
         Object.keys(ROUTES).forEach(key => {
             const config = ROUTES[key];
-            let distance, elevation;
+            let distance, elevation, routeFile;
 
             if (config.type === 'warmup') {
                 distance = config.distance;
                 elevation = config.elevation;
+                routeFile = config.routeFile;
             } else {
                 const selected = config[variant] || config.standard;
                 distance = selected.distance;
                 elevation = selected.elevation;
+                routeFile = selected.routeFile;
             }
 
-            // Create mock route data for calculation
             const mockRouteData = {
                 distance: distance,
                 elevationGain: elevation,
-                coordinates: generateMockCoordinates(distance, elevation)
+                coordinates: buildAnalysisCoordinates(distance, elevation, routeFile)
             };
 
             // Calculate metrics using PowerCalculator
@@ -1227,21 +1228,23 @@
 
             let distance, elevation;
 
+            let routeFile;
             if (config.type === 'warmup') {
                 distance = config.distance;
                 elevation = config.elevation;
+                routeFile = config.routeFile;
             } else {
                 const variant = selectedVariants[day] || 'standard';
                 const selected = config[variant] || config.standard;
                 distance = selected.distance;
                 elevation = selected.elevation;
+                routeFile = selected.routeFile;
             }
 
-            // Create mock route data for calculation
             const mockRouteData = {
                 distance: distance,
                 elevationGain: elevation,
-                coordinates: generateMockCoordinates(distance, elevation)
+                coordinates: buildAnalysisCoordinates(distance, elevation, routeFile)
             };
 
             // Calculate metrics
@@ -1775,32 +1778,30 @@
         const selectedVariant = selectedVariants[day] || 'standard';
         const isLongSelected = selectedVariant === 'long';
 
-        // Get distance and elevation based on selection
-        let distance, elevation;
+        let distance, elevation, routeFile;
 
         if (routeConfig.type === 'warmup') {
-            // Day 1 has no variant options
             distance = routeConfig.distance;
             elevation = routeConfig.elevation;
+            routeFile = routeConfig.routeFile;
         } else if (isLongSelected && routeConfig.long) {
-            // Long variant selected
             distance = routeConfig.long.distance;
             elevation = routeConfig.long.elevation;
+            routeFile = routeConfig.long.routeFile;
         } else if (routeConfig.standard) {
-            // Standard variant selected (or fallback)
             distance = routeConfig.standard.distance;
             elevation = routeConfig.standard.elevation;
+            routeFile = routeConfig.standard.routeFile;
         } else {
-            // Fallback to top-level config
             distance = routeConfig.distance || 0;
             elevation = routeConfig.elevation || 0;
+            routeFile = routeConfig.routeFile;
         }
 
-        // Create mock route data for calculation
         const mockRouteData = {
             distance: distance,
             elevationGain: elevation,
-            coordinates: generateMockCoordinates(distance, elevation)
+            coordinates: buildAnalysisCoordinates(distance, elevation, routeFile)
         };
 
         // Calculate metrics
@@ -1823,48 +1824,47 @@
         }
     }
 
-    /**
-     * Generate mock coordinates for route analysis
-     * Creates a simple linear route with the correct haversine distance
-     * and elevation profile matching the route statistics
-     */
-    function generateMockCoordinates(distanceKm, elevationGainM) {
-        const numPoints = 100;
-        const coords = [];
+    // Build PowerCalculator-shaped coordinates for on-landing route analysis.
+    // Prefer real DEM-derived elevations (from elevation-profiles.json) when
+    // available; otherwise fall back to a synthetic monotonic climb. The
+    // lat/lon path is a straight line whose haversine total matches the
+    // stated distance — PowerCalculator only needs elevation vs distance,
+    // not the geographic shape.
+    function buildAnalysisCoordinates(distanceKm, elevationGainM, routeFile) {
+        const profile = elevationProfilesCache && routeFile && elevationProfilesCache[routeFile];
+        const elevations = profile && profile.elevations && profile.elevations.length > 1
+            ? profile.elevations
+            : synthesizeElevations(elevationGainM);
+        const numPoints = elevations.length;
 
-        // At 44° latitude:
-        // 1° longitude ≈ 79km * cos(44°) ≈ 57km
-        // 1° latitude ≈ 111km
-        // For a diagonal path with aspect 0.6, total distance ≈ sqrt(lonKm² + latKm²)
-        // We need coords to span the actual route distance via haversine
-
-        // Scale factor: for every 100km of route, span about 0.8° lat, 0.5° lon
-        // This gives haversine distance of ~100km
+        // Span tuned so haversine over a 43.9°/4.8° diagonal ≈ distanceKm.
         const scaleFactor = distanceKm / 100;
-        const lonSpan = 0.5 * scaleFactor;  // degrees longitude
-        const latSpan = 0.8 * scaleFactor;  // degrees latitude
+        const lonSpan = 0.5 * scaleFactor;
+        const latSpan = 0.8 * scaleFactor;
 
-        // Simple elevation profile: gradual climb to elevationGain, with gentle undulation
-        // This matches what cyclists expect - net gain is the specified elevation
-        const startElevation = 100; // Avignon area
-
+        const coords = new Array(numPoints);
         for (let i = 0; i < numPoints; i++) {
             const progress = i / (numPoints - 1);
-
-            // Gentle sinusoidal undulation around a linear climb
-            // Net elevation gain = elevationGainM at the end
-            const baseElevation = startElevation + elevationGainM * progress;
-            const undulation = elevationGainM * 0.1 * Math.sin(progress * Math.PI * 6);
-            const elevation = Math.max(50, baseElevation + undulation);
-
-            coords.push([
-                4.8 + progress * lonSpan,   // Longitude
-                43.9 + progress * latSpan,  // Latitude
-                elevation
-            ]);
+            coords[i] = [
+                4.8 + progress * lonSpan,
+                43.9 + progress * latSpan,
+                elevations[i]
+            ];
         }
-
         return coords;
+    }
+
+    function synthesizeElevations(elevationGainM) {
+        const numPoints = 100;
+        const startElevation = 100;
+        const out = new Array(numPoints);
+        for (let i = 0; i < numPoints; i++) {
+            const progress = i / (numPoints - 1);
+            const base = startElevation + elevationGainM * progress;
+            const undulation = elevationGainM * 0.1 * Math.sin(progress * Math.PI * 6);
+            out[i] = Math.max(50, base + undulation);
+        }
+        return out;
     }
 
     /**
