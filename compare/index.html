@@ -5,8 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>KOTR 2026 - Route Comparison</title>
 <script src="https://d3js.org/d3.v7.min.js"></script>
-<script src="data-inline.js?v=b54dfb4"></script>
-<script src="gps-inline.js"></script>
+<script src="../js/config.js?v=b54dfb4"></script>
+<script src="data-inline.js?v=67b135d"></script>
+<script src="gps-inline.js?v=b54dfb4"></script>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -241,12 +242,8 @@
 
 <script>
 (function() {
-  // Token loaded from shared config (same token already public in js/main.js)
-  const MAPBOX_TOKEN = [
-    'pk.eyJ1IjoiZWJvd21hbiIsImEiOiJjbWE',
-    '1ZWVwdzYwODhwMmlzZnU4NTlyem1rIn0',
-    '.E10X5hj2NTgViJexKpvrOg'
-  ].join('');
+  // Token loaded from shared config
+  const MAPBOX_TOKEN = window.KOTR_CONFIG.MAPBOX_TOKEN;
 
   const COLORS = {
     teal: '#8fb5a3',

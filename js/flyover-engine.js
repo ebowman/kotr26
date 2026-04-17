@@ -15,8 +15,8 @@
 (function() {
     'use strict';
 
-    // Mapbox access token - replace with your own for production
-    const MAPBOX_TOKEN = 'pk.eyJ1IjoiZWJvd21hbiIsImEiOiJjbWE1ZWVwdzYwODhwMmlzZnU4NTlyem1rIn0.E10X5hj2NTgViJexKpvrOg';
+    // Mapbox access token — single source in js/config.js
+    const MAPBOX_TOKEN = window.KOTR_CONFIG.MAPBOX_TOKEN;
 
     // Animation configuration
     const CONFIG = {
@@ -6666,13 +6666,21 @@
      */
     function showError(message) {
         const overlay = document.getElementById('loading');
-        overlay.innerHTML = `
-            <div style="text-align: center;">
-                <div style="font-size: 48px; margin-bottom: 16px;">⚠️</div>
-                <div style="font-size: 18px; margin-bottom: 8px;">${message}</div>
-                <a href="index.html" style="color: #E6B800;">← Back to Routes</a>
-            </div>
-        `;
+        overlay.replaceChildren();
+        const wrap = document.createElement('div');
+        wrap.style.textAlign = 'center';
+        const icon = document.createElement('div');
+        icon.style.cssText = 'font-size: 48px; margin-bottom: 16px;';
+        icon.textContent = '⚠️';
+        const msg = document.createElement('div');
+        msg.style.cssText = 'font-size: 18px; margin-bottom: 8px;';
+        msg.textContent = String(message);
+        const back = document.createElement('a');
+        back.href = 'index.html';
+        back.style.color = '#E6B800';
+        back.textContent = '← Back to Routes';
+        wrap.append(icon, msg, back);
+        overlay.appendChild(wrap);
     }
 
     /**

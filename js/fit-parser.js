@@ -259,7 +259,6 @@ const FitParser = (function() {
                         break;
                     case 'string':
                         value = this.readString(field.fieldSize);
-                        this.offset -= field.fieldSize; // readString advances offset, reset it
                         break;
                     default:
                         value = this.dataView.getUint8(this.offset);
@@ -272,9 +271,7 @@ const FitParser = (function() {
             return value;
         }
 
-        /**
-         * Read a null-terminated string
-         */
+        // Pure read — caller (readFieldValue) advances offset by fieldSize.
         readString(maxLength) {
             let str = '';
             for (let i = 0; i < maxLength; i++) {
@@ -282,7 +279,6 @@ const FitParser = (function() {
                 if (char === 0) break;
                 str += String.fromCharCode(char);
             }
-            this.offset += maxLength;
             return str;
         }
 
@@ -358,14 +354,13 @@ const FitParser = (function() {
          */
         buildRouteData() {
             const coordinates = this.records
-                .filter(r => r.latitude && r.longitude)
-                .map(r => [r.longitude, r.latitude, r.altitude || 0]);
+                .filter(r => r.latitude !== undefined && r.longitude !== undefined)
+                .map(r => [r.longitude, r.latitude, r.altitude != null ? r.altitude : 0]);
 
-            // Smooth elevation data to reduce GPS noise before calculating gain
-            // This prevents small oscillations from being counted as climbing
+            const halfWindow = (window.KOTR_CONFIG && window.KOTR_CONFIG.ELEV_SMOOTH_HALF_WINDOW) || 5;
             const smoothedElevations = this.smoothElevations(
                 coordinates.map(c => c[2]),
-                5 // window size of 5 points (~15-25m typically)
+                halfWindow
             );
 
             // Calculate total stats using industry-standard algorithm
@@ -377,7 +372,7 @@ const FitParser = (function() {
             let maxElevation = -Infinity;
 
             // Threshold for counting a climb/descent (calibrated to match Strava)
-            const THRESHOLD = 3.5;
+            const THRESHOLD = (window.KOTR_CONFIG && window.KOTR_CONFIG.ELEV_GAIN_THRESHOLD_M) || 3.5;
             let lastExtreme = smoothedElevations[0];
             let wasClimbing = smoothedElevations.length > 1 ?
                 smoothedElevations[1] > smoothedElevations[0] : false;
@@ -469,18 +464,15 @@ const FitParser = (function() {
             return deg * (Math.PI / 180);
         }
 
-        /**
-         * Smooth elevation data using a moving average to reduce GPS noise
-         * @param {number[]} elevations - Array of elevation values
-         * @param {number} windowSize - Number of points on each side to average
-         * @returns {number[]} Smoothed elevation array
-         */
-        smoothElevations(elevations, windowSize) {
+        // Moving-average smoother. halfWindow = points on each side; effective
+        // window is 2*halfWindow + 1. Kept simple rather than FIR-optimal because
+        // the caller only needs it for the gain threshold walk.
+        smoothElevations(elevations, halfWindow) {
             const smoothed = [];
             for (let i = 0; i < elevations.length; i++) {
                 let sum = 0;
                 let count = 0;
-                for (let j = Math.max(0, i - windowSize); j <= Math.min(elevations.length - 1, i + windowSize); j++) {
+                for (let j = Math.max(0, i - halfWindow); j <= Math.min(elevations.length - 1, i + halfWindow); j++) {
                     sum += elevations[j];
                     count++;
                 }
@@ -527,33 +519,31 @@ const FitParser = (function() {
 
         // Try to load DEM sidecar file for accurate elevation data
         const demUrl = url.replace('.fit', '.dem.json');
+        routeData.elevationSource = 'gps';
         try {
             const demResponse = await fetch(demUrl);
-            if (demResponse.ok) {
-                const demData = await demResponse.json();
-                if (demData.elevations && demData.elevations.length === routeData.coordinates.length) {
-                    console.debug(`Loaded DEM elevation data for ${url}`);
-
-                    // Replace GPS elevation with DEM elevation
-                    for (let i = 0; i < routeData.coordinates.length; i++) {
-                        routeData.coordinates[i][2] = demData.elevations[i];
-                    }
-
-                    // Update stats from DEM data
-                    routeData.elevationGain = demData.stats.elevationGain;
-                    routeData.minElevation = demData.stats.minElevation;
-                    routeData.maxElevation = demData.stats.maxElevation;
-                    routeData.elevationSource = 'dem';
-                } else {
-                    console.warn(`DEM data point count mismatch: ${demData.elevations?.length} vs ${routeData.coordinates.length}`);
-                    routeData.elevationSource = 'gps';
+            if (!demResponse.ok) {
+                if (demResponse.status !== 404) {
+                    console.warn(`DEM fetch ${demResponse.status} for ${demUrl}, falling back to GPS elevation`);
                 }
-            } else {
-                routeData.elevationSource = 'gps';
+                return routeData;
             }
+            const demData = await demResponse.json();
+            if (!demData.elevations || demData.elevations.length !== routeData.coordinates.length) {
+                console.warn(`DEM data point count mismatch: ${demData.elevations && demData.elevations.length} vs ${routeData.coordinates.length}`);
+                return routeData;
+            }
+            for (let i = 0; i < routeData.coordinates.length; i++) {
+                routeData.coordinates[i][2] = demData.elevations[i];
+            }
+            routeData.elevationGain = demData.stats.elevationGain;
+            routeData.minElevation = demData.stats.minElevation;
+            routeData.maxElevation = demData.stats.maxElevation;
+            routeData.elevationSource = 'dem';
         } catch (e) {
-            console.debug(`No DEM data available for ${url}, using GPS elevation`);
-            routeData.elevationSource = 'gps';
+            // Network / JSON parse failures are worth knowing about — a missing
+            // sidecar comes back as !ok above, not as a thrown exception.
+            console.warn(`DEM load failed for ${demUrl}:`, e.message || e);
         }
 
         return routeData;

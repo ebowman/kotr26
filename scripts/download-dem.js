@@ -12,7 +12,7 @@ const https = require('https');
 const path = require('path');
 const { PNG } = require('pngjs');
 
-const MAPBOX_TOKEN = 'pk.eyJ1IjoiZWJvd21hbiIsImEiOiJjbWE1ZWVwdzYwODhwMmlzZnU4NTlyem1rIn0.E10X5hj2NTgViJexKpvrOg';
+const { MAPBOX_TOKEN, ELEV_GAIN_THRESHOLD_M, ELEV_SMOOTH_HALF_WINDOW } = require('../js/config.js');
 const SEMICIRCLE_TO_DEGREE = 180 / Math.pow(2, 31);
 
 // ============= Simple FIT Parser =============
@@ -67,7 +67,7 @@ class SimpleFitParser {
                 if (def.globalMsgNum === 20) this.parseRecord(data);
             }
         }
-        return this.records.filter(r => r.latitude && r.longitude);
+        return this.records.filter(r => r.latitude !== undefined && r.longitude !== undefined);
     }
 
     parseRecord(data) {
@@ -201,27 +201,23 @@ async function processRoute(routeFilePath, force = false) {
 
     console.log(`  Fetched ${records.length}/${records.length} elevations (${tileCache.size} tiles cached)`);
 
-    // Smooth elevation data to reduce noise (moving average)
+    // Moving-average smoother (half-window on each side).
     const smoothed = [];
-    const windowSize = 5; // ~25-50m window depending on point spacing
+    const halfWindow = ELEV_SMOOTH_HALF_WINDOW;
     for (let i = 0; i < demElevations.length; i++) {
         let sum = 0;
         let count = 0;
-        for (let j = Math.max(0, i - windowSize); j <= Math.min(demElevations.length - 1, i + windowSize); j++) {
+        for (let j = Math.max(0, i - halfWindow); j <= Math.min(demElevations.length - 1, i + halfWindow); j++) {
             sum += demElevations[j];
             count++;
         }
         smoothed.push(sum / count);
     }
 
-    // Calculate stats using industry-standard algorithm:
-    // Track direction changes and only count segments that exceed threshold
-    // This matches how Strava and other apps calculate elevation gain
+    // Strava-style gain/loss: walk extrema, count only segments exceeding threshold.
     let elevGain = 0, elevLoss = 0;
     let minElev = Infinity, maxElev = -Infinity;
-
-    // Threshold for counting a climb/descent (calibrated to match Strava)
-    const THRESHOLD = 3.5;
+    const THRESHOLD = ELEV_GAIN_THRESHOLD_M;
 
     // Find local extrema (peaks and valleys) and sum significant changes
     let lastExtreme = smoothed[0];

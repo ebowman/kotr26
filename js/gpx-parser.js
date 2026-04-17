@@ -62,14 +62,15 @@ const GpxParser = (function() {
         }
 
         // Smooth elevations and calculate stats (same algorithm as fit-parser.js)
+        const halfWindow = (typeof window !== 'undefined' && window.KOTR_CONFIG && window.KOTR_CONFIG.ELEV_SMOOTH_HALF_WINDOW) || 5;
         const rawElevations = coordinates.map(c => c[2]);
-        const smoothed = smoothElevations(rawElevations, 5);
+        const smoothed = smoothElevations(rawElevations, halfWindow);
 
         let totalElevationGain = 0;
         let minElevation = Infinity;
         let maxElevation = -Infinity;
 
-        const THRESHOLD = 3.5;
+        const THRESHOLD = (typeof window !== 'undefined' && window.KOTR_CONFIG && window.KOTR_CONFIG.ELEV_GAIN_THRESHOLD_M) || 3.5;
         let lastExtreme = smoothed[0];
         let wasClimbing = smoothed.length > 1 ? smoothed[1] > smoothed[0] : false;
 
@@ -136,45 +137,42 @@ const GpxParser = (function() {
 
         // Try to load DEM sidecar file for accurate elevation data
         const demUrl = url.replace('.gpx', '.dem.json');
+        routeData.elevationSource = 'gps';
         try {
             const demResponse = await fetch(demUrl);
-            if (demResponse.ok) {
-                const demData = await demResponse.json();
-                if (demData.elevations && demData.elevations.length === routeData.coordinates.length) {
-                    console.debug(`Loaded DEM elevation data for ${url}`);
-
-                    for (let i = 0; i < routeData.coordinates.length; i++) {
-                        routeData.coordinates[i][2] = demData.elevations[i];
-                    }
-
-                    routeData.elevationGain = demData.stats.elevationGain;
-                    routeData.minElevation = demData.stats.minElevation;
-                    routeData.maxElevation = demData.stats.maxElevation;
-                    routeData.elevationSource = 'dem';
-                } else {
-                    console.warn(`DEM data point count mismatch: ${demData.elevations?.length} vs ${routeData.coordinates.length}`);
-                    routeData.elevationSource = 'gps';
+            if (!demResponse.ok) {
+                if (demResponse.status !== 404) {
+                    console.warn(`DEM fetch ${demResponse.status} for ${demUrl}, falling back to GPS elevation`);
                 }
-            } else {
-                routeData.elevationSource = 'gps';
+                return routeData;
             }
+            const demData = await demResponse.json();
+            if (!demData.elevations || demData.elevations.length !== routeData.coordinates.length) {
+                console.warn(`DEM data point count mismatch: ${demData.elevations && demData.elevations.length} vs ${routeData.coordinates.length}`);
+                return routeData;
+            }
+            for (let i = 0; i < routeData.coordinates.length; i++) {
+                routeData.coordinates[i][2] = demData.elevations[i];
+            }
+            routeData.elevationGain = demData.stats.elevationGain;
+            routeData.minElevation = demData.stats.minElevation;
+            routeData.maxElevation = demData.stats.maxElevation;
+            routeData.elevationSource = 'dem';
         } catch (e) {
-            console.debug(`No DEM data available for ${url}, using GPS elevation`);
-            routeData.elevationSource = 'gps';
+            console.warn(`DEM load failed for ${demUrl}:`, e.message || e);
         }
 
         return routeData;
     }
 
-    /**
-     * Smooth elevation data using a moving average
-     */
-    function smoothElevations(elevations, windowSize) {
+    // Moving-average smoother. halfWindow = points on each side (effective
+    // window = 2*halfWindow + 1). Matches fit-parser.js.
+    function smoothElevations(elevations, halfWindow) {
         const smoothed = [];
         for (let i = 0; i < elevations.length; i++) {
             let sum = 0;
             let count = 0;
-            for (let j = Math.max(0, i - windowSize); j <= Math.min(elevations.length - 1, i + windowSize); j++) {
+            for (let j = Math.max(0, i - halfWindow); j <= Math.min(elevations.length - 1, i + halfWindow); j++) {
                 sum += elevations[j];
                 count++;
             }

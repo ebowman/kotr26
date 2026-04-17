@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>KOTR 2026 - Time-in-Saddle Simulation</title>
     <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="../js/config.js?v=b54dfb4"></script>
+    <script src="../js/rider-profile.js?v=b54dfb4"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -224,7 +226,7 @@
     Supporting <a href="https://www.justgiving.com/page/eric-bowman-kotr26">M&eacute;decins Sans Fronti&egrave;res</a>
 </div>
 
-<script src="data-inline.js?v=b54dfb4"></script>
+<script src="data-inline.js?v=67b135d"></script>
 <script>
 // ── Physics model ──────────────────────────────────────────────────
 const PHYSICS = {
@@ -573,34 +575,39 @@ function buildAll() {
     }
 }
 
-// ── Event listeners ────────────────────────────────────────────────
-document.getElementById('weight-slider').addEventListener('input', function() {
-    document.getElementById('weight-value').textContent = this.value + ' kg';
-    buildAll();
-});
-document.getElementById('ftp-slider').addEventListener('input', function() {
-    document.getElementById('ftp-value').textContent = this.value + ' W';
-    buildAll();
-});
-document.getElementById('variant-select').addEventListener('change', buildAll);
+// ── Rider profile wiring ───────────────────────────────────────────
+// Source of truth: RiderProfile module (shared with landing page).
+// Sliders seed from and write back to it so adjustments persist across pages.
+const weightSlider = document.getElementById('weight-slider');
+const ftpSlider = document.getElementById('ftp-slider');
+const variantSelect = document.getElementById('variant-select');
 
-// Load rider profile from localStorage (shared with main page)
-try {
-    const stored = localStorage.getItem('kotr-rider-profile');
-    if (stored) {
-        const profile = JSON.parse(stored);
-        if (profile.weight) {
-            const ws = document.getElementById('weight-slider');
-            ws.value = Math.max(+ws.min, Math.min(+ws.max, profile.weight));
-            document.getElementById('weight-value').textContent = ws.value + ' kg';
-        }
-        if (profile.ftp) {
-            const fs = document.getElementById('ftp-slider');
-            fs.value = Math.max(+fs.min, Math.min(+fs.max, profile.ftp));
-            document.getElementById('ftp-value').textContent = fs.value + ' W';
-        }
-    }
-} catch(e) { /* ignore localStorage errors */ }
+RiderProfile.load();
+const initialProfile = RiderProfile.get();
+weightSlider.value = Math.max(+weightSlider.min, Math.min(+weightSlider.max, initialProfile.weight));
+ftpSlider.value = Math.max(+ftpSlider.min, Math.min(+ftpSlider.max, initialProfile.ftp));
+document.getElementById('weight-value').textContent = weightSlider.value + ' kg';
+document.getElementById('ftp-value').textContent = ftpSlider.value + ' W';
+
+let persistPending = null;
+function persistProfile() {
+    clearTimeout(persistPending);
+    persistPending = setTimeout(() => {
+        RiderProfile.update({ weight: +weightSlider.value, ftp: +ftpSlider.value });
+    }, 200);
+}
+
+weightSlider.addEventListener('input', function() {
+    document.getElementById('weight-value').textContent = this.value + ' kg';
+    persistProfile();
+    buildAll();
+});
+ftpSlider.addEventListener('input', function() {
+    document.getElementById('ftp-value').textContent = this.value + ' W';
+    persistProfile();
+    buildAll();
+});
+variantSelect.addEventListener('change', buildAll);
 
 // Initial render
 buildAll();

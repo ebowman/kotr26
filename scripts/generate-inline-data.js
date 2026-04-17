@@ -138,7 +138,7 @@ class SimpleFitParser {
                 if (def.globalMsgNum === 20) this.parseRecord(data);
             }
         }
-        return this.records.filter(r => r.latitude && r.longitude);
+        return this.records.filter(r => r.latitude !== undefined && r.longitude !== undefined);
     }
 
     parseRecord(data) {
@@ -267,8 +267,8 @@ function main() {
             _elevation_min: stats.minElevation,
             _elevations_plain: chartElevationsRounded,
             _course_points: [
-                { name: records[0] ? route.label : 'Start', type: 'generic', dist: 0 },
-                { name: records[records.length - 1] ? route.label : 'End', type: 'generic', dist: Math.round(distanceKm * 1000 * 10) / 10 },
+                { name: 'Start', type: 'generic', dist: 0 },
+                { name: 'End', type: 'generic', dist: Math.round(distanceKm * 10) / 10 },
             ],
             _start: { lat: records[0].latitude, lon: records[0].longitude },
         });

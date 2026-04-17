@@ -6,9 +6,8 @@
 (function() {
     'use strict';
 
-    // Mapbox access token - replace with your own for production
-    // For demo purposes, using a placeholder that should be replaced
-    const MAPBOX_TOKEN = 'pk.eyJ1IjoiZWJvd21hbiIsImEiOiJjbWE1ZWVwdzYwODhwMmlzZnU4NTlyem1rIn0.E10X5hj2NTgViJexKpvrOg';
+    // Mapbox access token — single source in js/config.js
+    const MAPBOX_TOKEN = window.KOTR_CONFIG.MAPBOX_TOKEN;
 
     // ========================================================================
     // SINGLE SOURCE OF TRUTH: Route configurations
@@ -119,6 +118,33 @@
 
     // Export ROUTES for potential external access
     window.KOTR_ROUTES = ROUTES;
+
+    // Dev-time drift check: landing-page stats are hand-maintained in ROUTES but
+    // DEM-authoritative values live in routes/elevation-profiles.json. Warn if
+    // they diverge by >5m of gain so the inconsistency doesn't ship unnoticed.
+    (async function verifyRouteStatsAgainstDem() {
+        try {
+            const res = await fetch('routes/elevation-profiles.json');
+            if (!res.ok) return;
+            const profiles = await res.json();
+            const pairs = [
+                [ROUTES.day1,               null],
+                [ROUTES.day2.standard,      'standard'],
+                [ROUTES.day2.long,          'long'],
+                [ROUTES.day3.standard,      'standard'],
+                [ROUTES.day3.long,          'long'],
+                [ROUTES.day4.standard,      'standard'],
+                [ROUTES.day4.long,          'long'],
+            ];
+            for (const [entry] of pairs) {
+                const dem = profiles[entry.routeFile];
+                if (!dem) continue;
+                if (Math.abs(dem.gain - entry.elevation) > 5) {
+                    console.warn(`ROUTES stat drift: ${entry.routeFile} elevation=${entry.elevation}m, DEM gain=${dem.gain}m`);
+                }
+            }
+        } catch (e) { /* network or shape mismatch; silent in prod */ }
+    })();
 
     // ========================================================================
     // Countdown — live to 14:00 CEST May 29 (first ride rollout)
