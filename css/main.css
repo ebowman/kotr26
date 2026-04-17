@@ -908,6 +908,12 @@ footer a:hover {
     line-height: 1;
 }
 
+/* Option cards are narrow (half of day card); hide the flyover's text label
+   so the three buttons (flyover icon + GPX + FIT) fit without overflowing. */
+.option-actions .btn-flyover .btn-label {
+    display: none;
+}
+
 .option-actions .btn:hover {
     background: var(--color-primary);
     border-color: var(--color-primary);

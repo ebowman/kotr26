@@ -439,13 +439,13 @@
                 ${elevationProfile}
                 ${option.specialNote ? `<div class="special-note">${option.specialNote}</div>` : ''}
                 <div class="option-actions">
-                    <button class="btn btn-sm btn-flyover" data-route="${option.routeFile}">
-                        <span class="icon">&#127916;</span> 3D Flyover
+                    <button class="btn btn-sm btn-flyover" data-route="${option.routeFile}" title="3D Flyover" aria-label="3D Flyover">
+                        <span class="icon">&#127916;</span><span class="btn-label"> 3D Flyover</span>
                     </button>
-                    <button class="btn btn-sm btn-download" data-route="${option.routeFile}" data-format="gpx">
+                    <button class="btn btn-sm btn-download" data-route="${option.routeFile}" data-format="gpx" title="Download GPX">
                         <span class="icon">&#128229;</span> GPX
                     </button>
-                    <button class="btn btn-sm btn-download" data-route="${option.routeFile}" data-format="fit">
+                    <button class="btn btn-sm btn-download" data-route="${option.routeFile}" data-format="fit" title="Download FIT">
                         <span class="icon">&#128229;</span> FIT
                     </button>
                 </div>
