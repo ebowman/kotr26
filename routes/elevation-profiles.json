@@ -54,7 +54,44 @@
     ],
     "min": 19,
     "max": 108,
-    "gain": 150
+    "gain": 150,
+    "pois": [
+      {
+        "name": "Start of r",
+        "type": "marker",
+        "dist": 0,
+        "lat": 43.92618399113417,
+        "lon": 4.844746990129352
+      },
+      {
+        "name": "Caution ro",
+        "type": "danger",
+        "dist": 5.7,
+        "lat": 43.91093797981739,
+        "lon": 4.807821940630674
+      },
+      {
+        "name": "Feedzone",
+        "type": "food",
+        "dist": 31.3,
+        "lat": 43.87679999694228,
+        "lon": 4.884850960224867
+      },
+      {
+        "name": "Caution ro",
+        "type": "danger",
+        "dist": 42,
+        "lat": 43.906519962474704,
+        "lon": 4.814179949462414
+      },
+      {
+        "name": "End of rou",
+        "type": "marker",
+        "dist": 48.1,
+        "lat": 43.92618399113417,
+        "lon": 4.844746990129352
+      }
+    ]
   },
   "KOTR_D2_Short.fit": {
     "elevations": [
@@ -111,7 +148,37 @@
     ],
     "min": 9,
     "max": 233,
-    "gain": 428
+    "gain": 428,
+    "pois": [
+      {
+        "name": "Start of r",
+        "type": "marker",
+        "dist": 0,
+        "lat": 43.92623294144869,
+        "lon": 4.844771968200803
+      },
+      {
+        "name": "Dangerous ",
+        "type": "danger",
+        "dist": 7.7,
+        "lat": 43.954539969563484,
+        "lon": 4.791325936093926
+      },
+      {
+        "name": "Feedzone 2",
+        "type": "food",
+        "dist": 53.1,
+        "lat": 44.007268929854035,
+        "lon": 4.592504929751158
+      },
+      {
+        "name": "End of rou",
+        "type": "marker",
+        "dist": 81.7,
+        "lat": 43.92612498253584,
+        "lon": 4.8447199165821075
+      }
+    ]
   },
   "KOTR_D2_Long.fit": {
     "elevations": [
@@ -168,7 +235,58 @@
     ],
     "min": 9,
     "max": 233,
-    "gain": 703
+    "gain": 703,
+    "pois": [
+      {
+        "name": "Start of r",
+        "type": "marker",
+        "dist": 0,
+        "lat": 43.9260199572891,
+        "lon": 4.84396998770535
+      },
+      {
+        "name": "Dangerous ",
+        "type": "danger",
+        "dist": 7.7,
+        "lat": 43.954539969563484,
+        "lon": 4.791324930265546
+      },
+      {
+        "name": "Feedzone 1",
+        "type": "food",
+        "dist": 31.7,
+        "lat": 43.8643569778651,
+        "lon": 4.581131944432855
+      },
+      {
+        "name": "Public toi",
+        "type": "toilet",
+        "dist": 34.7,
+        "lat": 43.88293898664415,
+        "lon": 4.563143961131573
+      },
+      {
+        "name": "Feedzone 1",
+        "type": "food",
+        "dist": 53.1,
+        "lat": 43.95449294708669,
+        "lon": 4.47954093106091
+      },
+      {
+        "name": "Feedzone 2",
+        "type": "food",
+        "dist": 76.6,
+        "lat": 44.007264990359545,
+        "lon": 4.592506941407919
+      },
+      {
+        "name": "End of rou",
+        "type": "marker",
+        "dist": 105,
+        "lat": 43.92626395449042,
+        "lon": 4.84450894407928
+      }
+    ]
   },
   "KOTR_D3_Short.fit": {
     "elevations": [
@@ -225,7 +343,51 @@
     ],
     "min": 23,
     "max": 173,
-    "gain": 369
+    "gain": 369,
+    "pois": [
+      {
+        "name": "Start of r",
+        "type": "marker",
+        "dist": 0,
+        "lat": 43.92592993564904,
+        "lon": 4.844564935192466
+      },
+      {
+        "name": "Feedzone 1",
+        "type": "food",
+        "dist": 33.8,
+        "lat": 44.04483494348824,
+        "lon": 5.120198959484696
+      },
+      {
+        "name": "Public toi",
+        "type": "toilet",
+        "dist": 35.3,
+        "lat": 44.056124947965145,
+        "lon": 5.130230924114585
+      },
+      {
+        "name": "Public toi",
+        "type": "toilet",
+        "dist": 51.5,
+        "lat": 44.04861493036151,
+        "lon": 5.045218979939818
+      },
+      {
+        "name": "Feedzone 2",
+        "type": "food",
+        "dist": 62.5,
+        "lat": 43.95527598448098,
+        "lon": 5.02573692239821
+      },
+      {
+        "name": "End of rou",
+        "type": "marker",
+        "dist": 81.4,
+        "lat": 43.92579993233085,
+        "lon": 4.844463933259249
+      }
+    ]
   },
   "KOTR_D3_Long.fit": {
     "elevations": [
@@ -282,7 +444,65 @@
     ],
     "min": 23,
     "max": 1897,
-    "gain": 2189
+    "gain": 2189,
+    "pois": [
+      {
+        "name": "Start of r",
+        "type": "marker",
+        "dist": 0,
+        "lat": 43.92618399113417,
+        "lon": 4.844746990129352
+      },
+      {
+        "name": "Public toi",
+        "type": "toilet",
+        "dist": 24.7,
+        "lat": 43.999123983085155,
+        "lon": 5.056756921112537
+      },
+      {
+        "name": "Feedzone 1",
+        "type": "food",
+        "dist": 33.7,
+        "lat": 44.044844917953014,
+        "lon": 5.120202982798219
+      },
+      {
+        "name": "Public toi",
+        "type": "toilet",
+        "dist": 35.3,
+        "lat": 44.05612796545029,
+        "lon": 5.1302319299429655
+      },
+      {
+        "name": "Toilet",
+        "type": "toilet",
+        "dist": 60.4,
+        "lat": 44.15211391635239,
+        "lon": 5.318801952525973
+      },
+      {
+        "name": "Toilet",
+        "type": "toilet",
+        "dist": 72.5,
+        "lat": 44.18103399686515,
+        "lon": 5.258471947163343
+      },
+      {
+        "name": "Feed zone ",
+        "type": "food",
+        "dist": 121.1,
+        "lat": 43.95527598448098,
+        "lon": 5.02573692239821
+      },
+      {
+        "name": "End of rou",
+        "type": "marker",
+        "dist": 140,
+        "lat": 43.92612498253584,
+        "lon": 4.8447199165821075
+      }
+    ]
   },
   "KOTR_D4_Short.fit": {
     "elevations": [
@@ -339,7 +559,51 @@
     ],
     "min": 23,
     "max": 234,
-    "gain": 400
+    "gain": 400,
+    "pois": [
+      {
+        "name": "Start of r",
+        "type": "marker",
+        "dist": 0,
+        "lat": 43.926029931753874,
+        "lon": 4.843889940530062
+      },
+      {
+        "name": "Public toi",
+        "type": "toilet",
+        "dist": 20.8,
+        "lat": 43.9176119863987,
+        "lon": 5.054188957437873
+      },
+      {
+        "name": "Feedzone 1",
+        "type": "food",
+        "dist": 30,
+        "lat": 43.89224197715521,
+        "lon": 5.132763935253024
+      },
+      {
+        "name": "Public toi",
+        "type": "toilet",
+        "dist": 32,
+        "lat": 43.89031992293894,
+        "lon": 5.150232994928956
+      },
+      {
+        "name": "Feedzone 2",
+        "type": "food",
+        "dist": 45.9,
+        "lat": 43.84170899167657,
+        "lon": 5.165180945768952
+      },
+      {
+        "name": "End of rou",
+        "type": "marker",
+        "dist": 77.8,
+        "lat": 43.92603999003768,
+        "lon": 4.8438699916005135
+      }
+    ]
   },
   "KOTR_D4_Long.fit": {
     "elevations": [
@@ -396,6 +660,57 @@
     ],
     "min": 23,
     "max": 366,
-    "gain": 713
+    "gain": 713,
+    "pois": [
+      {
+        "name": "Start of r",
+        "type": "marker",
+        "dist": 0,
+        "lat": 43.92603999003768,
+        "lon": 4.8438699916005135
+      },
+      {
+        "name": "Public toi",
+        "type": "toilet",
+        "dist": 20.8,
+        "lat": 43.91767996363342,
+        "lon": 5.054106982424855
+      },
+      {
+        "name": "Feedzone 1",
+        "type": "food",
+        "dist": 30,
+        "lat": 43.892321940511465,
+        "lon": 5.132631920278072
+      },
+      {
+        "name": "Public Toi",
+        "type": "toilet",
+        "dist": 32,
+        "lat": 43.890322940424085,
+        "lon": 5.1502469927072525
+      },
+      {
+        "name": "Public Toi",
+        "type": "toilet",
+        "dist": 55,
+        "lat": 43.83150896988809,
+        "lon": 5.207999981939793
+      },
+      {
+        "name": "Feedzone 2",
+        "type": "food",
+        "dist": 59.6,
+        "lat": 43.84171293117106,
+        "lon": 5.165168959647417
+      },
+      {
+        "name": "End of rou",
+        "type": "marker",
+        "dist": 91.6,
+        "lat": 43.92603999003768,
+        "lon": 4.8438699916005135
+      }
+    ]
   }
 }

@@ -1668,6 +1668,12 @@ footer a:hover {
 }
 
 /* Download All button */
+.download-all-group {
+    display: inline-flex;
+    gap: 0.5rem;
+    margin-left: auto;
+}
+
 .btn-download-all {
     display: inline-flex;
     align-items: center;
@@ -1683,7 +1689,6 @@ footer a:hover {
     cursor: pointer;
     transition: all 0.2s ease;
     white-space: nowrap;
-    margin-left: auto;
 }
 
 .btn-download-all:hover {

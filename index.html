@@ -14,8 +14,8 @@
     <script src="https://unpkg.com/@turf/turf@6.5.0/turf.min.js"></script>
 
     <!-- Styles -->
-    <link rel="stylesheet" href="css/main.css?v=85f444f">
-    <link rel="stylesheet" href="css/mobile.css?v=85f444f">
+    <link rel="stylesheet" href="css/main.css?v=1834b3a">
+    <link rel="stylesheet" href="css/mobile.css?v=1834b3a">
 
     <!-- Favicon -->
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🚴</text></svg>">
@@ -102,9 +102,14 @@
                             <span class="summary-stat-label" id="summary-time-label">@ 75% FTP</span>
                         </div>
                     </div>
-                    <button class="btn btn-download-all" id="download-all-gpx">
-                        <span class="icon">&#128229;</span> Download All GPX
-                    </button>
+                    <div class="download-all-group">
+                        <button class="btn btn-download-all" id="download-all-gpx">
+                            <span class="icon">&#128229;</span> All GPX
+                        </button>
+                        <button class="btn btn-download-all" id="download-all-fit">
+                            <span class="icon">&#128229;</span> All FIT
+                        </button>
+                    </div>
                 </div>
             </div>
         </section>
@@ -221,13 +226,14 @@
     </footer>
 
     <!-- Scripts -->
-    <script src="js/config.js?v=85f444f"></script>
-    <script src="js/geo.js?v=85f444f"></script>
-    <script src="js/fit-parser.js?v=85f444f"></script>
-    <script src="js/gpx-parser.js?v=85f444f"></script>
-    <script src="js/weather-widget.js?v=85f444f"></script>
-    <script src="js/rider-profile.js?v=85f444f"></script>
-    <script src="js/power-calculator.js?v=85f444f"></script>
-    <script src="js/main.js?v=85f444f"></script>
+    <script src="js/config.js?v=1834b3a"></script>
+    <script src="js/geo.js?v=1834b3a"></script>
+    <script src="js/poi-display.js?v=1834b3a"></script>
+    <script src="js/fit-parser.js?v=1834b3a"></script>
+    <script src="js/gpx-parser.js?v=1834b3a"></script>
+    <script src="js/weather-widget.js?v=1834b3a"></script>
+    <script src="js/rider-profile.js?v=1834b3a"></script>
+    <script src="js/power-calculator.js?v=1834b3a"></script>
+    <script src="js/main.js?v=1834b3a"></script>
 </body>
 </html>

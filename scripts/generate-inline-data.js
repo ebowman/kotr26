@@ -270,6 +270,13 @@ function main() {
             min: stats.minElevation,
             max: stats.maxElevation,
             gain: stats.elevationGain,
+            pois: coursePoints.map(cp => ({
+                name: cp.name || '',
+                type: cp.category,
+                dist: Math.round((cp.distance_km || 0) * 10) / 10,
+                lat: cp.lat,
+                lon: cp.lon,
+            })),
         };
 
         // --- data-inline.js entries ---

@@ -313,11 +313,25 @@
         const strokeColors = ['#22C55E', '#EAB308', '#F97316', '#EF4444'];
         const strokeColor = strokeColors[difficulty - 1];
 
+        // POI markers (food / toilet / caution) — skip generic start/end.
+        let poiMarkers = '';
+        if (realProfile && Array.isArray(realProfile.pois) && window.KOTR_POI) {
+            const visible = window.KOTR_POI.displayable(realProfile.pois);
+            const totalKm = realProfile.pois.length && realProfile.pois[realProfile.pois.length - 1].dist || distance;
+            for (const poi of visible) {
+                const x = padding + Math.min(1, (poi.dist || 0) / totalKm) * (width - 2 * padding);
+                const icon = window.KOTR_POI.getIcon(poi.type);
+                const label = window.KOTR_POI.polishPoiName(poi.name, poi.type);
+                poiMarkers += `<text x="${x.toFixed(1)}" y="${(height - 1).toFixed(1)}" class="poi-icon" text-anchor="middle" font-size="9"><title>${label} · ${poi.dist}km</title>${icon}</text>`;
+            }
+        }
+
         return `
             <div class="mini-elevation-profile" data-difficulty="${difficulty}" data-route="${routeFile}" title="Click for 3D flyover">
-                <svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none">
+                <svg viewBox="0 0 ${width} ${height + 10}" preserveAspectRatio="none">
                     <path class="elevation-fill" d="${fillPath}" fill="url(#${gradientId})" />
                     <path class="elevation-line" d="${linePath}" fill="none" stroke="${strokeColor}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+                    ${poiMarkers}
                 </svg>
             </div>
         `;
@@ -383,8 +397,11 @@
                     <button class="btn btn-flyover" data-route="${config.routeFile}">
                         <span class="icon">&#127916;</span> 3D Flyover
                     </button>
-                    <button class="btn btn-download" data-route="${config.routeFile}">
+                    <button class="btn btn-download" data-route="${config.routeFile}" data-format="gpx">
                         <span class="icon">&#128229;</span> GPX
+                    </button>
+                    <button class="btn btn-download" data-route="${config.routeFile}" data-format="fit">
+                        <span class="icon">&#128229;</span> FIT
                     </button>
                 </div>
             </article>
@@ -425,8 +442,11 @@
                     <button class="btn btn-sm btn-flyover" data-route="${option.routeFile}">
                         <span class="icon">&#127916;</span> 3D Flyover
                     </button>
-                    <button class="btn btn-sm btn-download" data-route="${option.routeFile}">
+                    <button class="btn btn-sm btn-download" data-route="${option.routeFile}" data-format="gpx">
                         <span class="icon">&#128229;</span> GPX
+                    </button>
+                    <button class="btn btn-sm btn-download" data-route="${option.routeFile}" data-format="fit">
+                        <span class="icon">&#128229;</span> FIT
                     </button>
                 </div>
             </div>
@@ -1363,30 +1383,39 @@
         return files;
     }
 
-    /**
-     * Setup Download All GPX button
-     */
-    function setupDownloadAllGPX() {
-        const btn = document.getElementById('download-all-gpx');
-        if (!btn) return;
+    function setupDownloadAllButtons() {
+        wireDownloadAll('download-all-gpx', 'gpx');
+        wireDownloadAll('download-all-fit', 'fit');
+    }
 
+    function wireDownloadAll(elementId, format) {
+        const btn = document.getElementById(elementId);
+        if (!btn) return;
         btn.addEventListener('click', async () => {
             const originalText = btn.innerHTML;
             btn.innerHTML = '<span class="icon">&#8987;</span> Downloading...';
             btn.disabled = true;
-
             try {
                 const files = getSelectedRouteFiles();
-
-                // Download each file sequentially
                 for (const file of files) {
                     try {
-                        const loader = file.endsWith('.gpx') ? GpxParser.loadGpxFile : FitParser.loadFitFile;
-                        const routeData = await loader(`routes/${file}`);
-                        const gpxFilename = file.endsWith('.gpx') ? file : file.replace('.fit', '.gpx');
-                        FitParser.downloadGPX(routeData, gpxFilename);
-
-                        // Small delay between downloads to prevent browser blocking
+                        if (format === 'fit') {
+                            if (!file.endsWith('.fit')) continue;
+                            const resp = await fetch(`routes/${file}`);
+                            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                            const blob = await resp.blob();
+                            const url = URL.createObjectURL(blob);
+                            const a = document.createElement('a');
+                            a.href = url; a.download = file;
+                            document.body.appendChild(a); a.click(); document.body.removeChild(a);
+                            URL.revokeObjectURL(url);
+                        } else {
+                            const loader = file.endsWith('.gpx') ? GpxParser.loadGpxFile : FitParser.loadFitFile;
+                            const routeData = await loader(`routes/${file}`);
+                            const gpxFilename = file.endsWith('.gpx') ? file : file.replace('.fit', '.gpx');
+                            FitParser.downloadGPX(routeData, gpxFilename);
+                        }
+                        // Delay between downloads so the browser doesn't block them.
                         await new Promise(resolve => setTimeout(resolve, 500));
                     } catch (error) {
                         console.error(`Failed to download ${file}:`, error);
@@ -1528,41 +1557,67 @@
         });
     }
 
-    /**
-     * Setup download buttons for all routes
-     */
     function setupDownloadButtons() {
         const downloadButtons = document.querySelectorAll('.btn-download');
         downloadButtons.forEach(btn => {
             btn.addEventListener('click', async () => {
                 const routeFile = btn.dataset.route;
-                if (routeFile) {
-                    await downloadRoute(btn, routeFile);
+                const format = btn.dataset.format || 'gpx';
+                if (!routeFile) return;
+                if (format === 'fit') {
+                    await downloadOriginalFit(btn, routeFile);
+                } else {
+                    await downloadRouteAsGpx(btn, routeFile);
                 }
             });
         });
     }
 
-    /**
-     * Download a route file as GPX
-     */
-    async function downloadRoute(btn, routeFile) {
-        // Show loading state
+    // GPX: parse the source file then re-serialize via FitParser.downloadGPX.
+    // Note this path drops POIs / cue sheet — the FIT download preserves them.
+    async function downloadRouteAsGpx(btn, routeFile) {
         const originalText = btn.innerHTML;
         btn.innerHTML = '<span class="icon">⏳</span> Loading...';
         btn.disabled = true;
-
         try {
-            // Load and parse route file (FIT or GPX)
             const file = routeFile.split('/').pop();
             const loader = file.endsWith('.gpx') ? GpxParser.loadGpxFile : FitParser.loadFitFile;
             const routeData = await loader(`routes/${file}`);
-
-            // Download as GPX
             const gpxFilename = file.endsWith('.gpx') ? file : file.replace('.fit', '.gpx');
             FitParser.downloadGPX(routeData, gpxFilename);
         } catch (error) {
-            console.error('Failed to download route:', error);
+            console.error('Failed to download GPX:', error);
+            alert('Failed to download route. Please try again.');
+        } finally {
+            btn.innerHTML = originalText;
+            btn.disabled = false;
+        }
+    }
+
+    // FIT: fetch the original file bytes and hand them straight to the browser
+    // via a blob download — preserves course_points / cue sheet for Garmin.
+    async function downloadOriginalFit(btn, routeFile) {
+        const originalText = btn.innerHTML;
+        btn.innerHTML = '<span class="icon">⏳</span> Loading...';
+        btn.disabled = true;
+        try {
+            const file = routeFile.split('/').pop();
+            if (!file.endsWith('.fit')) {
+                throw new Error('Only .fit source files can be downloaded as FIT');
+            }
+            const resp = await fetch(`routes/${file}`);
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            const blob = await resp.blob();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = file;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        } catch (error) {
+            console.error('Failed to download FIT:', error);
             alert('Failed to download route. Please try again.');
         } finally {
             btn.innerHTML = originalText;
@@ -1917,7 +1972,7 @@
 
         // Initialize trip summary bar
         setupStickyTripSummary();
-        setupDownloadAllGPX();
+        setupDownloadAllButtons();
         updateTripSummary();
 
         // Initialize rider profile
