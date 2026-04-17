@@ -73,8 +73,15 @@ function downsampleCoords(coords, targetCount) {
 // ---------------------------------------------------------------------------
 // Simple FIT Parser (binary FIT with semicircle conversion)
 // ---------------------------------------------------------------------------
+const COURSE_POINT_CATEGORY = {
+    0: 'marker', 1: 'summit', 2: 'valley', 3: 'water', 4: 'food',
+    5: 'danger', 9: 'first_aid', 27: 'campsite', 28: 'aid_station',
+    29: 'rest_area', 31: 'service', 39: 'toilet', 40: 'shower',
+};
+const POI_VISIBLE = new Set(['food', 'toilet', 'water', 'danger', 'first_aid', 'aid_station', 'rest_area', 'shower', 'marker']);
+
 class SimpleFitParser {
-    constructor() { this.records = []; }
+    constructor() { this.records = []; this.coursePoints = []; }
 
     parse(buffer) {
         const dataView = new DataView(buffer.buffer);
@@ -115,7 +122,16 @@ class SimpleFitParser {
                 for (const field of def.fields) {
                     try {
                         const baseType = field.baseType & 0x1F;
-                        if (baseType === 6) data[field.fieldDefNum] = dataView.getUint32(offset, def.isLittleEndian);
+                        if (baseType === 7) {
+                            // String field — read null-terminated up to declared size.
+                            let s = '';
+                            for (let k = 0; k < field.size; k++) {
+                                const c = dataView.getUint8(offset + k);
+                                if (c === 0) break;
+                                s += String.fromCharCode(c);
+                            }
+                            data[field.fieldDefNum] = s;
+                        } else if (baseType === 6) data[field.fieldDefNum] = dataView.getUint32(offset, def.isLittleEndian);
                         else if (baseType === 5) data[field.fieldDefNum] = dataView.getInt32(offset, def.isLittleEndian);
                         else if (baseType === 4) data[field.fieldDefNum] = dataView.getUint16(offset, def.isLittleEndian);
                         else if (baseType === 3) data[field.fieldDefNum] = dataView.getInt16(offset, def.isLittleEndian);
@@ -124,6 +140,7 @@ class SimpleFitParser {
                     offset += field.size;
                 }
                 if (def.globalMsgNum === 20) this.parseRecord(data);
+                else if (def.globalMsgNum === 32) this.parseCoursePoint(data);
             }
         }
         return this.records.filter(r => r.latitude !== undefined && r.longitude !== undefined);
@@ -136,6 +153,17 @@ class SimpleFitParser {
         if (data[78] !== undefined && data[78] !== 0xFFFFFFFF) record.altitude = (data[78] / 5.0) - 500;
         else if (data[2] !== undefined && data[2] !== 0xFFFF) record.altitude = (data[2] / 5.0) - 500;
         if (record.latitude !== undefined && record.longitude !== undefined) this.records.push(record);
+    }
+
+    parseCoursePoint(data) {
+        const category = COURSE_POINT_CATEGORY[data[5]] || 'nav';
+        if (!POI_VISIBLE.has(category)) return;
+        const cp = { category, type_enum: data[5] };
+        if (data[2] !== undefined && data[2] !== 0x7FFFFFFF) cp.lat = data[2] * SEMICIRCLE_TO_DEGREE;
+        if (data[3] !== undefined && data[3] !== 0x7FFFFFFF) cp.lon = data[3] * SEMICIRCLE_TO_DEGREE;
+        if (data[4] !== undefined && data[4] !== 0xFFFFFFFF) cp.distance_km = data[4] / 100000;
+        if (typeof data[6] === 'string') cp.name = data[6];
+        this.coursePoints.push(cp);
     }
 }
 
@@ -162,17 +190,21 @@ class SimpleGPXParser {
 }
 
 // ---------------------------------------------------------------------------
-// Parse a route file and return GPS records [{latitude, longitude, altitude}]
-// ---------------------------------------------------------------------------
+// Parse a route file and return { records, coursePoints }.
+//   records      — [{latitude, longitude, altitude}]
+//   coursePoints — [{category, type_enum, lat, lon, distance_km, name}]
+//                  (empty for GPX; FIT only)
 function parseRouteFile(filePath) {
     const ext = path.extname(filePath).toLowerCase();
     if (ext === '.fit') {
         const buffer = fs.readFileSync(filePath);
-        return new SimpleFitParser().parse(buffer);
+        const parser = new SimpleFitParser();
+        const records = parser.parse(buffer);
+        return { records, coursePoints: parser.coursePoints };
     }
     if (ext === '.gpx') {
         const xmlText = fs.readFileSync(filePath, 'utf8');
-        return new SimpleGPXParser().parse(xmlText);
+        return { records: new SimpleGPXParser().parse(xmlText), coursePoints: [] };
     }
     throw new Error(`Unsupported file format: ${ext}`);
 }
@@ -220,8 +252,8 @@ function main() {
             continue;
         }
 
-        // Parse GPS records
-        const records = parseRouteFile(filePath);
+        // Parse GPS records + course points (POIs)
+        const { records, coursePoints } = parseRouteFile(filePath);
 
         // Load DEM elevation data
         const dem = loadDemJson(filePath);
@@ -254,10 +286,17 @@ function main() {
             elevation_max: stats.maxElevation,
             _elevation_min: stats.minElevation,
             _elevations_plain: chartElevationsRounded,
-            _course_points: [
-                { name: 'Start', type: 'generic', dist: 0 },
-                { name: 'End', type: 'generic', dist: Math.round(distanceKm * 10) / 10 },
-            ],
+            // Real course_points (food / toilet / danger / first_aid / marker)
+            // with nav cues filtered out by parseCoursePoint. Start/End are
+            // included when Ride with GPS marked them (they appear as
+            // category=marker with name "Start of r" / "End of rou").
+            _course_points: coursePoints.map(cp => ({
+                name: cp.name || '',
+                type: cp.category,
+                dist: Math.round((cp.distance_km || 0) * 10) / 10,
+                lat: cp.lat,
+                lon: cp.lon,
+            })),
             _start: { lat: records[0].latitude, lon: records[0].longitude },
         });
 

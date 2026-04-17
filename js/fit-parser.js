@@ -20,8 +20,30 @@ const FitParser = (function() {
         LAP: 19,
         RECORD: 20,
         EVENT: 21,
-        DEVICE_INFO: 23
+        DEVICE_INFO: 23,
+        COURSE_POINT: 32
     };
+
+    // FIT course_point.type enum → our narrow category set. Navigation cues
+    // (left/right/straight/u_turn/forks/*) are intentionally dropped per the
+    // user's filter preference. Unmapped values fall through to 'nav' so the
+    // caller can skip them uniformly.
+    const COURSE_POINT_CATEGORY = {
+        0: 'marker',      // generic (start/end flags)
+        1: 'summit',
+        2: 'valley',
+        3: 'water',
+        4: 'food',
+        5: 'danger',
+        9: 'first_aid',
+        27: 'campsite',
+        28: 'aid_station',
+        29: 'rest_area',
+        31: 'service',
+        39: 'toilet',
+        40: 'shower',
+    };
+    const POI_VISIBLE = new Set(['food', 'toilet', 'water', 'danger', 'first_aid', 'aid_station', 'rest_area', 'shower', 'marker']);
 
     // Base types for FIT data fields
     // Key is base type NUMBER (bits 0-4 of baseType byte)
@@ -51,6 +73,7 @@ const FitParser = (function() {
     class FitFileParser {
         constructor() {
             this.records = [];
+            this.coursePoints = [];
             this.laps = [];
             this.sessions = [];
             this.events = [];
@@ -216,7 +239,32 @@ const FitParser = (function() {
                 case MESSAGE_TYPES.DEVICE_INFO:
                     this.deviceInfo.push(data);
                     break;
+                case MESSAGE_TYPES.COURSE_POINT:
+                    this.parseCoursePointMessage(data);
+                    break;
             }
+        }
+
+        // course_point field numbers (per FIT profile):
+        //   1=timestamp, 2=position_lat, 3=position_long, 4=distance (cm),
+        //   5=type (enum), 6=name (string), 254=message_index
+        // Ride with GPS pre-truncates name to ~10-16 chars for Garmin display.
+        parseCoursePointMessage(data) {
+            const typeEnum = data[5];
+            const category = COURSE_POINT_CATEGORY[typeEnum] || 'nav';
+            if (!POI_VISIBLE.has(category)) return; // drop navigation cues
+            const cp = { category, typeEnum };
+            if (data[2] !== undefined && data[2] !== 0x7FFFFFFF) {
+                cp.lat = data[2] * SEMICIRCLE_TO_DEGREE;
+            }
+            if (data[3] !== undefined && data[3] !== 0x7FFFFFFF) {
+                cp.lon = data[3] * SEMICIRCLE_TO_DEGREE;
+            }
+            if (data[4] !== undefined && data[4] !== 0xFFFFFFFF) {
+                cp.distance_km = data[4] / 100000;
+            }
+            if (typeof data[6] === 'string') cp.name = data[6];
+            this.coursePoints.push(cp);
         }
 
         /**
@@ -394,6 +442,7 @@ const FitParser = (function() {
                 bounds,
                 pointCount: coordinates.length,
                 records: this.records,
+                pois: this.coursePoints,
                 laps: this.laps,
                 sessions: this.sessions
             };
