@@ -77,6 +77,7 @@ const RiderProfile = (function() {
         if (onProfileChange) {
             onProfileChange(profile);
         }
+        emitProfileChanged();
 
         return profile;
     }
@@ -90,7 +91,15 @@ const RiderProfile = (function() {
         if (onProfileChange) {
             onProfileChange(profile);
         }
+        emitProfileChanged();
         return profile;
+    }
+
+    function emitProfileChanged() {
+        if (typeof window === 'undefined' || typeof CustomEvent !== 'function') return;
+        window.dispatchEvent(new CustomEvent('kotr:profile-changed', {
+            detail: { weight: profile.weight, ftp: profile.ftp, isConfigured: profile.isConfigured }
+        }));
     }
 
     /**

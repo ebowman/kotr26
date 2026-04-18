@@ -102,8 +102,20 @@ const PowerCalculator = (function() {
             return Math.min(terminalSpeed, 25); // Cap at ~90 km/h for safety
         }
 
-        // Newton-Raphson iteration to solve for speed
-        let speed = 5; // Initial guess (m/s)
+        // Newton-Raphson iteration to solve for speed. Initial guess needs
+        // to be above the local minimum of (Pgravity + Prolling + Paero) on
+        // steep descents, otherwise the iteration walks into a negative-
+        // derivative region and clamps to 0.5 m/s forever.
+        let speed = 5;
+        if (grade < -0.02) {
+            // Coasting terminal velocity: |Pgravity| = Paero
+            // |mg sin(θ)| · s = ½·ρ·CdA·s³  →  s = √(|mg sin(θ)| / (½·ρ·CdA))
+            // Above this value the power equation is monotonic increasing,
+            // which is where Newton-Raphson needs to start.
+            const gravityRate = Math.abs(totalMass * g * Math.sin(gradeAngle));
+            const terminalGuess = Math.sqrt(gravityRate / (0.5 * CdA * rho));
+            speed = Math.max(5, terminalGuess + 1);
+        }
         const maxIterations = 50;
         const tolerance = 0.001;
 
@@ -657,6 +669,109 @@ const PowerCalculator = (function() {
         return `${minutes}m`;
     }
 
+    /**
+     * Map an estimated ride duration (hours) to a realistic all-day target IF.
+     * Coarse brackets matching cycling-calculator convention — long rides use
+     * lower %FTP because sustaining threshold for 6h is not physiologically
+     * available to most amateur riders.
+     */
+    function selectAllDayIF(estimatedHours) {
+        if (!isFinite(estimatedHours) || estimatedHours <= 0) return 0.70;
+        if (estimatedHours < 2) return 0.80;
+        if (estimatedHours < 3) return 0.75;
+        if (estimatedHours < 4) return 0.70;
+        if (estimatedHours < 5) return 0.65;
+        if (estimatedHours < 7) return 0.60;
+        return 0.55;
+    }
+
+    /**
+     * Resolve paceMode + route to the target IF actually used.
+     * paceMode: 'allday' | 'steady' | 'hard'
+     * For 'allday' we seed from a Steady-pace duration estimate and look up
+     * the bracket. One iteration is enough — the brackets are coarse relative
+     * to rider variance.
+     */
+    function resolveTargetIF(routeData, weight, ftp, paceMode) {
+        if (paceMode === 'hard') return 0.90;
+        if (paceMode === 'steady') return 0.75;
+        // All-day: estimate duration at steady, then look up IF bracket
+        const steadyPower = ftp * 0.75;
+        const coords = routeData && routeData.coordinates;
+        if (!coords || coords.length < 2) return 0.70;
+        let seconds = 0;
+        for (let i = 1; i < coords.length; i++) {
+            const dist = haversineDistance(
+                coords[i-1][1], coords[i-1][0],
+                coords[i][1], coords[i][0]
+            ) * 1000;
+            if (dist <= 0) continue;
+            const elevDiff = (coords[i][2] || 0) - (coords[i-1][2] || 0);
+            const grade = elevDiff / dist;
+            const speed = calculateSpeedForPower(grade, steadyPower, weight);
+            seconds += dist / speed;
+        }
+        return selectAllDayIF(seconds / 3600);
+    }
+
+    /**
+     * Precompute a cumulative elapsed-time series aligned with
+     * routeData.coordinates. Returns:
+     *   - elapsed: Float32Array of cumulative seconds at each coordinate
+     *   - cumDistMeters: Float32Array of cumulative meters at each coordinate
+     *   - totalSeconds, totalMeters
+     *   - IF (resolved), paceMode
+     * Constant-power model; speed varies with gradient.
+     */
+    function buildElapsedTimeSeries(routeData, weight, ftp, paceMode) {
+        const coords = routeData && routeData.coordinates;
+        if (!coords || coords.length < 2) return null;
+
+        const IF = resolveTargetIF(routeData, weight, ftp, paceMode);
+        const power = ftp * IF;
+        const n = coords.length;
+        const elapsed = new Float32Array(n);
+        const cumDistMeters = new Float32Array(n);
+
+        let t = 0;
+        let d = 0;
+        let prevAlt = coords[0][2] || 0;
+        for (let i = 1; i < n; i++) {
+            const dist = haversineDistance(
+                coords[i-1][1], coords[i-1][0],
+                coords[i][1], coords[i][0]
+            ) * 1000;
+            if (dist > 0) {
+                const alt = isFinite(coords[i][2]) ? coords[i][2] : prevAlt;
+                const grade = (alt - prevAlt) / dist;
+                prevAlt = alt;
+                const speed = calculateSpeedForPower(grade, power, weight);
+                t += dist / Math.max(speed, 0.5);
+                d += dist;
+            }
+            elapsed[i] = t;
+            cumDistMeters[i] = d;
+        }
+
+        return {
+            elapsed,
+            cumDistMeters,
+            totalSeconds: t,
+            totalMeters: d,
+            IF,
+            paceMode: paceMode || 'allday'
+        };
+    }
+
+    // Short HUD elapsed format: "3h 42m" or "42m" for sub-hour rides.
+    function formatElapsed(seconds) {
+        if (!isFinite(seconds) || seconds < 0) return '--';
+        const h = Math.floor(seconds / 3600);
+        const m = Math.floor((seconds % 3600) / 60);
+        if (h === 0) return m + 'm';
+        return h + 'h ' + String(m).padStart(2, '0') + 'm';
+    }
+
     // Public API
     return {
         calculatePowerForSpeed,
@@ -672,6 +787,10 @@ const PowerCalculator = (function() {
         calculateClimbTable,
         calculatePowerProfile,
         formatDuration,
+        selectAllDayIF,
+        resolveTargetIF,
+        buildElapsedTimeSeries,
+        formatElapsed,
         CONSTANTS,
         ZONES
     };

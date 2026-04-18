@@ -199,6 +199,16 @@
     let cameraPath = null;
     let totalDistance = 0;
 
+    // Elapsed-time (ETA) state
+    let elapsedSeries = null; // { elapsed, cumDistMeters, totalSeconds, IF, paceMode }
+    let paceMode = (function() {
+        try {
+            const stored = localStorage.getItem('kotr-flyover-pace');
+            if (stored === 'allday' || stored === 'steady' || stored === 'hard') return stored;
+        } catch (e) {}
+        return 'allday';
+    })();
+
     /**
      * Load pitch from localStorage
      */
@@ -3626,6 +3636,9 @@
             // Initialize stats at position 0
             initializeStats();
 
+            // Build elapsed-time series for current profile + paceMode
+            buildEtaSeries();
+
             // Hide loading overlay
             hideLoading();
 
@@ -4362,6 +4375,22 @@
                 btn.classList.add('active');
                 speedMultiplier = CONFIG.speeds[btn.dataset.speed] || 1;
             });
+        });
+
+        // Pace toggle: All Day / Steady / Hard
+        document.querySelectorAll('.pace-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const next = btn.dataset.pace;
+                if (next === paceMode) return;
+                paceMode = next;
+                try { localStorage.setItem('kotr-flyover-pace', paceMode); } catch (e) {}
+                buildEtaSeries();
+            });
+        });
+
+        // Rebuild ETA when rider profile changes (weight/FTP saved via modal)
+        window.addEventListener('kotr:profile-changed', () => {
+            if (routeData) buildEtaSeries();
         });
 
         // Profile track click to seek (uses animated seek for smooth transition)
@@ -6619,6 +6648,10 @@
         if (elevClimbed) elevClimbed.textContent = '0';
         if (elevLeft) elevLeft.textContent = `${routeData.elevationGain || 0} m to go`;
 
+        // Initialize elapsed-time stat
+        const elapsedEl = document.getElementById('stat-elapsed');
+        if (elapsedEl) elapsedEl.textContent = '0m';
+
         // Initialize scrubber position (accounts for 10px canvas padding)
         const scrubber = document.getElementById('scrubber-handle');
         const overlay = document.getElementById('progress-overlay');
@@ -6659,8 +6692,100 @@
 
         // Grade and elevation stats are updated in updateDotAndUI via elevationProfile
 
+        // Update elapsed-time stat (constant-power model → distance→time lookup)
+        updateEtaReadout(currentDistance);
+
         // Update active climb highlight (distance in meters for climb detection)
         updateActiveClimb(currentDistance * 1000);
+    }
+
+    /**
+     * Build the elapsed-time series for the current route + profile + paceMode,
+     * then refresh the HUD readout. Call after routeData loads and whenever
+     * profile or paceMode changes.
+     */
+    function buildEtaSeries() {
+        if (!routeData || !routeData.coordinates || routeData.coordinates.length < 2) {
+            elapsedSeries = null;
+            const elapsedEl = document.getElementById('stat-elapsed');
+            const detailEl = document.getElementById('stat-pace-detail');
+            if (elapsedEl) elapsedEl.textContent = '--';
+            if (detailEl) detailEl.textContent = '--';
+            return;
+        }
+        const profile = (typeof RiderProfile !== 'undefined' && RiderProfile.get)
+            ? RiderProfile.get()
+            : { weight: 75, ftp: 200, isConfigured: false };
+        elapsedSeries = PowerCalculator.buildElapsedTimeSeries(
+            routeData, profile.weight, profile.ftp, paceMode
+        );
+        renderPaceDetail(profile);
+        renderPaceToggleState();
+        // Refresh current readout so the switch is felt immediately
+        updateEtaReadout(progress * totalDistance);
+    }
+
+    /**
+     * Compose the pace-detail secondary line: IF pct + either a personalize
+     * nudge (defaults) or the rider's current weight/FTP.
+     */
+    function renderPaceDetail(profile) {
+        const detailEl = document.getElementById('stat-pace-detail');
+        if (!detailEl || !elapsedSeries) return;
+        const pct = Math.round(elapsedSeries.IF * 100);
+        const isDefaults = (profile.weight === 75 && profile.ftp === 200 && !profile.isConfigured);
+        detailEl.innerHTML = '';
+        detailEl.appendChild(document.createTextNode(pct + '% FTP · '));
+        if (isDefaults) {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'personalize-link';
+            btn.textContent = 'Personalize →';
+            btn.addEventListener('click', () => {
+                if (typeof RiderProfile !== 'undefined' && RiderProfile.showModal) {
+                    RiderProfile.showModal();
+                }
+            });
+            detailEl.appendChild(btn);
+        } else {
+            detailEl.appendChild(document.createTextNode(profile.weight + 'kg / ' + profile.ftp + 'W'));
+        }
+    }
+
+    function renderPaceToggleState() {
+        document.querySelectorAll('.pace-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.pace === paceMode);
+        });
+    }
+
+    /**
+     * Interpolate elapsed time at the given distance (in km) and update HUD.
+     * Binary search in cumDistMeters; linear interp between bracket points.
+     */
+    function updateEtaReadout(distanceKm) {
+        const elapsedEl = document.getElementById('stat-elapsed');
+        if (!elapsedEl) return;
+        if (!elapsedSeries) { elapsedEl.textContent = '--'; return; }
+        const targetM = Math.max(0, Math.min(elapsedSeries.totalMeters, distanceKm * 1000));
+        const cum = elapsedSeries.cumDistMeters;
+        const elapsed = elapsedSeries.elapsed;
+        // Binary search for bracket
+        let lo = 0, hi = cum.length - 1;
+        while (lo < hi) {
+            const mid = (lo + hi) >>> 1;
+            if (cum[mid] < targetM) lo = mid + 1; else hi = mid;
+        }
+        let seconds;
+        if (lo === 0) {
+            seconds = 0;
+        } else {
+            const d0 = cum[lo - 1], d1 = cum[lo];
+            const t0 = elapsed[lo - 1], t1 = elapsed[lo];
+            const span = d1 - d0;
+            const ratio = span > 0 ? (targetM - d0) / span : 0;
+            seconds = t0 + (t1 - t0) * ratio;
+        }
+        elapsedEl.textContent = PowerCalculator.formatElapsed(seconds);
     }
 
     /**

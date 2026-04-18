@@ -552,6 +552,60 @@
         }
 
         /* Progress stats row - larger text for accessibility */
+        .pace-toggle-row {
+            display: flex;
+            justify-content: center;
+            margin-bottom: var(--space-sm);
+        }
+
+        .pace-toggle {
+            display: inline-flex;
+            background: rgba(255,255,255,0.08);
+            border-radius: 999px;
+            padding: 3px;
+            gap: 2px;
+        }
+
+        .pace-btn {
+            background: transparent;
+            border: none;
+            color: rgba(255,255,255,0.65);
+            font-family: inherit;
+            font-size: 0.8125rem;
+            font-weight: 600;
+            padding: 4px 12px;
+            border-radius: 999px;
+            cursor: pointer;
+            transition: background 0.15s, color 0.15s;
+            letter-spacing: 0.02em;
+        }
+
+        .pace-btn:hover {
+            color: rgba(255,255,255,0.9);
+        }
+
+        .pace-btn.active {
+            background: rgba(255,255,255,0.18);
+            color: white;
+        }
+
+        .stat-group.time .stat-secondary .personalize-link {
+            color: rgba(255,255,255,0.85);
+            text-decoration: underline;
+            text-decoration-color: rgba(255,255,255,0.4);
+            text-underline-offset: 2px;
+            cursor: pointer;
+            background: none;
+            border: none;
+            font: inherit;
+            padding: 0;
+        }
+
+        .stat-group.time .stat-secondary .personalize-link:hover {
+            color: white;
+            text-decoration-color: rgba(255,255,255,0.8);
+        }
+
         .progress-stats {
             display: flex;
             justify-content: space-around;
@@ -562,7 +616,7 @@
             display: flex;
             flex-direction: column;
             align-items: center;
-            min-width: 100px;
+            min-width: 80px;
         }
 
         .stat-primary {
@@ -766,7 +820,13 @@
             }
 
             .progress-stats {
-                gap: var(--space-md);
+                gap: var(--space-sm);
+                flex-wrap: wrap;
+            }
+
+            .stat-group {
+                min-width: 70px;
+                flex: 1 0 70px;
             }
 
             .stat-group .stat-value {
@@ -775,6 +835,15 @@
 
             .stat-secondary {
                 font-size: 0.625rem;
+            }
+
+            .pace-btn {
+                font-size: 0.6875rem;
+                padding: 3px 8px;
+            }
+
+            .pace-toggle-row {
+                margin-bottom: 4px;
             }
 
             .scrubber-knob {
@@ -1135,6 +1204,13 @@
             </div>
             <div class="progress-overlay" id="progress-overlay"></div>
         </div>
+        <div class="pace-toggle-row">
+            <div class="pace-toggle" id="pace-toggle" role="group" aria-label="Pace">
+                <button class="pace-btn active" data-pace="allday" title="Realistic all-day sustainable effort">All Day</button>
+                <button class="pace-btn" data-pace="steady" title="Steady 75% FTP endurance">Steady</button>
+                <button class="pace-btn" data-pace="hard" title="Hard 90% FTP near-threshold">Hard</button>
+            </div>
+        </div>
         <div class="progress-stats">
             <div class="stat-group distance">
                 <div class="stat-primary">
@@ -1159,6 +1235,13 @@
                     <span class="stat-unit">m</span>
                 </div>
                 <div class="stat-secondary" id="stat-elev-left">-- m to go</div>
+            </div>
+            <div class="stat-group time">
+                <div class="stat-primary">
+                    <span class="stat-icon">⏱️</span>
+                    <span class="stat-value" id="stat-elapsed">--</span>
+                </div>
+                <div class="stat-secondary" id="stat-pace-detail">--</div>
             </div>
         </div>
     </div>
@@ -1299,14 +1382,14 @@
     </div>
 
     <!-- Scripts -->
-    <script src="js/config.js?v=3c36ad3"></script>
-    <script src="js/geo.js?v=3c36ad3"></script>
-    <script src="js/poi-display.js?v=3c36ad3"></script>
-    <script src="js/fit-parser.js?v=3c36ad3"></script>
-    <script src="js/gpx-parser.js?v=3c36ad3"></script>
-    <script src="js/elevation-profile.js?v=3c36ad3"></script>
-    <script src="js/rider-profile.js?v=3c36ad3"></script>
-    <script src="js/power-calculator.js?v=3c36ad3"></script>
-    <script src="js/flyover-engine.js?v=3c36ad3"></script>
+    <script src="js/config.js?v=d8707e6"></script>
+    <script src="js/geo.js?v=d8707e6"></script>
+    <script src="js/poi-display.js?v=d8707e6"></script>
+    <script src="js/fit-parser.js?v=d8707e6"></script>
+    <script src="js/gpx-parser.js?v=d8707e6"></script>
+    <script src="js/elevation-profile.js?v=d8707e6"></script>
+    <script src="js/rider-profile.js?v=d8707e6"></script>
+    <script src="js/power-calculator.js?v=d8707e6"></script>
+    <script src="js/flyover-engine.js?v=d8707e6"></script>
 </body>
 </html>
