@@ -4990,8 +4990,10 @@
         uiVisible = false;
         const progressWidget = document.getElementById('unified-progress-widget');
         const shortcutsHelp = document.getElementById('shortcuts-help');
-        if (progressWidget) progressWidget.classList.add('auto-hidden');
+        // Help panel always auto-hides during playback.
         if (shortcutsHelp) shortcutsHelp.classList.add('auto-hidden');
+        // Elevation widget only auto-hides when not pinned.
+        if (progressWidget && !uiPinned) progressWidget.classList.add('auto-hidden');
     }
 
     // Coalesce mousemove storms: only schedule the hide timer once per rAF,
@@ -5008,7 +5010,10 @@
                 clearTimeout(autoHideTimeout);
                 autoHideTimeout = null;
             }
-            if (isPlaying && !uiPinned) {
+            // Schedule auto-hide during playback regardless of pin: the pin
+            // only keeps the elevation widget visible — the help panel still
+            // fades out after idle.
+            if (isPlaying) {
                 autoHideTimeout = setTimeout(hideUI, AUTO_HIDE_DELAY);
             }
         });
@@ -5022,15 +5027,20 @@
         const pinBtn = document.getElementById('btn-pin-ui');
         if (pinBtn) {
             pinBtn.classList.toggle('active', uiPinned);
-            pinBtn.title = uiPinned ? 'Unpin controls (always visible)' : 'Pin controls (auto-hides)';
+            pinBtn.setAttribute('aria-pressed', uiPinned ? 'true' : 'false');
+            pinBtn.title = uiPinned
+                ? 'Unpin elevation profile (auto-hides during playback)'
+                : 'Pin elevation profile (stays visible during playback)';
         }
+        const progressWidget = document.getElementById('unified-progress-widget');
+        if (!progressWidget) return;
         if (uiPinned) {
-            // Cancel any pending hide
-            if (autoHideTimeout) {
-                clearTimeout(autoHideTimeout);
-                autoHideTimeout = null;
-            }
-            showUI();
+            // Ensure widget is visible immediately. Help panel is untouched.
+            progressWidget.classList.remove('auto-hidden');
+        } else if (!uiVisible) {
+            // Unpinned while in the idle/hidden state: bring the widget back
+            // in line with the shared hidden state.
+            progressWidget.classList.add('auto-hidden');
         }
     }
 

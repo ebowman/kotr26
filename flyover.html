@@ -225,24 +225,37 @@
         /* Pin button in progress widget */
         .btn-pin-ui {
             position: absolute;
-            top: 6px;
-            right: 8px;
-            background: none;
-            border: none;
-            color: rgba(255,255,255,0.4);
+            top: 4px;
+            right: 6px;
+            background: rgba(255,255,255,0.06);
+            border: 1px solid rgba(255,255,255,0.18);
+            color: rgba(255,255,255,0.55);
             font-size: 14px;
+            line-height: 1;
             cursor: pointer;
-            padding: 2px 4px;
-            border-radius: 4px;
-            transition: color 0.2s, background 0.2s;
+            padding: 4px 7px;
+            border-radius: 6px;
+            transition: color 0.2s, background 0.2s, border-color 0.2s, box-shadow 0.2s, transform 0.2s;
             z-index: 10;
+            /* Unpinned: pin laid flat (dangling) */
+            transform: rotate(-35deg);
         }
         .btn-pin-ui:hover {
-            color: rgba(255,255,255,0.8);
-            background: rgba(255,255,255,0.1);
+            color: rgba(255,255,255,0.95);
+            background: rgba(255,255,255,0.14);
+            border-color: rgba(255,255,255,0.3);
         }
         .btn-pin-ui.active {
-            color: #e6b800;
+            color: #1a1a1a;
+            background: #e6b800;
+            border-color: #ffcc33;
+            box-shadow: 0 0 0 1px rgba(230,184,0,0.25), 0 0 10px rgba(230,184,0,0.45);
+            /* Pinned: pin driven straight in */
+            transform: rotate(0deg);
+        }
+        .btn-pin-ui.active:hover {
+            background: #ffcc33;
+            border-color: #ffd966;
         }
 
         /* Auto-hide state for progress widget during playback */
@@ -1111,7 +1124,7 @@
 
     <!-- Unified Progress Widget -->
     <div class="unified-progress-widget" id="unified-progress-widget">
-        <button class="btn-pin-ui" id="btn-pin-ui" title="Pin controls (auto-hides)">&#x1F4CC;</button>
+        <button class="btn-pin-ui" id="btn-pin-ui" aria-pressed="false" title="Pin elevation profile (stays visible during playback)">&#x1F4CC;</button>
         <div class="profile-track" id="profile-track">
             <canvas class="elevation-canvas" id="elevation-canvas"></canvas>
             <!-- Climb markers overlay -->
@@ -1286,14 +1299,14 @@
     </div>
 
     <!-- Scripts -->
-    <script src="js/config.js?v=0241570"></script>
-    <script src="js/geo.js?v=0241570"></script>
-    <script src="js/poi-display.js?v=0241570"></script>
-    <script src="js/fit-parser.js?v=0241570"></script>
-    <script src="js/gpx-parser.js?v=0241570"></script>
-    <script src="js/elevation-profile.js?v=0241570"></script>
-    <script src="js/rider-profile.js?v=0241570"></script>
-    <script src="js/power-calculator.js?v=0241570"></script>
-    <script src="js/flyover-engine.js?v=0241570"></script>
+    <script src="js/config.js?v=3c36ad3"></script>
+    <script src="js/geo.js?v=3c36ad3"></script>
+    <script src="js/poi-display.js?v=3c36ad3"></script>
+    <script src="js/fit-parser.js?v=3c36ad3"></script>
+    <script src="js/gpx-parser.js?v=3c36ad3"></script>
+    <script src="js/elevation-profile.js?v=3c36ad3"></script>
+    <script src="js/rider-profile.js?v=3c36ad3"></script>
+    <script src="js/power-calculator.js?v=3c36ad3"></script>
+    <script src="js/flyover-engine.js?v=3c36ad3"></script>
 </body>
 </html>
