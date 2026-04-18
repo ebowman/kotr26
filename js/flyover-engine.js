@@ -6730,9 +6730,10 @@
         const detailEl = document.getElementById('stat-pace-detail');
         if (!detailEl || !elapsedSeries) return;
         const pct = Math.round(elapsedSeries.IF * 100);
+        const watts = Math.round(profile.ftp * elapsedSeries.IF);
         const isDefaults = (profile.weight === 75 && profile.ftp === 200 && !profile.isConfigured);
         detailEl.innerHTML = '';
-        detailEl.appendChild(document.createTextNode(pct + '% FTP · '));
+        detailEl.appendChild(document.createTextNode(watts + 'W · ' + pct + '% FTP · '));
         if (isDefaults) {
             const btn = document.createElement('button');
             btn.type = 'button';
