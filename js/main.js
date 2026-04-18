@@ -1857,10 +1857,13 @@
         // Create analysis display
         const analysisHtml = createAnalysisHTML(metrics, weight, ftp);
 
-        // Insert before card actions
-        const cardActions = card.querySelector('.card-actions');
-        if (cardActions) {
-            cardActions.insertAdjacentHTML('beforebegin', analysisHtml);
+        // Day 1 (single-route card) has .card-actions; Days 2-4 (comparison
+        // cards) have .route-comparison instead. Insert the analysis panel
+        // directly after whichever anchor is present.
+        const anchor = card.querySelector('.card-actions') || card.querySelector('.route-comparison');
+        if (anchor) {
+            const position = anchor.classList.contains('card-actions') ? 'beforebegin' : 'afterend';
+            anchor.insertAdjacentHTML(position, analysisHtml);
         }
     }
 

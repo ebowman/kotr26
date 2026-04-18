@@ -3953,16 +3953,15 @@
         // Initial check
         updateToggleState();
 
-        // Listen for profile changes
-        if (typeof RiderProfile !== 'undefined') {
-            RiderProfile.setOnChange(() => {
-                updateToggleState();
-                // Refresh the elevation profile render
-                if (elevationProfile.getColorMode() === ElevationProfile.COLOR_MODES.EFFORT) {
-                    elevationProfile.render();
-                }
-            });
-        }
+        // Listen for profile changes. Using the window-level event (not
+        // RiderProfile.setOnChange) because setOnChange is single-slot — the
+        // climb-analysis panel's own listener would otherwise overwrite this.
+        window.addEventListener('kotr:profile-changed', () => {
+            updateToggleState();
+            if (elevationProfile.getColorMode() === ElevationProfile.COLOR_MODES.EFFORT) {
+                elevationProfile.render();
+            }
+        });
 
         // Toggle click handler
         toggle.addEventListener('click', () => {
@@ -4070,18 +4069,16 @@
             hideClimbPopup();
         });
 
-        // Update on profile change
-        if (typeof RiderProfile !== 'undefined') {
-            RiderProfile.setOnChange(() => {
-                // If popup is visible, refresh it
-                if (selectedClimbIndex >= 0 && popup.classList.contains('visible')) {
-                    const marker = markersContainer.querySelector(`[data-climb-index="${selectedClimbIndex}"]`);
-                    if (marker) {
-                        showClimbPopup(detectedClimbs[selectedClimbIndex], selectedClimbIndex, marker);
-                    }
+        // Update on profile change (via window event — see note on other
+        // kotr:profile-changed listener above)
+        window.addEventListener('kotr:profile-changed', () => {
+            if (selectedClimbIndex >= 0 && popup.classList.contains('visible')) {
+                const marker = markersContainer.querySelector(`[data-climb-index="${selectedClimbIndex}"]`);
+                if (marker) {
+                    showClimbPopup(detectedClimbs[selectedClimbIndex], selectedClimbIndex, marker);
                 }
-            });
-        }
+            }
+        });
     }
 
     /**
