@@ -20,13 +20,13 @@ const path = require('path');
 // Route configuration
 // ---------------------------------------------------------------------------
 const ROUTES = [
-    { day: 1, variant: 'standard', label: 'Shake Out the Travel Legs', date: 'May 29', file: 'KOTR_D1.fit' },
-    { day: 2, variant: 'standard', label: 'NW Provence – Short', date: 'May 30', file: 'KOTR_D2_Short.fit' },
-    { day: 2, variant: 'long',     label: 'NW Provence – Long',  date: 'May 30', file: 'KOTR_D2_Long.fit' },
-    { day: 3, variant: 'standard', label: 'Mazan Loop',          date: 'May 31', file: 'KOTR_D3_Short.fit' },
-    { day: 3, variant: 'long',     label: 'Mont Ventoux',        date: 'May 31', file: 'KOTR_D3_Long.fit' },
-    { day: 4, variant: 'standard', label: 'Luberon Loop – Short', date: 'Jun 1', file: 'KOTR_D4_Short.fit' },
-    { day: 4, variant: 'long',     label: 'Luberon Loop – Long',  date: 'Jun 1', file: 'KOTR_D4_Long.fit' },
+    { day: 1, variant: 'standard', label: 'Shake Out the Travel Legs', date: 'May 28', file: 'KOTR_D1.fit' },
+    { day: 2, variant: 'standard', label: 'NW Provence – Short', date: 'May 29', file: 'KOTR_D2_Short.fit' },
+    { day: 2, variant: 'long',     label: 'NW Provence – Long',  date: 'May 29', file: 'KOTR_D2_Long.fit' },
+    { day: 3, variant: 'standard', label: 'Mazan Loop',          date: 'May 30', file: 'KOTR_D3_Short.fit' },
+    { day: 3, variant: 'long',     label: 'Mont Ventoux',        date: 'May 30', file: 'KOTR_D3_Long.fit' },
+    { day: 4, variant: 'standard', label: 'Luberon Loop – Short', date: 'May 31', file: 'KOTR_D4_Short.fit' },
+    { day: 4, variant: 'long',     label: 'Luberon Loop – Long',  date: 'May 31', file: 'KOTR_D4_Long.fit' },
 ];
 
 const ROUTES_DIR = path.resolve(__dirname, '..', 'routes');

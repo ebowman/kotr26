@@ -19,11 +19,11 @@ const WeatherWidget = (function() {
         start: '2026-05-28',
         end: '2026-06-01',
         days: [
-            { date: '2026-05-28', label: 'Arrival', isEventDay: true },
-            { date: '2026-05-29', label: 'Day 1', isEventDay: true },
-            { date: '2026-05-30', label: 'Day 2', isEventDay: true },
-            { date: '2026-05-31', label: 'Day 3', isEventDay: true },
-            { date: '2026-06-01', label: 'Day 4', isEventDay: true }
+            { date: '2026-05-28', label: 'Arrival + Warm-up', isEventDay: true },
+            { date: '2026-05-29', label: 'Day 2', isEventDay: true },
+            { date: '2026-05-30', label: 'Day 3', isEventDay: true },
+            { date: '2026-05-31', label: 'Day 4', isEventDay: true },
+            { date: '2026-06-01', label: 'Departure', isEventDay: false }
         ]
     };
 
@@ -230,7 +230,7 @@ const WeatherWidget = (function() {
         }
 
         // Add Ventoux summit conditions for Day 3
-        const day3 = days.find(d => d.date === '2026-05-31');
+        const day3 = days.find(d => d.date === '2026-05-30');
         if (day3) {
             const ventouxNote = document.createElement('div');
             ventouxNote.className = 'weather-ventoux-note';

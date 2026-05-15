@@ -19,8 +19,8 @@
     const ROUTES = {
         day1: {
             day: 1,
-            date: '2026-05-29',
-            dateDisplay: 'May 29',
+            date: '2026-05-28',
+            dateDisplay: 'May 28',
             name: 'Shake Out the Travel Legs',
             description: 'Ease into the adventure with a gentle spin through Provencal countryside.',
             type: 'warmup',
@@ -33,8 +33,8 @@
         },
         day2: {
             day: 2,
-            date: '2026-05-30',
-            dateDisplay: 'May 30',
+            date: '2026-05-29',
+            dateDisplay: 'May 29',
             name: 'Find Your Rhythm',
             description: null,
             type: 'choice',
@@ -59,8 +59,8 @@
         },
         day3: {
             day: 3,
-            date: '2026-05-31',
-            dateDisplay: 'May 31',
+            date: '2026-05-30',
+            dateDisplay: 'May 30',
             name: 'The Main Event',
             description: null,
             type: 'epic',
@@ -89,8 +89,8 @@
         },
         day4: {
             day: 4,
-            date: '2026-06-01',
-            dateDisplay: 'June 1',
+            date: '2026-05-31',
+            dateDisplay: 'May 31',
             name: 'Celebrate Together',
             description: null,
             type: 'choice',
@@ -146,13 +146,13 @@
     })();
 
     // ========================================================================
-    // Countdown — live to 14:00 CEST May 29 (first ride rollout)
+    // Countdown — live to 14:30 CEST May 28 (Thursday warm-up ride)
     // ========================================================================
     (function initCountdown() {
         const el = document.getElementById('countdown');
         if (!el) return;
-        // May 29 2026 14:00 CEST = 12:00 UTC
-        const rollout = new Date('2026-05-29T12:00:00Z');
+        // May 28 2026 14:30 CEST = 12:30 UTC
+        const rollout = new Date('2026-05-28T12:30:00Z');
         const eventEnd = new Date('2026-06-01T23:59:59Z');
 
         function tick() {
