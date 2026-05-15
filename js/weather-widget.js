@@ -23,7 +23,7 @@ const WeatherWidget = (function() {
             { date: '2026-05-29', label: 'Day 2', isEventDay: true },
             { date: '2026-05-30', label: 'Day 3', isEventDay: true },
             { date: '2026-05-31', label: 'Day 4', isEventDay: true },
-            { date: '2026-06-01', label: 'Departure', isEventDay: false }
+            { date: '2026-06-01', label: 'Departure', isEventDay: true }
         ]
     };
 
@@ -66,14 +66,6 @@ const WeatherWidget = (function() {
         const date = new Date(dateStr);
         const options = { weekday: 'short', month: 'short', day: 'numeric' };
         return date.toLocaleDateString('en-US', options);
-    }
-
-    /**
-     * Get day of week
-     */
-    function getDayOfWeek(dateStr) {
-        const date = new Date(dateStr);
-        return date.toLocaleDateString('en-US', { weekday: 'short' });
     }
 
     /**
@@ -141,50 +133,46 @@ const WeatherWidget = (function() {
     }
 
     /**
-     * Extract event days from forecast data
+     * Extract event days from forecast data. Always returns all 5 event days,
+     * using a historical placeholder for any date beyond the forecast horizon
+     * (Open-Meteo provides 16 days; if today is more than 11-12 days before
+     * the event, the later days fall off the end).
      */
     function extractEventDays(weatherData) {
         const daily = weatherData.daily;
-        const days = [];
-
+        const dateToIdx = {};
         for (let i = 0; i < daily.time.length; i++) {
-            const date = daily.time[i];
-            const eventDay = EVENT_DATES.days.find(d => d.date === date);
-
-            if (eventDay || isNearEventDates(date)) {
-                days.push({
-                    date: date,
-                    label: eventDay ? eventDay.label : getDayOfWeek(date),
-                    isEventDay: !!eventDay,
-                    tempMax: Math.round(daily.temperature_2m_max[i]),
-                    tempMin: Math.round(daily.temperature_2m_min[i]),
-                    precipProb: daily.precipitation_probability_max[i],
-                    precipSum: daily.precipitation_sum[i],
-                    weatherCode: daily.weather_code[i],
-                    windSpeed: Math.round(daily.wind_speed_10m_max[i]),
-                    windGusts: Math.round(daily.wind_gusts_10m_max[i])
-                });
-            }
+            dateToIdx[daily.time[i]] = i;
         }
 
-        return days;
-    }
-
-    /**
-     * Check if date is near event dates (for context)
-     */
-    function isNearEventDates(dateStr) {
-        const date = new Date(dateStr);
-        const eventStart = new Date(EVENT_DATES.start);
-        const eventEnd = new Date(EVENT_DATES.end);
-
-        // Show 2 days before and 2 days after
-        const rangeStart = new Date(eventStart);
-        rangeStart.setDate(rangeStart.getDate() - 2);
-        const rangeEnd = new Date(eventEnd);
-        rangeEnd.setDate(rangeEnd.getDate() + 2);
-
-        return date >= rangeStart && date <= rangeEnd;
+        return EVENT_DATES.days.map(eventDay => {
+            const i = dateToIdx[eventDay.date];
+            if (i === undefined) {
+                return {
+                    date: eventDay.date,
+                    label: eventDay.label,
+                    isEventDay: eventDay.isEventDay,
+                    isHistorical: true,
+                    tempMax: 26,
+                    tempMin: 14,
+                    precipProb: 25,
+                    weatherCode: 1,
+                    windSpeed: 15
+                };
+            }
+            return {
+                date: eventDay.date,
+                label: eventDay.label,
+                isEventDay: eventDay.isEventDay,
+                tempMax: Math.round(daily.temperature_2m_max[i]),
+                tempMin: Math.round(daily.temperature_2m_min[i]),
+                precipProb: daily.precipitation_probability_max[i],
+                precipSum: daily.precipitation_sum[i],
+                weatherCode: daily.weather_code[i],
+                windSpeed: Math.round(daily.wind_speed_10m_max[i]),
+                windGusts: Math.round(daily.wind_gusts_10m_max[i])
+            };
+        });
     }
 
     /**
