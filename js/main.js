@@ -146,6 +146,55 @@
     })();
 
     // ========================================================================
+    // Event-state helpers (used by hero countdown, Live Event panel, and
+    // per-day status badges). Day boundaries are computed in Paris local
+    // time so an 11pm UTC tick still reads "today is Day 3" on the ground.
+    // ========================================================================
+    const EVENT_START_UTC = new Date('2026-05-28T00:00:00+02:00');
+    const EVENT_END_UTC   = new Date('2026-06-01T23:59:59+02:00');
+    const DAY_KEYS = ['day1', 'day2', 'day3', 'day4'];
+
+    function parisDateKey(d) {
+        // 'YYYY-MM-DD' in Europe/Paris regardless of host timezone.
+        return d.toLocaleDateString('en-CA', { timeZone: 'Europe/Paris' });
+    }
+
+    function getEventState(now = new Date()) {
+        const todayKey = parisDateKey(now);
+        let phase;
+        if (now < EVENT_START_UTC)      phase = 'pre';
+        else if (now > EVENT_END_UTC)   phase = 'post';
+        else                             phase = 'event';
+
+        const dayKeyForDate = (dateStr) => {
+            const match = DAY_KEYS.find(k => ROUTES[k].date === dateStr);
+            return match || null;
+        };
+
+        const todayDayKey = dayKeyForDate(todayKey);
+
+        const tomorrow = new Date(now.getTime() + 24 * 3600 * 1000);
+        const tomorrowKey = parisDateKey(tomorrow);
+        const tomorrowDayKey = dayKeyForDate(tomorrowKey);
+
+        let dayNumber = 0;
+        if (phase === 'event') {
+            if (todayDayKey) {
+                dayNumber = parseInt(todayDayKey.replace('day', ''), 10);
+            } else if (todayKey === '2026-06-01') {
+                dayNumber = 5;
+            }
+        }
+
+        return {
+            phase, todayKey, tomorrowKey, todayDayKey, tomorrowDayKey,
+            dayNumber, totalDays: 4,
+            eventStart: EVENT_START_UTC, eventEnd: EVENT_END_UTC,
+        };
+    }
+    window.KOTR_EVENT_STATE = getEventState;
+
+    // ========================================================================
     // Countdown — live to 14:30 CEST May 28 (Thursday warm-up ride)
     // ========================================================================
     (function initCountdown() {
@@ -154,29 +203,51 @@
         // May 28 2026 14:30 CEST = 12:30 UTC
         const rollout = new Date('2026-05-28T12:30:00Z');
         const eventEnd = new Date('2026-06-01T23:59:59Z');
+        const pad = n => String(n).padStart(2, '0');
 
-        function tick() {
-            const now = new Date();
-            if (now >= eventEnd) {
-                el.textContent = '';
-                return;
-            }
-            if (now >= rollout) {
-                el.textContent = 'Wheels are rolling';
-                return;
-            }
-            const diff = rollout - now;
+        function fmtCountdown(target, now) {
+            const diff = target - now;
             const d = Math.floor(diff / 86400000);
             const h = Math.floor((diff % 86400000) / 3600000);
             const m = Math.floor((diff % 3600000) / 60000);
             const s = Math.floor((diff % 60000) / 1000);
-            const pad = n => String(n).padStart(2, '0');
+            return d > 0
+                ? d + (d === 1 ? ' day ' : ' days ') + pad(h) + ':' + pad(m) + ':' + pad(s)
+                : pad(h) + ':' + pad(m) + ':' + pad(s);
+        }
 
-            if (d > 0) {
-                el.textContent = d + (d === 1 ? ' day ' : ' days ') + pad(h) + ':' + pad(m) + ':' + pad(s);
-            } else {
-                el.textContent = pad(h) + ':' + pad(m) + ':' + pad(s);
+        function tick() {
+            const now = new Date();
+            if (now >= eventEnd) {
+                el.innerHTML = '';
+                return;
             }
+
+            // Pre-rollout (before warm-up on Day 1): live timer to 14:30 CEST.
+            if (now < rollout) {
+                el.textContent = fmtCountdown(rollout, now);
+                return;
+            }
+
+            // During the event, surface today's ride name and tomorrow preview.
+            const state = getEventState(now);
+            let main = 'Wheels are rolling';
+            let sub  = '';
+            if (state.todayDayKey) {
+                const today = ROUTES[state.todayDayKey];
+                main = 'Day ' + today.day + ' · ' + today.name;
+                if (state.tomorrowDayKey) {
+                    sub = 'Tomorrow: ' + ROUTES[state.tomorrowDayKey].name;
+                } else if (state.tomorrowKey === '2026-06-01') {
+                    sub = 'Tomorrow: depart Avignon';
+                }
+            } else if (state.dayNumber === 5) {
+                main = 'Safe travels home';
+                sub  = 'KOTR 2026 wraps tonight at midnight CEST';
+            }
+
+            el.innerHTML = '<span class="countdown-main">' + main + '</span>'
+                + (sub ? '<span class="countdown-sub">' + sub + '</span>' : '');
         }
 
         tick();
@@ -467,6 +538,42 @@
     }
 
     /**
+     * Tag each route card with its event-relative status (done / today /
+     * tomorrow / upcoming). Idempotent — safe to re-run on midnight rollover.
+     */
+    function applyRouteCardStatus() {
+        const state = getEventState();
+        document.querySelectorAll('.route-card').forEach(card => {
+            const dayKey = 'day' + card.dataset.day;
+            const day = ROUTES[dayKey];
+            if (!day) return;
+
+            card.classList.remove('is-done', 'is-today', 'is-tomorrow', 'is-upcoming');
+            const existing = card.querySelector('.route-status-badge');
+            if (existing) existing.remove();
+
+            let kind, label;
+            if (state.phase === 'post') {
+                kind = 'done'; label = 'DONE';
+            } else if (state.phase === 'event') {
+                if (day.date < state.todayKey)        { kind = 'done';     label = 'DONE'; }
+                else if (day.date === state.todayKey) { kind = 'today';    label = 'TODAY'; }
+                else if (day.date === state.tomorrowKey) { kind = 'tomorrow'; label = 'TOMORROW'; }
+                else                                  { kind = 'upcoming'; label = 'UPCOMING'; }
+            } else {
+                return; // pre-event: no badge
+            }
+
+            card.classList.add('is-' + kind);
+            const badge = document.createElement('span');
+            badge.className = 'route-status-badge status-' + kind;
+            badge.textContent = label;
+            const header = card.querySelector('.card-header');
+            if (header) header.appendChild(badge);
+        });
+    }
+
+    /**
      * Render all route cards from ROUTES config
      */
     function renderRouteCards() {
@@ -500,6 +607,8 @@
         });
 
         container.innerHTML = html;
+
+        applyRouteCardStatus();
 
         // Setup click handlers for elevation profiles
         setupElevationProfileClicks();
@@ -756,17 +865,45 @@
     function renderTrainingCountdown() {
         const container = document.getElementById('training-countdown-content');
         if (!container) return;
+        const section = document.getElementById('training-countdown-section');
 
         const now = new Date();
-        const weeksUntil = calculateWeeksUntilEvent(now);
-        const daysUntil = Math.ceil(weeksUntil * 7);
-        const phase = getTrainingPhase(weeksUntil);
+        const state = getEventState(now);
 
-        // Event has passed
-        if (weeksUntil < 0) {
+        const title = section?.querySelector('.training-countdown-title');
+        const setTitle = t => { if (title) title.textContent = t; };
+
+        // After the event ends: show the wrap-up card.
+        if (state.phase === 'post') {
+            if (section) {
+                section.hidden = false;
+                section.classList.remove('live-event-mode');
+            }
+            setTitle('King of the Road · 2026');
             container.innerHTML = renderEventComplete();
             return;
         }
+
+        // During the event: training countdown no longer applies — the
+        // Live Event panel takes over this slot (today's ride + tomorrow).
+        if (state.phase === 'event') {
+            if (section) {
+                section.hidden = false;
+                section.classList.add('live-event-mode');
+            }
+            setTitle('King of the Road · Live');
+            container.innerHTML = renderLiveEvent(state);
+            return;
+        }
+
+        const weeksUntil = calculateWeeksUntilEvent(now);
+        const daysUntil = Math.ceil(weeksUntil * 7);
+        const phase = getTrainingPhase(weeksUntil);
+        if (section) {
+            section.hidden = false;
+            section.classList.remove('live-event-mode');
+        }
+        setTitle('Training Countdown');
 
         // Get personalized info if available
         let personalizedNote = '';
@@ -915,6 +1052,129 @@
                 <p>KOTR 2026 has concluded. We hope you had an incredible experience cycling through Provence and conquering Mont Ventoux!</p>
             </div>
         `;
+    }
+
+    /**
+     * Render the Live Event panel (shown during the event window in place of
+     * the Training Countdown). Highlights today's ride and previews tomorrow.
+     */
+    function renderLiveEvent(state) {
+        const todayLabel = (() => {
+            const d = new Date(state.todayKey + 'T12:00:00+02:00');
+            return d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', timeZone: 'Europe/Paris' });
+        })();
+
+        const dayBadge = state.dayNumber === 5
+            ? `<span class="live-day-num">Day 5</span><span class="live-day-total">Departure</span>`
+            : `<span class="live-day-num">Day ${state.dayNumber}</span><span class="live-day-total">of ${state.totalDays}</span>`;
+
+        const todaySection = renderLiveTodaySection(state);
+        const tomorrowSection = renderLiveTomorrowSection(state);
+
+        return `
+            <div class="live-event-panel">
+                <div class="live-event-header">
+                    <div class="live-day-badge">${dayBadge}</div>
+                    <div class="live-day-meta">
+                        <div class="live-day-name">${todayHeadline(state)}</div>
+                        <div class="live-day-date">${todayLabel}</div>
+                    </div>
+                    <div class="live-status">
+                        <span class="live-dot"></span>
+                        <span class="live-label">LIVE</span>
+                    </div>
+                </div>
+                <div class="live-event-body">
+                    ${todaySection}
+                    ${tomorrowSection}
+                </div>
+            </div>
+        `;
+    }
+
+    function todayHeadline(state) {
+        if (state.todayDayKey) return ROUTES[state.todayDayKey].name;
+        if (state.dayNumber === 5) return 'Safe Travels Home';
+        return 'King of the Road';
+    }
+
+    function renderLiveTodaySection(state) {
+        // Departure day — no ride
+        if (!state.todayDayKey && state.dayNumber === 5) {
+            return `
+                <article class="live-ride-card live-ride-today live-ride-departure">
+                    <div class="live-ride-eyebrow">TODAY · DEPARTURE</div>
+                    <h5>Safe travels home</h5>
+                    <p class="live-ride-desc">The 2026 King of the Road tour ends today. Hope you took some photos.</p>
+                </article>
+            `;
+        }
+        if (!state.todayDayKey) return '';
+
+        const day = ROUTES[state.todayDayKey];
+        const variants = day.type === 'choice' || day.type === 'epic'
+            ? [['Standard', day.standard], ['Long', day.long]]
+            : [[day.type === 'warmup' ? 'Warm-up' : 'Route', day]];
+
+        return `
+            <article class="live-ride-card live-ride-today">
+                <div class="live-ride-eyebrow">TODAY · ${(day.type || 'RIDE').toUpperCase()}</div>
+                <h5>${day.name}</h5>
+                ${day.description ? `<p class="live-ride-desc">${day.description}</p>` : ''}
+                <div class="live-ride-variants">
+                    ${variants.map(([label, v]) => `
+                        <div class="live-ride-variant">
+                            <div class="live-variant-label">${label}</div>
+                            <div class="live-variant-stats">
+                                <span><strong>${v.distance}</strong> km</span>
+                                <span><strong>${formatElevation(v.elevation)}</strong> m</span>
+                                <span>${v.difficultyLabel}</span>
+                                <span>${v.duration}</span>
+                            </div>
+                            <a href="flyover.html?route=${encodeURIComponent(v.routeFile)}" class="btn btn-flyover btn-flyover-sm">
+                                <span class="icon">&#127916;</span> 3D Flyover
+                            </a>
+                        </div>
+                    `).join('')}
+                </div>
+            </article>
+        `;
+    }
+
+    function renderLiveTomorrowSection(state) {
+        if (state.todayKey === '2026-06-01') return '';
+
+        // Tomorrow is a riding day
+        if (state.tomorrowDayKey) {
+            const day = ROUTES[state.tomorrowDayKey];
+            const distRange = day.type === 'warmup'
+                ? `${day.distance} km`
+                : `${day.standard.distance}–${day.long.distance} km`;
+            const elevRange = day.type === 'warmup'
+                ? `${formatElevation(day.elevation)} m`
+                : `${formatElevation(day.standard.elevation)}–${formatElevation(day.long.elevation)} m`;
+            return `
+                <article class="live-ride-card live-ride-tomorrow">
+                    <div class="live-ride-eyebrow">TOMORROW · DAY ${day.day} OF ${state.totalDays}</div>
+                    <h5>${day.name}</h5>
+                    <div class="live-ride-stats">
+                        <span><strong>${distRange}</strong></span>
+                        <span><strong>${elevRange}</strong> climbing</span>
+                    </div>
+                </article>
+            `;
+        }
+
+        // Tomorrow is departure
+        if (state.tomorrowKey === '2026-06-01') {
+            return `
+                <article class="live-ride-card live-ride-tomorrow live-ride-departure">
+                    <div class="live-ride-eyebrow">TOMORROW · DEPARTURE</div>
+                    <h5>Final day, safe travels</h5>
+                </article>
+            `;
+        }
+        return '';
     }
 
     /**

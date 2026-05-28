@@ -20,3 +20,4 @@ node_modules/
 *.local.md
 PRD-*.md
 PREDICTIVE_CAMERA_PLAN.md
+.screenshots/

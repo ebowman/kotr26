@@ -130,6 +130,23 @@ body {
     font-variant-numeric: tabular-nums;
 }
 
+.hero .countdown .countdown-main {
+    display: block;
+    font-family: var(--font-display);
+    font-size: clamp(1.4rem, 3vw, 2rem);
+    letter-spacing: 0.5px;
+    line-height: 1.15;
+}
+
+.hero .countdown .countdown-sub {
+    display: block;
+    margin-top: 0.4rem;
+    font-size: clamp(0.85rem, 1.6vw, 1rem);
+    opacity: 0.8;
+    letter-spacing: 0.5px;
+    font-family: inherit;
+}
+
 .charity-badge {
     display: inline-flex;
     flex-direction: column;
@@ -454,6 +471,76 @@ body {
     font-size: 0.75rem;
     font-weight: 600;
     margin-left: auto;
+}
+
+/* Event-relative status badges (during/after the event) */
+.route-status-badge {
+    margin-left: auto;
+    padding: var(--space-xs) var(--space-sm);
+    border-radius: 999px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.route-status-badge.status-today {
+    background: var(--color-danger);
+    color: white;
+    box-shadow: 0 0 0 4px rgba(244, 67, 54, 0.15);
+}
+
+.route-status-badge.status-tomorrow {
+    background: var(--color-accent);
+    color: var(--color-text);
+}
+
+.route-status-badge.status-upcoming {
+    background: var(--color-bg);
+    color: var(--color-text-muted);
+    border: 1px solid var(--color-border);
+}
+
+.route-status-badge.status-done {
+    background: var(--color-success);
+    color: white;
+    opacity: 0.85;
+}
+
+/* When a route has the featured-badge AND a status-badge, keep them
+   from fighting for the right edge. */
+.route-card .featured-badge + .route-status-badge,
+.route-card .route-status-badge + .featured-badge {
+    margin-left: var(--space-sm);
+}
+
+/* Today: subtle emphasis on the whole card */
+.route-card.is-today {
+    border: 2px solid var(--color-accent);
+    box-shadow: var(--shadow-lg);
+    position: relative;
+}
+
+.route-card.is-today::before {
+    content: '';
+    position: absolute;
+    inset: -2px;
+    border-radius: inherit;
+    pointer-events: none;
+    background: linear-gradient(135deg, rgba(230, 184, 0, 0.10) 0%, rgba(230, 184, 0, 0) 50%);
+    z-index: 0;
+}
+
+.route-card.is-today > * { position: relative; z-index: 1; }
+
+/* Done: fade slightly to push the eye past completed days */
+.route-card.is-done {
+    opacity: 0.7;
+    filter: saturate(0.85);
+}
+.route-card.is-done:hover {
+    opacity: 1;
+    filter: none;
 }
 
 .card-header time {
@@ -2455,6 +2542,231 @@ footer a:hover {
     font-size: 1rem;
     color: var(--color-text-muted);
     margin: 0;
+}
+
+/* ==============================================
+   Live Event Panel (during the event itself)
+   Replaces the Training Countdown content
+   while phase === 'event'.
+   ============================================== */
+
+.training-countdown-section.live-event-mode {
+    border-color: var(--color-accent);
+    box-shadow: var(--shadow-lg);
+    background:
+        linear-gradient(135deg, rgba(230, 184, 0, 0.06) 0%, var(--color-surface) 60%);
+}
+
+.live-event-panel {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-lg);
+}
+
+.live-event-header {
+    display: flex;
+    align-items: center;
+    gap: var(--space-lg);
+    padding-bottom: var(--space-lg);
+    border-bottom: 1px solid var(--color-border);
+}
+
+.live-day-badge {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-dark) 100%);
+    color: white;
+    padding: var(--space-md) var(--space-lg);
+    border-radius: var(--radius-lg);
+    min-width: 110px;
+}
+
+.live-day-num {
+    font-family: var(--font-display);
+    font-size: 1.75rem;
+    font-weight: 700;
+    line-height: 1;
+}
+
+.live-day-total {
+    font-size: 0.75rem;
+    opacity: 0.9;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-top: 2px;
+}
+
+.live-day-meta {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.live-day-name {
+    font-family: var(--font-display);
+    font-size: 1.5rem;
+    color: var(--color-primary);
+    line-height: 1.15;
+    margin-bottom: 2px;
+}
+
+.live-day-date {
+    font-size: 0.9rem;
+    color: var(--color-text-muted);
+}
+
+.live-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.35rem 0.7rem;
+    background: rgba(244, 67, 54, 0.1);
+    color: var(--color-danger);
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+}
+
+.live-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--color-danger);
+    animation: livePulse 1.6s ease-in-out infinite;
+}
+
+@keyframes livePulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50%      { opacity: 0.55; transform: scale(0.8); }
+}
+
+.live-event-body {
+    display: grid;
+    grid-template-columns: 2fr 1fr;
+    gap: var(--space-lg);
+}
+
+.live-ride-card {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    padding: var(--space-lg);
+}
+
+.live-ride-card.live-ride-today {
+    border-color: var(--color-accent);
+    border-left: 4px solid var(--color-accent);
+}
+
+.live-ride-card.live-ride-tomorrow {
+    border-left: 4px solid var(--color-ventoux);
+    background: var(--color-bg);
+}
+
+.live-ride-card.live-ride-departure {
+    border-left-color: var(--color-text-muted);
+    background: var(--color-bg);
+}
+
+.live-ride-eyebrow {
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    color: var(--color-primary);
+    text-transform: uppercase;
+    margin-bottom: var(--space-xs);
+}
+
+.live-ride-card h5 {
+    font-family: var(--font-display);
+    font-size: 1.2rem;
+    color: var(--color-text);
+    margin: 0 0 var(--space-sm);
+    line-height: 1.2;
+}
+
+.live-ride-desc {
+    font-size: 0.9rem;
+    color: var(--color-text-muted);
+    margin: 0 0 var(--space-md);
+}
+
+.live-ride-variants {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
+}
+
+.live-ride-variant {
+    background: var(--color-bg);
+    border-radius: var(--radius-md);
+    padding: var(--space-md);
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: center;
+    gap: var(--space-md);
+}
+
+.live-variant-label {
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: var(--color-primary);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    min-width: 70px;
+}
+
+.live-variant-stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-md);
+    font-size: 0.9rem;
+    color: var(--color-text);
+}
+
+.live-variant-stats strong {
+    color: var(--color-primary);
+}
+
+.live-ride-stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-md);
+    font-size: 0.9rem;
+    color: var(--color-text);
+}
+
+.live-ride-stats strong {
+    color: var(--color-primary);
+}
+
+.btn-flyover-sm {
+    padding: 0.35rem 0.7rem;
+    font-size: 0.8rem;
+}
+
+@media (max-width: 768px) {
+    .live-event-header {
+        flex-wrap: wrap;
+    }
+    .live-event-body {
+        grid-template-columns: 1fr;
+    }
+    .live-ride-variant {
+        grid-template-columns: 1fr;
+        gap: var(--space-sm);
+    }
+}
+
+@media (max-width: 480px) {
+    .live-day-badge {
+        min-width: 80px;
+        padding: var(--space-sm) var(--space-md);
+    }
+    .live-day-num { font-size: 1.35rem; }
+    .live-day-name { font-size: 1.2rem; }
 }
 
 /* Taper week special styling */
