@@ -853,6 +853,37 @@ body {
 .briefing-card.briefing-safety .briefing-icon { background: rgba(74, 144, 164, 0.15); }
 .briefing-card.briefing-whatsapp h3 { color: #25D366; }
 .briefing-card.briefing-whatsapp .briefing-icon { background: rgba(37, 211, 102, 0.15); }
+.whatsapp-qr {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-xs);
+    margin-top: var(--space-md);
+    padding: var(--space-md);
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    text-decoration: none;
+    transition: transform 0.15s, box-shadow 0.15s;
+}
+.whatsapp-qr:hover {
+    transform: scale(1.02);
+    box-shadow: var(--shadow-md);
+    border-color: #25D366;
+}
+.whatsapp-qr img {
+    display: block;
+    width: 180px;
+    height: auto;
+    image-rendering: crisp-edges;
+}
+.whatsapp-qr-caption {
+    font-size: 0.8rem;
+    color: var(--color-text-muted);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    font-weight: 600;
+}
 @media (max-width: 480px) {
     .briefing-grid { grid-template-columns: 1fr; }
     .briefing-card { padding: var(--space-md); }
