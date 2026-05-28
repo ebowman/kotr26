@@ -738,6 +738,126 @@ body {
     line-height: 1.7;
 }
 
+/* ==============================================
+   Event Briefing — trip logistics from info pack
+   ============================================== */
+.event-briefing-section {
+    padding: var(--space-2xl) 0;
+    background: linear-gradient(180deg, var(--color-bg) 0%, var(--color-surface) 100%);
+}
+.event-briefing-section h2 {
+    text-align: center;
+    margin-bottom: var(--space-sm);
+}
+.event-briefing-intro {
+    text-align: center;
+    color: var(--color-text-muted);
+    margin: 0 auto var(--space-2xl);
+    max-width: 640px;
+}
+.briefing-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: var(--space-lg);
+}
+.briefing-card {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    padding: var(--space-lg);
+    box-shadow: var(--shadow-sm);
+    transition: box-shadow 0.15s, transform 0.15s;
+}
+.briefing-card:hover {
+    box-shadow: var(--shadow-md);
+}
+.briefing-card h3 {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-family: var(--font-display);
+    font-size: 1.15rem;
+    color: var(--color-primary);
+    margin: 0 0 var(--space-md);
+}
+.briefing-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
+    border-radius: 50%;
+    background: var(--color-bg);
+    font-size: 1.1rem;
+}
+.briefing-lead {
+    margin: 0 0 var(--space-md);
+    font-size: 0.95rem;
+    line-height: 1.45;
+    color: var(--color-text);
+}
+.briefing-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+}
+.briefing-list li {
+    position: relative;
+    padding-left: var(--space-md);
+    font-size: 0.9rem;
+    line-height: 1.45;
+    color: var(--color-text);
+}
+.briefing-list li::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0.55em;
+    width: 5px;
+    height: 5px;
+    background: var(--color-accent);
+    border-radius: 50%;
+}
+.briefing-list code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    background: var(--color-bg);
+    padding: 0.05rem 0.35rem;
+    border-radius: var(--radius-sm);
+    font-size: 0.85em;
+}
+.briefing-list a {
+    color: var(--color-primary);
+    text-decoration: none;
+    border-bottom: 1px dotted currentColor;
+}
+.briefing-list a:hover { border-bottom-style: solid; }
+.briefing-list-compact li {
+    font-size: 0.85rem;
+}
+.briefing-note {
+    margin: var(--space-md) 0 0;
+    padding: var(--space-sm) var(--space-md);
+    background: rgba(230, 184, 0, 0.12);
+    border-left: 3px solid var(--color-accent);
+    border-radius: var(--radius-sm);
+    font-size: 0.85rem;
+    color: var(--color-text);
+    line-height: 1.5;
+}
+.briefing-card.briefing-emergency .briefing-icon { background: rgba(244, 67, 54, 0.15); }
+.briefing-card.briefing-emergency h3 { color: var(--color-danger); }
+.briefing-card.briefing-safety h3 { color: var(--color-ventoux); }
+.briefing-card.briefing-safety .briefing-icon { background: rgba(74, 144, 164, 0.15); }
+.briefing-card.briefing-whatsapp h3 { color: #25D366; }
+.briefing-card.briefing-whatsapp .briefing-icon { background: rgba(37, 211, 102, 0.15); }
+@media (max-width: 480px) {
+    .briefing-grid { grid-template-columns: 1fr; }
+    .briefing-card { padding: var(--space-md); }
+}
+
 /* Footer */
 footer {
     background: var(--color-primary-dark);
@@ -2767,6 +2887,104 @@ footer a:hover {
     }
     .live-day-num { font-size: 1.35rem; }
     .live-day-name { font-size: 1.2rem; }
+}
+
+/* Today's-plan timeline inside the Live Event panel */
+.live-schedule {
+    margin-top: var(--space-sm);
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    padding: var(--space-lg);
+}
+.live-schedule-title {
+    font-family: var(--font-display);
+    font-size: 1rem;
+    color: var(--color-primary);
+    margin: 0 0 var(--space-md);
+    letter-spacing: 0.02em;
+}
+.live-schedule-tz {
+    color: var(--color-text-muted);
+    font-weight: 400;
+    font-size: 0.8rem;
+    font-family: inherit;
+}
+.live-schedule-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.live-schedule-item {
+    display: grid;
+    grid-template-columns: 80px 1fr auto;
+    align-items: center;
+    gap: var(--space-md);
+    padding: 0.4rem var(--space-sm);
+    border-radius: var(--radius-sm);
+    border-left: 3px solid transparent;
+    transition: background-color 0.15s;
+}
+.live-schedule-item .sched-time {
+    font-family: var(--font-display);
+    font-size: 0.95rem;
+    color: var(--color-text);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.02em;
+}
+.live-schedule-item .sched-body {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.25;
+    min-width: 0;
+}
+.live-schedule-item .sched-label {
+    color: var(--color-text);
+    font-size: 0.92rem;
+}
+.live-schedule-item .sched-sub {
+    color: var(--color-text-muted);
+    font-size: 0.78rem;
+    margin-top: 1px;
+}
+.live-schedule-item.is-past {
+    opacity: 0.45;
+}
+.live-schedule-item.is-past .sched-label { text-decoration: line-through; }
+.live-schedule-item.is-next {
+    background: rgba(230, 184, 0, 0.10);
+    border-left-color: var(--color-accent);
+}
+.live-schedule-item.is-next .sched-label { font-weight: 600; }
+.live-schedule-item.highlight .sched-time {
+    color: var(--color-primary);
+    font-weight: 700;
+}
+.live-schedule-item.kind-ride { border-left-color: var(--color-primary); }
+.live-schedule-item.kind-meal { border-left-color: var(--color-accent); }
+.live-schedule-item.kind-briefing { border-left-color: var(--color-ventoux); }
+.live-schedule-item.kind-transfer { border-left-color: var(--color-text-muted); }
+.live-schedule-item.is-next.kind-ride,
+.live-schedule-item.is-next.kind-meal,
+.live-schedule-item.is-next.kind-briefing,
+.live-schedule-item.is-next.kind-transfer { border-left-color: var(--color-accent); }
+.sched-next-pill {
+    background: var(--color-accent);
+    color: var(--color-text);
+    font-size: 0.65rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 0.18rem 0.5rem;
+    border-radius: 999px;
+}
+@media (max-width: 480px) {
+    .live-schedule-item { grid-template-columns: 64px 1fr auto; }
+    .live-schedule-item .sched-time { font-size: 0.85rem; }
+    .live-schedule-item .sched-label { font-size: 0.85rem; }
 }
 
 /* Taper week special styling */

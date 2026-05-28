@@ -41,8 +41,8 @@
             standard: {
                 label: 'NW PROVENCE – SHORT',
                 routeFile: 'KOTR_D2_Short.fit',
-                distance: 82,
-                elevation: 428,
+                distance: 81.7,
+                elevation: 440,
                 difficulty: 2,
                 difficultyLabel: 'Moderate',
                 duration: '~3-4 hours'
@@ -51,7 +51,7 @@
                 label: 'NW PROVENCE – LONG',
                 routeFile: 'KOTR_D2_Long.fit',
                 distance: 105,
-                elevation: 703,
+                elevation: 702,
                 difficulty: 3,
                 difficultyLabel: 'Challenging',
                 duration: '~4-5 hours'
@@ -68,8 +68,8 @@
             standard: {
                 label: 'MAZAN LOOP',
                 routeFile: 'KOTR_D3_Short.fit',
-                distance: 81,
-                elevation: 369,
+                distance: 81.4,
+                elevation: 390,
                 difficulty: 2,
                 difficultyLabel: 'Moderate',
                 duration: '~3-4 hours'
@@ -79,12 +79,12 @@
                 labelIcon: '&#127956;',
                 routeFile: 'KOTR_D3_Long.fit',
                 distance: 140,
-                elevation: 2189,
+                elevation: 2184,
                 difficulty: 4,
                 difficultyLabel: 'Epic',
                 duration: '~6-7 hours',
                 special: true,
-                specialNote: 'Beast of Provence - Summit 1,897m'
+                specialNote: 'Beast of Provence — Summit 1,910 m'
             }
         },
         day4: {
@@ -97,8 +97,8 @@
             standard: {
                 label: 'LUBERON LOOP – SHORT',
                 routeFile: 'KOTR_D4_Short.fit',
-                distance: 78,
-                elevation: 400,
+                distance: 77.8,
+                elevation: 457,
                 difficulty: 2,
                 difficultyLabel: 'Moderate',
                 duration: '~3-4 hours'
@@ -106,8 +106,8 @@
             long: {
                 label: 'LUBERON LOOP – LONG',
                 routeFile: 'KOTR_D4_Long.fit',
-                distance: 92,
-                elevation: 713,
+                distance: 91.6,
+                elevation: 751,
                 difficulty: 3,
                 difficultyLabel: 'Challenging',
                 duration: '~3.5-4.5 hours'
@@ -144,6 +144,55 @@
             }
         } catch (e) { /* network or shape mismatch; silent in prod */ }
     })();
+
+    // ========================================================================
+    // Daily schedule (Europe/Paris times) — source of truth for the
+    // Live Event panel timeline and the hero "next up" line. Times are
+    // copied from the official KOTR 2026 attendee info pack agenda;
+    // Day 1 was updated to the on-the-day 13:30 warm-up (pack says 14:30).
+    // ========================================================================
+    const RIDE_WAVES = [
+        { time: '07:30', label: 'Departure · Long · Espresso',   kind: 'ride' },
+        { time: '07:40', label: 'Departure · Long · Cortado',    kind: 'ride' },
+        { time: '07:50', label: 'Departure · Long · Capuccino',  kind: 'ride' },
+        { time: '08:00', label: 'Departure · Short · Espresso',  kind: 'ride' },
+        { time: '08:10', label: 'Departure · Short · Cortado',   kind: 'ride' },
+        { time: '08:20', label: 'Departure · Short · Capuccino', kind: 'ride' },
+    ];
+    const DAILY_SCHEDULE = {
+        day1: [
+            { time: '13:00', label: 'Meet at hotel for lunch',          kind: 'meal' },
+            { time: '13:30', label: 'Warm-up ride starts',              sub: 'Bike collection + shake-out spin with ESC', kind: 'ride', highlight: true },
+            { time: '19:00', label: 'Safety briefing with ESC',         sub: 'Hotel meeting room', kind: 'briefing', highlight: true },
+            { time: '19:30', label: 'Team dinner',                      sub: 'Hotel restaurant',   kind: 'meal' },
+        ],
+        day2: [
+            { time: '06:00', label: 'Breakfast opens', sub: 'Ibis Styles Avignon Sud', kind: 'meal' },
+            ...RIDE_WAVES,
+            { time: 'Post-ride', label: 'Rest · Refuel · Free time',                 kind: 'free' },
+            { time: '18:30', label: 'Shuttle · Hotel → Avignon centre',              kind: 'transfer' },
+            { time: '21:00', label: 'Shuttle · Centre → Hotel',                      kind: 'transfer' },
+        ],
+        day3: [
+            { time: '06:00', label: 'Breakfast opens', sub: 'Ibis Styles Avignon Sud', kind: 'meal' },
+            ...RIDE_WAVES,
+            { time: 'Post-ride', label: 'Rest · Refuel · Free time',                 kind: 'free' },
+            { time: '18:30', label: 'Shuttle · Hotel → Avignon centre',              kind: 'transfer' },
+            { time: '21:00', label: 'Shuttle · Centre → Hotel',                      kind: 'transfer' },
+        ],
+        day4: [
+            { time: '06:00', label: 'Breakfast opens', sub: 'Ibis Styles Avignon Sud', kind: 'meal' },
+            ...RIDE_WAVES,
+            { time: 'Post-ride', label: 'Rest · Refuel · Free time',                 kind: 'free' },
+            { time: '18:30', label: 'Shuttle · Hotel → Avignon centre',              kind: 'transfer' },
+            { time: '19:30', label: 'Team dinner',                                   sub: 'Pomelo · 36 Cr Jean Jaurès, Avignon', kind: 'meal', highlight: true },
+            { time: '22:00', label: 'Shuttle · Centre → Hotel',                      kind: 'transfer' },
+        ],
+        day5: [
+            { time: '06:00',  label: 'Breakfast opens', sub: 'Ibis Styles Avignon Sud', kind: 'meal' },
+            { time: 'All day', label: 'Departures from hotel',                        kind: 'transfer' },
+        ],
+    };
 
     // ========================================================================
     // Event-state helpers (used by hero countdown, Live Event panel, and
@@ -200,8 +249,10 @@
     (function initCountdown() {
         const el = document.getElementById('countdown');
         if (!el) return;
-        // May 28 2026 14:30 CEST = 12:30 UTC
-        const rollout = new Date('2026-05-28T12:30:00Z');
+        // Warm-up rollout: Thu 28 May 2026 13:30 CEST (== 11:30 UTC).
+        // Pack agenda says 14:30 but the actual on-the-day call is 13:30
+        // (meet 13:00 for lunch). Tracked in bead hq-ujs.
+        const rollout = new Date('2026-05-28T11:30:00Z');
         const eventEnd = new Date('2026-06-01T23:59:59Z');
         const pad = n => String(n).padStart(2, '0');
 
@@ -1071,6 +1122,8 @@
         const todaySection = renderLiveTodaySection(state);
         const tomorrowSection = renderLiveTomorrowSection(state);
 
+        const scheduleSection = renderTodaySchedule(state);
+
         return `
             <div class="live-event-panel">
                 <div class="live-event-header">
@@ -1088,6 +1141,64 @@
                     ${todaySection}
                     ${tomorrowSection}
                 </div>
+                ${scheduleSection}
+            </div>
+        `;
+    }
+
+    /**
+     * Render the timeline for today's events (lunch, ride waves, dinner...).
+     * Highlights the next not-yet-happened item. Times are Paris-local strings
+     * (HH:MM); the "now in Paris" needle is computed via Intl, not Date math.
+     */
+    function renderTodaySchedule(state) {
+        const dayKey = state.todayDayKey || (state.dayNumber === 5 ? 'day5' : null);
+        if (!dayKey) return '';
+        const items = DAILY_SCHEDULE[dayKey];
+        if (!items || !items.length) return '';
+
+        // "Now" in Europe/Paris as minutes since midnight, for next-up highlight.
+        const parisNow = new Date().toLocaleTimeString('en-GB', {
+            hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Paris', hour12: false
+        });
+        const [nh, nm] = parisNow.split(':').map(Number);
+        const nowMin = nh * 60 + nm;
+
+        const itemMin = it => {
+            if (!/^\d{2}:\d{2}$/.test(it.time)) return Infinity; // "Post-ride", "All day"
+            const [h, m] = it.time.split(':').map(Number);
+            return h * 60 + m;
+        };
+
+        const upcomingIdx = items.findIndex(it => itemMin(it) >= nowMin);
+        const nextIdx = upcomingIdx === -1 ? -1 : upcomingIdx;
+
+        const itemHtml = items.map((it, i) => {
+            const past = itemMin(it) < nowMin && /^\d{2}:\d{2}$/.test(it.time);
+            const isNext = i === nextIdx;
+            const cls = [
+                'live-schedule-item',
+                'kind-' + (it.kind || 'event'),
+                it.highlight ? 'highlight' : '',
+                past ? 'is-past' : '',
+                isNext ? 'is-next' : '',
+            ].filter(Boolean).join(' ');
+            return `
+                <li class="${cls}">
+                    <span class="sched-time">${it.time}</span>
+                    <span class="sched-body">
+                        <span class="sched-label">${it.label}</span>
+                        ${it.sub ? `<span class="sched-sub">${it.sub}</span>` : ''}
+                    </span>
+                    ${isNext ? '<span class="sched-next-pill">Next</span>' : ''}
+                </li>
+            `;
+        }).join('');
+
+        return `
+            <div class="live-schedule">
+                <h6 class="live-schedule-title">Today's plan <span class="live-schedule-tz">· Europe/Paris</span></h6>
+                <ol class="live-schedule-list">${itemHtml}</ol>
             </div>
         `;
     }
@@ -1113,7 +1224,7 @@
 
         const day = ROUTES[state.todayDayKey];
         const variants = day.type === 'choice' || day.type === 'epic'
-            ? [['Standard', day.standard], ['Long', day.long]]
+            ? [['Short', day.standard], ['Long', day.long]]
             : [[day.type === 'warmup' ? 'Warm-up' : 'Route', day]];
 
         return `
