@@ -88,6 +88,11 @@ const WeatherWidget = (function() {
         ].join(','));
         url.searchParams.set('timezone', 'Europe/Paris');
         url.searchParams.set('forecast_days', '16');
+        // Once the event is underway, the forecast endpoint no longer covers
+        // past days (e.g. on Day 3, the response starts at May 30 and Day 1/2
+        // drop off). past_days backfills those with Open-Meteo's recorded
+        // values so the widget keeps showing all five event days.
+        url.searchParams.set('past_days', '5');
 
         try {
             const response = await fetch(url);
@@ -122,14 +127,16 @@ const WeatherWidget = (function() {
     }
 
     /**
-     * Check if event dates are within forecast range
+     * Check if the forecast response covers at least one event day.
+     * (Previously checked only EVENT_DATES.start — that broke mid-event
+     * because the forecast endpoint no longer included past days.)
      */
     function isEventInForecastRange(weatherData) {
         if (!weatherData || !weatherData.daily || !weatherData.daily.time) {
             return false;
         }
         const forecastDates = weatherData.daily.time;
-        return forecastDates.includes(EVENT_DATES.start);
+        return EVENT_DATES.days.some(d => forecastDates.includes(d.date));
     }
 
     /**
