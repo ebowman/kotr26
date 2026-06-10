@@ -573,9 +573,9 @@
         const minAltitude = calculateMinimumAltitude(terrainElevation, riderAltitude);
 
         if (cameraAlt < minAltitude) {
-            return { altitude: minAltitude, adjusted: true };
+            return { altitude: minAltitude, adjusted: true, terrainElevation };
         }
-        return { altitude: cameraAlt, adjusted: false };
+        return { altitude: cameraAlt, adjusted: false, terrainElevation };
     }
 
     /**
@@ -3333,6 +3333,50 @@
                 bearing: cameraState.bearing.toFixed(1),
                 seekDistanceKm: seekDistanceKm.toFixed(1)
             });
+        }
+    }
+
+    /**
+     * Seed the smoothing pipeline from the camera state that was actually applied.
+     *
+     * During lerp transitions (user-override return, mode change) the applied camera
+     * follows a terrain-collided target, but calculateCameraForMode keeps writing the
+     * UNCOLLIDED ideal into the smoothing caches, and the predictive spring stays
+     * reset. On the first post-transition frame everything re-initializes at the
+     * ideal target - tens of meters below where the camera actually is - producing
+     * an instant drop, then a near-freeze while the fresh spring builds velocity.
+     * Calling this on the transition's final frame makes the pipeline continue from
+     * the rendered position and converge to the ideal smoothly.
+     */
+    function seedSmoothingFromApplied(appliedState, riderPos) {
+        if (!appliedState) return;
+        const pos = { lng: appliedState.lng, lat: appliedState.lat, alt: appliedState.alt };
+
+        window._cameraSmoothState = { ...pos, mode: targetCameraMode };
+        if (riderPos) {
+            window._riderSmoothState = {
+                lng: riderPos.lng,
+                lat: riderPos.lat,
+                alt: riderPos.alt,
+                mode: targetCameraMode
+            };
+        }
+
+        if (predictiveCameraController) {
+            predictiveCameraController.cameraSpring.teleportTo(pos);
+        }
+
+        if (window._terrainCache) {
+            window._terrainCache.lastLng = appliedState.lng;
+            window._terrainCache.lastLat = appliedState.lat;
+            window._terrainCache.lastCameraAlt = appliedState.alt;
+            window._terrainCache.lastBearing = appliedState.bearing;
+            window._terrainCache.lastPitch = appliedState.pitch;
+        }
+
+        if (window.FLYOVER_DEBUG) {
+            console.debug('[TRANSITION END] Seeded smoothing from applied state, alt:',
+                appliedState.alt.toFixed(1));
         }
     }
 
@@ -6168,6 +6212,21 @@
             window._transitionTerrainCache.lastAlt = smoothedAlt;
 
             targetState.alt = smoothedAlt;
+
+            // Keep terrain-availability tracking alive through the transition.
+            // calculateCameraForMode skips its terrain query during transitions, so
+            // without this hadTerrainData goes stale and the unavailable-floor
+            // protection cannot arm if terrain queries fail right as the transition
+            // ends - letting the camera drop to the uncollided ideal altitude.
+            if (window._terrainCache) {
+                const hasTerrainNow = collision.terrainElevation != null;
+                if (window._terrainCache.hadTerrainData && !hasTerrainNow) {
+                    window._terrainCache.terrainUnavailableFloor = smoothedAlt;
+                } else if (hasTerrainNow) {
+                    window._terrainCache.terrainUnavailableFloor = null;
+                }
+                window._terrainCache.hadTerrainData = hasTerrainNow;
+            }
         } else {
             // Reset transition cache when not in transition
             if (window._transitionTerrainCache) {
@@ -6247,6 +6306,13 @@
             const t = easeOutCubic(returnProgress);
             finalState = lerpCameraState(lastUserCameraState, targetState, t);
             isInTransition = true;
+
+            if (returnProgress >= 1) {
+                // Transition ends this frame - hand the pipeline the state the
+                // camera actually rendered (terrain-collided), not the ideal it
+                // computed, so the next frame continues without a discontinuity.
+                seedSmoothingFromApplied(finalState, dotPoint);
+            }
         }
         // Handle mode transition
         else if (modeTransitionProgress < 1 && transitionStartState) {
@@ -6269,6 +6335,8 @@
 
             if (modeTransitionProgress >= 1) {
                 currentCameraMode = targetCameraMode;
+                // Same continuity hand-off as the user-override return above
+                seedSmoothingFromApplied(finalState, dotPoint);
             }
         }
         // Normal guided mode
