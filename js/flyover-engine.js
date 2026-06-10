@@ -127,7 +127,6 @@
     let overviewTargetState = null; // Cached overview camera state
     let shouldReturnFromOverview = false; // Whether to zoom back after drag
     let scrubStartPoint = null; // Position where scrubbing began
-    let scrubBearing = 0; // Consistent bearing during scrub
     let scrubAnimationId = null; // Animation frame ID for scrub transitions
 
     // User override state
@@ -5326,18 +5325,32 @@
     const SCRUB_ALTITUDE = 2500; // meters above terrain
 
     /**
-     * Calculate camera state for scrubbing - simple fixed altitude, centered on point
+     * Calculate camera state for scrubbing - fixed altitude with the dot centered.
+     *
+     * The camera is offset slightly SOUTH of the dot rather than directly above
+     * it: applyCameraState orients via Mapbox lookAtPoint(rider), and that call
+     * is degenerate (gimbal lock) when the target is straight below the camera.
+     * Mapbox then resolves to an arbitrary orientation that points away from
+     * the route entirely - the dot and route end up off-screen while dragging.
+     * The fixed southward offset (same trick bird's-eye mode uses) keeps the
+     * dot centered in a stable, north-up, near-top-down view.
      */
     function calculateScrubCameraState(point) {
         if (!point) return calculateOverviewCameraState();
 
-        // Simple: fixed altitude above the current point, looking straight down
+        const south = turf.destination(
+            turf.point([point.lng, point.lat]),
+            0.35, // km south - ~8 deg off nadir at scrub altitude
+            180,
+            { units: 'kilometers' }
+        );
+
         return createCameraState(
-            point.lng,
-            point.lat,
+            south.geometry.coordinates[0],
+            south.geometry.coordinates[1],
             SCRUB_ALTITUDE + (point.alt || 0),
-            scrubBearing, // Maintain consistent bearing during scrub
-            -70 // Looking down at steep angle
+            0,   // north-up while scrubbing - consistent map-like orientation
+            -82  // nominal; actual orientation comes from lookAtPoint(rider)
         );
     }
 
@@ -5360,9 +5373,8 @@
         const dotPoint = getPointAlongRoute(dotDistance);
         scrubStartPoint = dotPoint ? { lng: dotPoint.lng, lat: dotPoint.lat, alt: dotPoint.alt } : null;
 
-        // Store current camera state and bearing for smooth transition
+        // Store current camera state for smooth transition
         transitionStartState = getCurrentCameraState();
-        scrubBearing = transitionStartState ? transitionStartState.bearing : 0;
 
         // Target is scrub camera at current point
         overviewTargetState = scrubStartPoint ? calculateScrubCameraState(scrubStartPoint) : calculateOverviewCameraState();
