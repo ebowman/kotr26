@@ -2708,7 +2708,8 @@
             window._terrainCache = {
                 lastElevation: null,
                 lastCameraAlt: null,
-                lastPosition: null
+                lastPosition: null,
+                smoothedMinAlt: null
             };
         }
 
@@ -2729,6 +2730,9 @@
         if (useSimplifiedCollision) {
             window._terrainCache.wasInTransition = true;
             window._terrainCache.transitionExitFrames = 0;
+            // Floor smoothing state is position-dependent - discard it during
+            // transitions/seeks so it reinitializes at the new location
+            window._terrainCache.smoothedMinAlt = null;
         } else if (window._terrainCache.wasInTransition) {
             // Just exited transition - start faster smoothing period
             window._terrainCache.wasInTransition = false;
@@ -2815,8 +2819,30 @@
                 minAltitude = Math.max(minAltitude, window._terrainCache.terrainUnavailableFloor);
             }
 
-            if (cameraAlt < minAltitude) {
-                cameraAlt = minAltitude;
+            // ASYMMETRIC FLOOR SMOOTHING
+            // The raw floor tracks per-frame terrain samples at the moving camera position,
+            // amplified 1.5x by dynamic clearance. Over rough terrain it swings by tens of
+            // meters frame-to-frame, and clamping the camera to it directly is what causes
+            // the hunting jitter. Smooth the floor itself: rise quickly (terrain safety),
+            // descend slowly (dips and noise spikes are ignored; descent looks cinematic).
+            // The camera moves ~1-3 m/frame horizontally, so terrain beneath it cannot rise
+            // faster than that on real slopes - 15 m/frame rise has ample margin within the
+            // 100m clearance budget. Post-transition/tile-load corrections use 50 m/frame
+            // to match the faster altitude smoothing used in those windows.
+            const floorRiseRate = (justExitedTransition || terrainJustBecameAvailable) ? 50 : 15;
+            const FLOOR_FALL_RATE = 0.75;
+            let smoothedFloor = window._terrainCache.smoothedMinAlt;
+            if (smoothedFloor == null) {
+                smoothedFloor = minAltitude;
+            } else if (minAltitude > smoothedFloor) {
+                smoothedFloor = Math.min(smoothedFloor + floorRiseRate, minAltitude);
+            } else {
+                smoothedFloor = Math.max(smoothedFloor - FLOOR_FALL_RATE, minAltitude);
+            }
+            window._terrainCache.smoothedMinAlt = smoothedFloor;
+
+            if (cameraAlt < smoothedFloor) {
+                cameraAlt = smoothedFloor;
                 terrainAdjusted = true;
             }
         }
@@ -2831,8 +2857,12 @@
             if (spring.position && spring.position.alt < cameraAlt) {
                 // Spring is behind where terrain collision put us - sync it up
                 spring.position.alt = cameraAlt;
-                // Also zero the altitude velocity to prevent overshoot
-                spring.velocity.alt = 0;
+                // Only cancel downward velocity. Zeroing all velocity here re-resets
+                // the spring on every clamped frame, so it can never converge while
+                // riding the floor - that perpetual reset reads as jitter on screen.
+                if (spring.velocity.alt < 0) {
+                    spring.velocity.alt = 0;
+                }
             }
         }
 
@@ -2950,6 +2980,19 @@
             cameraLng = smoothed.lng;
             cameraLat = smoothed.lat;
             cameraAlt = smoothed.alt;
+
+            // Enforce the smoothed terrain floor on the FINAL rendered altitude.
+            // The exponential smoother lags its target, so after a clamp upstream the
+            // rendered altitude can sit below the floor for seconds - which keeps the
+            // clamp engaged every frame and makes the whole pipeline hunt instead of
+            // converge. The floor itself is rate-limited above, so this clamp cannot
+            // introduce sudden jumps. Writing it back into the smoothing state stops
+            // the EMA from retaining sub-floor state that drags the camera back down.
+            const floor = window._terrainCache ? window._terrainCache.smoothedMinAlt : null;
+            if (!useSimplifiedCollision && !isCinematicHighZoom && floor != null && cameraAlt < floor) {
+                cameraAlt = floor;
+                state.alt = floor;
+            }
         }
 
         // Debug logging for camera state (computed, before final smoothing in applyCameraState)
@@ -3303,6 +3346,7 @@
             window._terrainCache.lastLng = null;
             window._terrainCache.lastLat = null;
             window._terrainCache.lastElevation = null;
+            window._terrainCache.smoothedMinAlt = null;
         }
         cameraHistory = [];
         watchdogAltitudeHistory = [];
