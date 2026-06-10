@@ -91,18 +91,28 @@ const FitParser = (function() {
             this.dataView = new DataView(buffer);
             this.offset = 0;
 
-            // Parse header
-            const header = this.parseHeader();
-            if (!header.valid) {
-                throw new Error('Invalid FIT file header');
-            }
+            // A FIT file may contain multiple chained header+data+CRC blocks
+            // (common in device-recorded activities). Parse each in sequence.
+            let blockCount = 0;
+            while (this.offset + 12 <= buffer.byteLength) {
+                const header = this.parseHeader(this.offset);
+                if (!header.valid) {
+                    if (blockCount === 0) {
+                        throw new Error('Invalid FIT file header');
+                    }
+                    break; // trailing bytes after the last chained block
+                }
+                blockCount++;
 
-            // Parse data records
-            const dataEnd = header.headerSize + header.dataSize;
-            this.offset = header.headerSize;
+                // Local message definitions do not carry across chained files
+                this.definitions = {};
 
-            while (this.offset < dataEnd) {
-                this.parseRecord();
+                const dataEnd = this.offset + header.headerSize + header.dataSize;
+                this.offset += header.headerSize;
+                while (this.offset < dataEnd) {
+                    this.parseRecord();
+                }
+                this.offset = dataEnd + 2; // skip the 2-byte CRC
             }
 
             // Build route data from parsed records
@@ -110,18 +120,18 @@ const FitParser = (function() {
         }
 
         /**
-         * Parse FIT file header
+         * Parse FIT file header at the given byte offset
          */
-        parseHeader() {
-            const headerSize = this.dataView.getUint8(0);
-            const protocolVersion = this.dataView.getUint8(1);
-            const profileVersion = this.dataView.getUint16(2, true);
-            const dataSize = this.dataView.getUint32(4, true);
+        parseHeader(base = 0) {
+            const headerSize = this.dataView.getUint8(base);
+            const protocolVersion = this.dataView.getUint8(base + 1);
+            const profileVersion = this.dataView.getUint16(base + 2, true);
+            const dataSize = this.dataView.getUint32(base + 4, true);
             const dataType = String.fromCharCode(
-                this.dataView.getUint8(8),
-                this.dataView.getUint8(9),
-                this.dataView.getUint8(10),
-                this.dataView.getUint8(11)
+                this.dataView.getUint8(base + 8),
+                this.dataView.getUint8(base + 9),
+                this.dataView.getUint8(base + 10),
+                this.dataView.getUint8(base + 11)
             );
 
             const valid = dataType === '.FIT';
@@ -145,6 +155,7 @@ const FitParser = (function() {
 
             // Check if this is a definition message or data message
             const isDefinition = (recordHeader & 0x40) !== 0;
+            const hasDeveloperFields = (recordHeader & 0x20) !== 0;
             const localMessageType = recordHeader & 0x0F;
             const isCompressedTimestamp = (recordHeader & 0x80) !== 0;
 
@@ -154,7 +165,7 @@ const FitParser = (function() {
                 const localMsgType = (recordHeader >> 5) & 0x03;
                 this.parseDataMessage(localMsgType);
             } else if (isDefinition) {
-                this.parseDefinitionMessage(localMessageType);
+                this.parseDefinitionMessage(localMessageType, hasDeveloperFields);
             } else {
                 this.parseDataMessage(localMessageType);
             }
@@ -163,7 +174,7 @@ const FitParser = (function() {
         /**
          * Parse a definition message
          */
-        parseDefinitionMessage(localMessageType) {
+        parseDefinitionMessage(localMessageType, hasDeveloperFields = false) {
             // Reserved byte
             this.offset++;
 
@@ -195,11 +206,27 @@ const FitParser = (function() {
                 });
             }
 
+            // Developer fields (FIT protocol 2.0) - present when bit 0x20 is set
+            // in the record header. We don't decode them, but we must consume their
+            // definitions here and account for their bytes in every data message,
+            // or the parse offset desyncs and everything after reads as garbage.
+            // Activity files from modern head units almost always include these.
+            let devFieldsSize = 0;
+            if (hasDeveloperFields) {
+                const numDevFields = this.dataView.getUint8(this.offset);
+                this.offset++;
+                for (let i = 0; i < numDevFields; i++) {
+                    devFieldsSize += this.dataView.getUint8(this.offset + 1);
+                    this.offset += 3; // fieldNum, size, developerDataIndex
+                }
+            }
+
             // Store definition
             this.definitions[localMessageType] = {
                 globalMessageNumber,
                 isLittleEndian,
-                fields
+                fields,
+                devFieldsSize
             };
 
         }
@@ -221,6 +248,9 @@ const FitParser = (function() {
                 const value = this.readFieldValue(field, definition.isLittleEndian);
                 data[field.fieldDefNum] = value;
             }
+
+            // Skip developer field bytes declared in the definition message
+            this.offset += definition.devFieldsSize || 0;
 
             // Store parsed data based on message type
             switch (definition.globalMessageNumber) {

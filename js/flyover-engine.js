@@ -3614,6 +3614,74 @@
         });
     }
 
+    // Cap for user-uploaded routes. Device activity files record at 1s
+    // intervals (an 8-hour ride is ~29k points); the camera path generation
+    // and Turf lookups are tuned for the course files' few thousand points.
+    const MAX_USER_ROUTE_POINTS = 5000;
+
+    /**
+     * Distance-based downsampling: keeps points at even spacing along the
+     * track (plus first and last) so dense recordings don't lose shape in
+     * slow sections and keep redundant points on straights.
+     */
+    function downsampleCoordinates(coordinates, maxPoints) {
+        if (coordinates.length <= maxPoints) return coordinates;
+
+        const GEO = window.KOTR_GEO;
+        let total = 0;
+        const cumDist = [0];
+        for (let i = 1; i < coordinates.length; i++) {
+            total += GEO.haversineKm(
+                coordinates[i - 1][1], coordinates[i - 1][0],
+                coordinates[i][1], coordinates[i][0]
+            );
+            cumDist.push(total);
+        }
+
+        const spacing = total / (maxPoints - 1);
+        const result = [coordinates[0]];
+        let nextDist = spacing;
+        for (let i = 1; i < coordinates.length - 1; i++) {
+            if (cumDist[i] >= nextDist) {
+                result.push(coordinates[i]);
+                nextDist += spacing;
+            }
+        }
+        result.push(coordinates[coordinates.length - 1]);
+        return result;
+    }
+
+    /**
+     * Load a user-uploaded route from IndexedDB (route=user:<id>).
+     * Elevation comes from the file's own GPS/barometric data - there is
+     * no pre-computed DEM sidecar for user routes.
+     */
+    async function loadUserRoute(id) {
+        if (typeof RouteStore === 'undefined') {
+            throw new Error('Route storage unavailable in this browser');
+        }
+        const stored = await RouteStore.getRoute(id);
+        if (!stored) {
+            throw new Error('Uploaded route not found - it may have been cleared from this browser');
+        }
+
+        let data;
+        if (/\.gpx$/i.test(stored.fileName)) {
+            data = GpxParser.parseGpx(new TextDecoder().decode(stored.buffer));
+        } else {
+            data = new FitParser.FitFileParser().parse(stored.buffer);
+        }
+        if (!data.coordinates || data.coordinates.length < 2) {
+            throw new Error('No GPS track found in file');
+        }
+
+        data.coordinates = downsampleCoordinates(data.coordinates, MAX_USER_ROUTE_POINTS);
+        data.pointCount = data.coordinates.length;
+        data.elevationSource = 'gps';
+        data.name = stored.name || data.name;
+        return data;
+    }
+
     /**
      * Load route from URL parameter
      */
@@ -3629,8 +3697,12 @@
         try {
             // Parse FIT file
             console.debug('Loading route file:', routeFile);
-            const loader = routeFile.endsWith('.gpx') ? GpxParser.loadGpxFile : FitParser.loadFitFile;
-            routeData = await loader(`routes/${routeFile}`);
+            if (routeFile.startsWith('user:')) {
+                routeData = await loadUserRoute(routeFile.slice(5));
+            } else {
+                const loader = routeFile.endsWith('.gpx') ? GpxParser.loadGpxFile : FitParser.loadFitFile;
+                routeData = await loader(`routes/${routeFile}`);
+            }
             console.debug('Route data loaded:', {
                 points: routeData.coordinates?.length,
                 distance: routeData.distance,
@@ -3936,7 +4008,9 @@
             'KOTR_D4_Short.fit': 'Day 4 - Luberon Loop (Short)',
             'KOTR_D4_Long.fit':  'Day 4 - Luberon Loop (Long)',
         };
-        const name = TITLES[routeFile] || routeFile.replace(/\.(fit|gpx)$/, '').replace(/_/g, ' ');
+        const name = TITLES[routeFile] ||
+            (routeFile.startsWith('user:') && routeData && routeData.name) ||
+            routeFile.replace(/\.(fit|gpx)$/, '').replace(/_/g, ' ');
         document.getElementById('route-title').textContent = name;
     }
 
@@ -6884,7 +6958,100 @@
         back.style.color = '#E6B800';
         back.textContent = '← Back to Routes';
         wrap.append(icon, msg, back);
+
+        // Offer a way forward: upload a route directly
+        if (typeof RouteStore !== 'undefined') {
+            const upload = document.createElement('div');
+            upload.style.marginTop = '20px';
+            const label = document.createElement('label');
+            label.style.cssText = 'color: #E6B800; cursor: pointer; text-decoration: underline; font-size: 15px;';
+            label.textContent = '…or upload your own .fit / .gpx file';
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = '.fit,.gpx';
+            input.style.display = 'none';
+            input.addEventListener('change', () => {
+                if (input.files && input.files[0]) handleRouteUpload(input.files[0]);
+            });
+            label.appendChild(input);
+            upload.appendChild(label);
+            wrap.appendChild(upload);
+        }
         overlay.appendChild(wrap);
+    }
+
+    /**
+     * Transient message for upload problems (invalid file type, etc.)
+     */
+    function showUploadToast(message) {
+        const toast = document.createElement('div');
+        toast.style.cssText = 'position: fixed; bottom: 90px; left: 50%; transform: translateX(-50%); ' +
+            'background: rgba(20, 18, 14, 0.92); color: #E6B800; padding: 12px 20px; border-radius: 8px; ' +
+            'font-size: 15px; z-index: 10001; pointer-events: none;';
+        toast.textContent = message;
+        document.body.appendChild(toast);
+        setTimeout(() => toast.remove(), 3500);
+    }
+
+    /**
+     * Store a user-selected route file and reload the flyover pointing at it.
+     */
+    async function handleRouteUpload(file) {
+        const problem = RouteStore.validateFile(file);
+        if (problem) {
+            showUploadToast(problem);
+            return;
+        }
+        try {
+            const id = await RouteStore.saveRoute(file);
+            window.location.href = `flyover.html?route=user:${id}`;
+        } catch (e) {
+            console.error('Route upload failed:', e);
+            showUploadToast(`Could not store route: ${e.message}`);
+        }
+    }
+
+    /**
+     * Accept .fit/.gpx files dragged onto the page
+     */
+    function setupRouteUpload() {
+        if (typeof RouteStore === 'undefined') return;
+
+        let hint = null;
+        let dragDepth = 0;
+
+        function showHint() {
+            if (hint) return;
+            hint = document.createElement('div');
+            hint.style.cssText = 'position: fixed; inset: 0; z-index: 10000; display: flex; ' +
+                'align-items: center; justify-content: center; background: rgba(20, 18, 14, 0.8); ' +
+                'color: #E6B800; font-size: 24px; pointer-events: none; ' +
+                'border: 3px dashed #E6B800; box-sizing: border-box;';
+            hint.textContent = 'Drop a .fit or .gpx file to fly over it';
+            document.body.appendChild(hint);
+        }
+        function hideHint() {
+            if (hint) { hint.remove(); hint = null; }
+        }
+
+        document.addEventListener('dragenter', (e) => {
+            if (!e.dataTransfer || !Array.from(e.dataTransfer.types).includes('Files')) return;
+            e.preventDefault();
+            dragDepth++;
+            showHint();
+        });
+        document.addEventListener('dragover', (e) => e.preventDefault());
+        document.addEventListener('dragleave', () => {
+            dragDepth = Math.max(0, dragDepth - 1);
+            if (dragDepth === 0) hideHint();
+        });
+        document.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dragDepth = 0;
+            hideHint();
+            const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+            if (file) handleRouteUpload(file);
+        });
     }
 
     /**
@@ -6892,6 +7059,7 @@
      */
     function init() {
         initMap();
+        setupRouteUpload();
     }
 
     // Start when DOM is ready

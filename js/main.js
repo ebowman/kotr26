@@ -2315,6 +2315,35 @@
     /**
      * Initialize everything on DOM ready
      */
+    /**
+     * Wire up the "upload your own route" control: store the file in
+     * IndexedDB via RouteStore and open the flyover pointing at it.
+     */
+    function setupRouteUpload() {
+        const input = document.getElementById('route-upload-input');
+        const status = document.getElementById('route-upload-status');
+        if (!input || typeof RouteStore === 'undefined') return;
+
+        input.addEventListener('change', async () => {
+            const file = input.files && input.files[0];
+            const problem = RouteStore.validateFile(file);
+            if (problem) {
+                if (status) status.textContent = problem;
+                input.value = '';
+                return;
+            }
+            try {
+                if (status) status.textContent = 'Storing route…';
+                const id = await RouteStore.saveRoute(file);
+                window.location.href = `flyover.html?route=user:${id}`;
+            } catch (e) {
+                console.error('Route upload failed:', e);
+                if (status) status.textContent = `Could not store route: ${e.message}`;
+                input.value = '';
+            }
+        });
+    }
+
     async function init() {
         // Load real elevation profiles before rendering cards
         await loadElevationProfiles();
@@ -2324,6 +2353,7 @@
 
         initOverviewMap();
         setupRouteOptions();
+        setupRouteUpload();
         setupFlyoverButtons();
         setupDownloadButtons();
         setupDropdownToggles();
