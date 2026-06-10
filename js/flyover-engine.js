@@ -5354,9 +5354,19 @@
         );
     }
 
+    // Time-based scrub transitions. The previous implementation applied the
+    // target state directly with isTransitioning=true, which SKIPS the rate
+    // caps in applyCameraState - both "animations" were actually hard cuts
+    // completing in 1-2 frames, partially masked (and then snapped) by the
+    // seek-grace altitude lock. These are real eased lerps instead.
+    const SCRUB_ZOOM_UP_MS = 900;
+    const SCRUB_ZOOM_DOWN_MS = 1500;
+    let scrubLerpStart = 0;        // performance.now() when the lerp began
+    let scrubLerpFromState = null; // camera state the lerp started from
+
     /**
      * Start transition to overview mode when scrubber drag begins
-     * Google Earth style: fast zoom UP to fixed altitude
+     * Google Earth style: smooth eased rise to scrub altitude
      */
     function startOverviewTransition() {
         overviewTransitionProgress = 0;
@@ -5373,55 +5383,42 @@
         const dotPoint = getPointAlongRoute(dotDistance);
         scrubStartPoint = dotPoint ? { lng: dotPoint.lng, lat: dotPoint.lat, alt: dotPoint.alt } : null;
 
-        // Store current camera state for smooth transition
+        // Lerp starts from the actual rendered camera
         transitionStartState = getCurrentCameraState();
+        scrubLerpFromState = transitionStartState;
+        scrubLerpStart = performance.now();
+        scrubAltSmoothed = null;
+        scrubAltTime = performance.now();
 
         // Target is scrub camera at current point
         overviewTargetState = scrubStartPoint ? calculateScrubCameraState(scrubStartPoint) : calculateOverviewCameraState();
 
-        // Start fast zoom-up animation
         animateScrubZoomUp();
     }
 
     /**
-     * Fast zoom-up animation for Google Earth-style scrubbing
+     * Eased rise to scrub altitude. The target is recomputed from the live
+     * scrub position each frame so dragging during the rise stays tracked.
      */
     function animateScrubZoomUp() {
         const dotDistance = progress * totalDistance;
         const dotPoint = getPointAlongRoute(dotDistance);
 
-        if (dotPoint && transitionStartState) {
-            const currentPoint = { lng: dotPoint.lng, lat: dotPoint.lat, alt: dotPoint.alt };
-            const targetState = calculateScrubCameraState(currentPoint);
+        if (dotPoint && scrubLerpFromState) {
+            const t = Math.min(1, (performance.now() - scrubLerpStart) / SCRUB_ZOOM_UP_MS);
+            const targetState = calculateScrubCameraState(
+                { lng: dotPoint.lng, lat: dotPoint.lat, alt: dotPoint.alt });
+            const frameState = lerpCameraState(scrubLerpFromState, targetState, easeInOutCubic(t));
 
-            // Calculate remaining distance from current applied state to target
-            const lastApplied = _lastAppliedState || transitionStartState;
-            const altDist = Math.abs(lastApplied.alt - targetState.alt);
-            const cosLat = Math.cos(targetState.lat * Math.PI / 180);
-            const lngDistM = Math.abs(lastApplied.lng - targetState.lng) * 111000 * cosLat;
-            const latDistM = Math.abs(lastApplied.lat - targetState.lat) * 111000;
-            const posDistM = Math.sqrt(lngDistM * lngDistM + latDistM * latDistM);
+            applyCameraState(frameState, dotPoint, true);
+            updateDotAndUI(dotPoint);
 
-            // Smoothing limits (same as applyCameraState)
-            // Altitude scales DOWN with zoom, position scales UP with zoom
-            const altZoomFactor = Math.max(0.33, 1 / zoomLevel);
-            const posZoomFactor = Math.max(1, zoomLevel);
-            const maxAltPerFrame = 15 * altZoomFactor;
-            const maxPosPerFrame = 8 * posZoomFactor;
-
-            // Check if close enough to target
-            const closeEnough = altDist < maxAltPerFrame * 2 && posDistM < maxPosPerFrame * 2;
-
-            if (closeEnough) {
-                // Transition complete - snap to target
-                applyCameraState(targetState, dotPoint, false);
+            if (t >= 1) {
                 overviewTransitionProgress = 1;
                 overviewTargetState = targetState;
-            } else {
-                // Still transitioning - apply target directly, smoothing will cap movement
-                applyCameraState(targetState, dotPoint, true);
             }
-            updateDotAndUI(dotPoint);
+        } else {
+            overviewTransitionProgress = 1;
         }
 
         // Continue if not done and still dragging
@@ -5433,15 +5430,15 @@
     }
 
     /**
-     * Smooth zoom-down animation when scrubbing ends
-     * Uses direct-to-target approach - the smoothing in applyCameraState handles the rate
+     * Eased swoop down to the normal camera when scrubbing ends (paused case).
+     * Lerps from the rendered camera at release to the live, terrain-collided
+     * chase target, then hands the smoothing pipeline the final applied state.
      */
     function animateScrubZoomDown() {
         const dotDistance = progress * totalDistance;
         const dotPoint = getPointAlongRoute(dotDistance);
 
-        if (dotPoint) {
-            // Calculate target camera state (where we want to end up)
+        if (dotPoint && scrubLerpFromState) {
             const directionDistance = Math.min(dotDistance + CONFIG.lookAheadDistance / 1000, totalDistance);
             const directionPoint = getPointAlongRoute(directionDistance);
             const normalCameraState = directionPoint
@@ -5449,32 +5446,26 @@
                 : null;
 
             if (normalCameraState) {
-                // Calculate remaining distance from current applied state to target
-                const lastApplied = _lastAppliedState || overviewTargetState || normalCameraState;
-                const altDist = Math.abs(lastApplied.alt - normalCameraState.alt);
-                const cosLat = Math.cos(normalCameraState.lat * Math.PI / 180);
-                const lngDistM = Math.abs(lastApplied.lng - normalCameraState.lng) * 111000 * cosLat;
-                const latDistM = Math.abs(lastApplied.lat - normalCameraState.lat) * 111000;
-                const posDistM = Math.sqrt(lngDistM * lngDistM + latDistM * latDistM);
+                // Keep the lerp target above terrain. Note Mapbox itself
+                // enforces a minimum camera height over (exaggerated) terrain
+                // and silently raises anything below it; colliding the target
+                // here keeps our state consistent with what actually renders.
+                const collision = applyTerrainCollision(
+                    normalCameraState.lng, normalCameraState.lat,
+                    normalCameraState.alt, dotPoint.alt);
+                normalCameraState.alt = collision.altitude;
 
-                // Smoothing limits (same as applyCameraState)
-                // Altitude scales DOWN with zoom, position scales UP with zoom
-                const altZoomFactor = Math.max(0.33, 1 / zoomLevel);
-                const posZoomFactor = Math.max(1, zoomLevel);
-                const maxAltPerFrame = 15 * altZoomFactor;
-                const maxPosPerFrame = 8 * posZoomFactor;
+                const t = Math.min(1, (performance.now() - scrubLerpStart) / SCRUB_ZOOM_DOWN_MS);
+                const frameState = lerpCameraState(scrubLerpFromState, normalCameraState, easeInOutCubic(t));
 
-                // Check if close enough to target
-                const closeEnough = altDist < maxAltPerFrame * 2 && posDistM < maxPosPerFrame * 2;
-
-                if (closeEnough) {
-                    // Transition complete - snap to target
-                    applyCameraState(normalCameraState, dotPoint, false);
+                if (t >= 1) {
                     overviewTransitionProgress = 0;
+                    applyCameraState(frameState, dotPoint, false);
                 } else {
-                    // Still transitioning - apply target directly, smoothing will cap movement
-                    applyCameraState(normalCameraState, dotPoint, true);
+                    applyCameraState(frameState, dotPoint, true);
                 }
+            } else {
+                overviewTransitionProgress = 0;
             }
             updateDotAndUI(dotPoint);
         } else {
@@ -5485,21 +5476,27 @@
         if (overviewTransitionProgress > 0) {
             scrubAnimationId = requestAnimationFrame(animateScrubZoomDown);
         } else {
-            // Clean up - reset caches and start settling period
-            // Settling period skips terrain collision to prevent jitter
+            // Hand off to the normal pipeline from the state that actually
+            // rendered, so playback resumes without a snap
             scrubAnimationId = null;
             overviewTransitionProgress = 0;
             transitionStartState = null;
             overviewTargetState = null;
             shouldReturnFromOverview = false;
             resetCameraCaches();
+            const finalState = getCurrentCameraState();
+            const dotNow = getPointAlongRoute(progress * totalDistance);
+            if (finalState && dotNow) {
+                seedSmoothingFromApplied(finalState, dotNow);
+            }
             settlingFramesRemaining = SETTLING_DURATION;
+            scrubLerpFromState = null;
         }
     }
 
     /**
      * End overview transition when scrubber drag ends
-     * Google Earth style: fast swoop DOWN to normal camera
+     * Google Earth style: smooth swoop DOWN to normal camera
      */
     function endOverviewTransition() {
         scrubStartPoint = null;
@@ -5510,13 +5507,10 @@
             scrubAnimationId = null;
         }
 
-        // Store current overview state for the swoop-down
+        // Swoop starts from the actual rendered camera at release
         overviewTargetState = getCurrentCameraState();
-
-        // Trigger adaptive smoothing for faster altitude descent after scrub
-        // The scrub altitude change is large (often 2000m+), so we want fast catch-up
-        _seekTimestamp = performance.now();
-        _seekDistance = SCRUB_ALTITUDE; // Use scrub altitude as the "seek distance" for adaptive smoothing
+        scrubLerpFromState = overviewTargetState;
+        scrubLerpStart = performance.now();
 
         if (!isPlaying) {
             // When paused, swoop down to normal camera at current position
@@ -5532,6 +5526,14 @@
             transitionStartState = overviewTargetState;
         }
     }
+
+    // Rate-limited altitude while dragging. Horizontal tracking stays instant
+    // (that's what makes scrubbing feel direct), but the scrub altitude rides
+    // on the dot's elevation - dragging across a mountain would otherwise
+    // step the camera by hundreds of meters between mousemove events.
+    let scrubAltSmoothed = null;
+    let scrubAltTime = 0;
+    const SCRUB_ALT_RATE = 2500; // m/s max altitude change while dragging
 
     /**
      * Seek to position during scrubber drag
@@ -5554,8 +5556,24 @@
             if (overviewTransitionProgress < 1 && scrubAnimationId) {
                 // Animation is handling it
             } else {
-                // At scrub altitude: INSTANT tracking of the dot (Google Earth style)
-                // No lerping here - camera should snap to target position immediately
+                // At scrub altitude: instant horizontal tracking, rate-limited altitude
+                const now = performance.now();
+                // dt clamped to one 30fps frame so a yank after an idle gap
+                // can't step more than ~83m in a single event
+                const dt = Math.min(1 / 30, (now - scrubAltTime) / 1000);
+                scrubAltTime = now;
+                if (scrubAltSmoothed === null) {
+                    // Seed from the rendered camera, NOT the new target -
+                    // otherwise the first drag event after the zoom-up jumps
+                    // the full altitude difference in a single frame
+                    const current = getCurrentCameraState();
+                    scrubAltSmoothed = current ? current.alt : newTargetState.alt;
+                }
+                const diff = newTargetState.alt - scrubAltSmoothed;
+                const maxStep = SCRUB_ALT_RATE * dt;
+                scrubAltSmoothed += Math.abs(diff) <= maxStep ? diff : Math.sign(diff) * maxStep;
+                newTargetState.alt = scrubAltSmoothed;
+
                 applyCameraState(newTargetState, dotPoint, true); // isTransitioning=true during scrub
                 overviewTargetState = newTargetState;
             }
@@ -6653,7 +6671,7 @@
             // Use time-based lerp from transition start to current target.
             // This avoids the "chasing a moving target" problem that caused jitter.
             // The transition lasts a fixed duration, then snaps to target.
-            const transitionDuration = 0.5; // seconds
+            const transitionDuration = 0.8; // seconds
 
             // Track transition progress using a counter (frames elapsed)
             if (!window._overviewReturnFrames) {
@@ -6675,6 +6693,9 @@
                 overviewTargetState = null;
                 window._overviewReturnFrames = 0;
                 resetCameraCaches();
+                // Seed the smoothing pipeline from the applied state so the
+                // next normal frame continues without a snap
+                seedSmoothingFromApplied(finalState, dotPoint);
                 settlingFramesRemaining = SETTLING_DURATION;
 
                 applyCameraState(finalState, dotPoint, false);
