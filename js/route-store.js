@@ -85,6 +85,26 @@ const RouteStore = (function() {
             .sort((a, b) => b.addedAt - a.addedAt);
     }
 
+    /**
+     * Merge fields into a stored route record (e.g. { compareWith: 'KOTR_D3_Long.fit' }).
+     * Silently does nothing if the route no longer exists.
+     */
+    async function updateRoute(id, fields) {
+        const db = await openDb();
+        const tx = db.transaction(STORE, 'readwrite');
+        const store = tx.objectStore(STORE);
+        const record = await requestToPromise(store.get(id));
+        if (record) {
+            Object.assign(record, fields);
+            store.put(record);
+        }
+        await new Promise((resolve, reject) => {
+            tx.oncomplete = resolve;
+            tx.onerror = () => reject(tx.error || new Error('Failed to update route'));
+        });
+        db.close();
+    }
+
     async function deleteRoute(id) {
         const db = await openDb();
         const tx = db.transaction(STORE, 'readwrite');
@@ -111,6 +131,7 @@ const RouteStore = (function() {
         saveRoute,
         getRoute,
         listRoutes,
+        updateRoute,
         deleteRoute,
         validateFile
     };

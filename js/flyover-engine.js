@@ -3723,6 +3723,9 @@
         data.pointCount = data.coordinates.length;
         data.elevationSource = 'gps';
         data.name = stored.name || data.name;
+        // For planned-vs-actual comparison: persistence id + saved choice
+        data.userRouteId = id;
+        data.compareWith = stored.compareWith;
         return data;
     }
 
@@ -3810,6 +3813,10 @@
 
             // Handle URL parameters for position and mode (for debugging)
             applyUrlParameters(params);
+
+            // Planned vs actual comparison (user-uploaded routes only).
+            // Runs async after load - auto-match fetches the planned courses.
+            setupComparison(routeFile).catch(e => console.warn('Comparison setup failed:', e));
 
         } catch (error) {
             console.error('Failed to load route:', error);
@@ -4040,19 +4047,405 @@
     /**
      * Update route info in UI
      */
-    function updateRouteInfo(routeFile) {
-        // Canonical titles for the 7 new .fit files. Falls back to a
-        // prettified filename if an unknown route is loaded.
-        const TITLES = {
-            'KOTR_D1.fit':       'Day 1 - Shake Out the Travel Legs',
-            'KOTR_D2_Short.fit': 'Day 2 - NW Provence (Short)',
-            'KOTR_D2_Long.fit':  'Day 2 - NW Provence (Long)',
-            'KOTR_D3_Short.fit': 'Day 3 - Mazan Loop',
-            'KOTR_D3_Long.fit':  'Day 3 - Mont Ventoux',
-            'KOTR_D4_Short.fit': 'Day 4 - Luberon Loop (Short)',
-            'KOTR_D4_Long.fit':  'Day 4 - Luberon Loop (Long)',
+    // Canonical titles for the 7 planned course files. Used for the route
+    // header and as the catalog for planned-vs-actual comparison.
+    const ROUTE_TITLES = {
+        'KOTR_D1.fit':       'Day 1 - Shake Out the Travel Legs',
+        'KOTR_D2_Short.fit': 'Day 2 - NW Provence (Short)',
+        'KOTR_D2_Long.fit':  'Day 2 - NW Provence (Long)',
+        'KOTR_D3_Short.fit': 'Day 3 - Mazan Loop',
+        'KOTR_D3_Long.fit':  'Day 3 - Mont Ventoux',
+        'KOTR_D4_Short.fit': 'Day 4 - Luberon Loop (Short)',
+        'KOTR_D4_Long.fit':  'Day 4 - Luberon Loop (Long)',
+    };
+
+    // =========================================================================
+    // PLANNED VS ACTUAL ROUTE COMPARISON
+    //
+    // For user-uploaded rides: overlay a planned KOTR route as a dashed ghost
+    // line, highlight where the actual track left the planned corridor, and
+    // show planned-vs-ridden stats. The actual track stays the primary route
+    // (the rider dot flies it); the planned route is a static overlay.
+    // =========================================================================
+
+    const COMPARE_CORRIDOR_M = 60;   // distance from planned line that counts as "on route"
+    const COMPARE_CELL_M = 250;      // spatial grid cell for segment lookups
+    const COMPARE_MATCH_THRESHOLD_M = 400;  // mean sampled distance for auto-match
+
+    const comparisonState = { plannedFile: null, plannedData: null, result: null };
+    const _plannedRouteCache = new Map();
+
+    async function loadPlannedRoute(file) {
+        if (_plannedRouteCache.has(file)) return _plannedRouteCache.get(file);
+        const loader = file.endsWith('.gpx') ? GpxParser.loadGpxFile : FitParser.loadFitFile;
+        const data = await loader(`routes/${file}`);
+        if (!data.coordinates || data.coordinates.length < 2) {
+            throw new Error('No coordinates in planned route');
+        }
+        _plannedRouteCache.set(file, data);
+        return data;
+    }
+
+    // --- Geometry helpers (local equirectangular projection in meters) ---
+
+    function projectTrack(coords, lat0) {
+        const kx = Math.cos(lat0 * Math.PI / 180) * 111320;
+        const ky = 110540;
+        const pts = new Array(coords.length);
+        for (let i = 0; i < coords.length; i++) {
+            pts[i] = [coords[i][0] * kx, coords[i][1] * ky];
+        }
+        return pts;
+    }
+
+    function distPointToSegment(px, py, a, b) {
+        const dx = b[0] - a[0], dy = b[1] - a[1];
+        const lenSq = dx * dx + dy * dy;
+        let t = lenSq ? ((px - a[0]) * dx + (py - a[1]) * dy) / lenSq : 0;
+        t = Math.max(0, Math.min(1, t));
+        const qx = a[0] + t * dx, qy = a[1] + t * dy;
+        return Math.hypot(px - qx, py - qy);
+    }
+
+    // Index polyline segments into a coarse grid so per-point distance checks
+    // only touch nearby segments (5000 actual x several thousand planned
+    // points would otherwise be tens of millions of segment tests).
+    function buildSegmentGrid(pts, cell) {
+        const grid = new Map();
+        for (let i = 0; i < pts.length - 1; i++) {
+            const x0 = Math.floor(Math.min(pts[i][0], pts[i + 1][0]) / cell);
+            const x1 = Math.floor(Math.max(pts[i][0], pts[i + 1][0]) / cell);
+            const y0 = Math.floor(Math.min(pts[i][1], pts[i + 1][1]) / cell);
+            const y1 = Math.floor(Math.max(pts[i][1], pts[i + 1][1]) / cell);
+            for (let cx = x0; cx <= x1; cx++) {
+                for (let cy = y0; cy <= y1; cy++) {
+                    const key = cx + ':' + cy;
+                    let arr = grid.get(key);
+                    if (!arr) grid.set(key, arr = []);
+                    arr.push(i);
+                }
+            }
+        }
+        return grid;
+    }
+
+    function minDistToPolyline(px, py, pts, grid, cell) {
+        const cx = Math.floor(px / cell), cy = Math.floor(py / cell);
+        let best = Infinity;
+        for (let dx = -1; dx <= 1; dx++) {
+            for (let dy = -1; dy <= 1; dy++) {
+                const arr = grid.get((cx + dx) + ':' + (cy + dy));
+                if (!arr) continue;
+                for (const i of arr) {
+                    const d = distPointToSegment(px, py, pts[i], pts[i + 1]);
+                    if (d < best) best = d;
+                }
+            }
+        }
+        return best;
+    }
+
+    // Absorb runs shorter than minRun into their surroundings so single-point
+    // GPS blips don't paint isolated on/off flecks along the track.
+    function cleanMask(mask, minRun) {
+        const out = mask.slice();
+        let i = 0;
+        while (i < out.length) {
+            let j = i;
+            while (j < out.length && out[j] === out[i]) j++;
+            if (j - i < minRun && i > 0 && j < out.length) {
+                for (let k = i; k < j; k++) out[k] = out[i - 1];
+            }
+            i = j;
+        }
+        return out;
+    }
+
+    /**
+     * Compare the actual track against a planned route.
+     * Returns off-route GeoJSON features plus coverage / distance stats.
+     */
+    function computeComparison(actualCoords, plannedCoords) {
+        const GEO = window.KOTR_GEO;
+        const lat0 = actualCoords[0][1];
+        const A = projectTrack(actualCoords, lat0);
+        const P = projectTrack(plannedCoords, lat0);
+
+        // Which actual points sit inside the planned corridor
+        const gridP = buildSegmentGrid(P, COMPARE_CELL_M);
+        let offMask = new Array(A.length);
+        for (let i = 0; i < A.length; i++) {
+            offMask[i] = minDistToPolyline(A[i][0], A[i][1], P, gridP, COMPARE_CELL_M) > COMPARE_CORRIDOR_M;
+        }
+        offMask = cleanMask(offMask, 3);
+
+        // Off-route line features (run boundaries extended one point each way
+        // so the highlight connects visually to the on-route line)
+        const offFeatures = [];
+        let offKm = 0;
+        let i = 0;
+        while (i < offMask.length) {
+            if (!offMask[i]) { i++; continue; }
+            let j = i;
+            while (j < offMask.length && offMask[j]) j++;
+            const s = Math.max(0, i - 1), e = Math.min(actualCoords.length - 1, j);
+            offFeatures.push({
+                type: 'Feature',
+                properties: {},
+                geometry: {
+                    type: 'LineString',
+                    coordinates: actualCoords.slice(s, e + 1).map(c => [c[0], c[1]])
+                }
+            });
+            for (let k = i; k < j - 1; k++) {
+                offKm += GEO.haversineKm(
+                    actualCoords[k][1], actualCoords[k][0],
+                    actualCoords[k + 1][1], actualCoords[k + 1][0]
+                );
+            }
+            i = j;
+        }
+
+        // How much of the PLANNED route the ride covered
+        const gridA = buildSegmentGrid(A, COMPARE_CELL_M);
+        let covered = 0;
+        for (let k = 0; k < P.length; k++) {
+            if (minDistToPolyline(P[k][0], P[k][1], A, gridA, COMPARE_CELL_M) <= COMPARE_CORRIDOR_M) covered++;
+        }
+
+        return {
+            offFeatures,
+            offKm,
+            coveragePct: Math.round((covered / P.length) * 100)
         };
-        const name = TITLES[routeFile] ||
+    }
+
+    /**
+     * Mean distance from sampled actual points to a planned route - used to
+     * auto-detect which planned route a ride corresponds to.
+     */
+    function meanDistanceToPlanned(actualCoords, plannedCoords) {
+        const lat0 = actualCoords[0][1];
+        const A = projectTrack(actualCoords, lat0);
+        const P = projectTrack(plannedCoords, lat0);
+        const grid = buildSegmentGrid(P, COMPARE_CELL_M);
+        const samples = 25;
+        let sum = 0;
+        for (let s = 0; s < samples; s++) {
+            const idx = Math.floor((s / (samples - 1)) * (A.length - 1));
+            const d = minDistToPolyline(A[idx][0], A[idx][1], P, grid, COMPARE_CELL_M);
+            // Grid lookup only sees ~250m around the point; beyond that just
+            // treat it as "far" rather than scanning every segment.
+            sum += isFinite(d) ? d : 2000;
+        }
+        return sum / samples;
+    }
+
+    async function autoMatchPlannedRoute() {
+        const files = Object.keys(ROUTE_TITLES);
+        const loaded = await Promise.all(files.map(async f => {
+            try { return { file: f, data: await loadPlannedRoute(f) }; }
+            catch (e) { return null; }
+        }));
+        let best = null;
+        for (const r of loaded) {
+            if (!r) continue;
+            const score = meanDistanceToPlanned(routeData.coordinates, r.data.coordinates);
+            if (score < COMPARE_MATCH_THRESHOLD_M && (!best || score < best.score)) {
+                best = { file: r.file, score };
+            }
+        }
+        return best ? best.file : null;
+    }
+
+    // --- Map layers ---
+
+    function removeComparisonLayers() {
+        for (const id of ['planned-route-line', 'off-route-line']) {
+            if (map.getLayer(id)) map.removeLayer(id);
+        }
+        for (const id of ['planned-route', 'off-route']) {
+            if (map.getSource(id)) map.removeSource(id);
+        }
+    }
+
+    function addComparisonLayers(plannedData, offFeatures) {
+        removeComparisonLayers();
+
+        map.addSource('planned-route', {
+            type: 'geojson',
+            data: turf.lineString(plannedData.coordinates.map(c => [c[0], c[1]]))
+        });
+        // Ghost line: white dashed, drawn UNDER the actual route
+        map.addLayer({
+            id: 'planned-route-line',
+            type: 'line',
+            source: 'planned-route',
+            paint: {
+                'line-color': '#FFFFFF',
+                'line-width': 4,
+                'line-opacity': 0.75,
+                'line-dasharray': [1.5, 2]
+            },
+            layout: { 'line-cap': 'butt', 'line-join': 'round' }
+        }, 'route-line');
+
+        map.addSource('off-route', {
+            type: 'geojson',
+            data: { type: 'FeatureCollection', features: offFeatures }
+        });
+        // Deviations: drawn OVER the actual route, under the rider dot
+        map.addLayer({
+            id: 'off-route-line',
+            type: 'line',
+            source: 'off-route',
+            paint: {
+                'line-color': '#FF4D6D',
+                'line-width': 7,
+                'line-opacity': 0.95
+            },
+            layout: { 'line-cap': 'round', 'line-join': 'round' }
+        }, 'current-position');
+    }
+
+    // --- Stats panel ---
+
+    function formatElapsed(seconds) {
+        const h = Math.floor(seconds / 3600);
+        const m = Math.round((seconds % 3600) / 60);
+        return h > 0 ? `${h}h ${String(m).padStart(2, '0')}m` : `${m}m`;
+    }
+
+    function getElapsedSeconds(records) {
+        if (!records || !records.length) return null;
+        let first = null, last = null;
+        for (const r of records) {
+            if (r.timestamp != null) {
+                if (first === null) first = r.timestamp;
+                last = r.timestamp;
+            }
+        }
+        return (first !== null && last > first) ? last - first : null;
+    }
+
+    function renderComparisonStats(plannedData, result) {
+        const el = document.getElementById('compare-stats');
+        if (!el) return;
+        const elapsed = getElapsedSeconds(routeData.records);
+        const lines = [
+            `<div class="cmp-line"><span class="cmp-label">Planned</span>` +
+                `<span>${plannedData.distance.toFixed(1)} km · ${plannedData.elevationGain} m ↑</span></div>`,
+            `<div class="cmp-line"><span class="cmp-label">Ridden</span>` +
+                `<span>${routeData.distance.toFixed(1)} km · ${routeData.elevationGain} m ↑</span></div>`
+        ];
+        if (elapsed !== null) {
+            lines.push(`<div class="cmp-line"><span class="cmp-label">Time</span>` +
+                `<span>${formatElapsed(elapsed)}</span></div>`);
+        }
+        const offText = result.offKm >= 0.05
+            ? `${result.coveragePct}% · ${result.offKm.toFixed(1)} km off-route`
+            : `${result.coveragePct}%`;
+        lines.push(`<div class="cmp-line"><span class="cmp-label">Coverage</span><span>${offText}</span></div>`);
+        lines.push(
+            `<div class="compare-legend">` +
+            `<span><span class="legend-swatch legend-planned"></span>planned</span>` +
+            `<span><span class="legend-swatch legend-offroute"></span>off-route</span>` +
+            `</div>`
+        );
+        el.innerHTML = lines.join('');
+        el.hidden = false;
+    }
+
+    // --- Enable / disable / setup ---
+
+    async function enableComparison(plannedFile, persist) {
+        if (!ROUTE_TITLES[plannedFile]) return;
+        const plannedData = await loadPlannedRoute(plannedFile);
+        const result = computeComparison(routeData.coordinates, plannedData.coordinates);
+
+        comparisonState.plannedFile = plannedFile;
+        comparisonState.plannedData = plannedData;
+        comparisonState.result = result;
+
+        addComparisonLayers(plannedData, result.offFeatures);
+        renderComparisonStats(plannedData, result);
+
+        const select = document.getElementById('compare-select');
+        if (select) select.value = plannedFile;
+
+        if (persist && routeData.userRouteId && typeof RouteStore !== 'undefined') {
+            RouteStore.updateRoute(routeData.userRouteId, { compareWith: plannedFile }).catch(() => {});
+        }
+    }
+
+    function disableComparison(persist) {
+        removeComparisonLayers();
+        comparisonState.plannedFile = null;
+        comparisonState.plannedData = null;
+        comparisonState.result = null;
+
+        const stats = document.getElementById('compare-stats');
+        if (stats) { stats.hidden = true; stats.innerHTML = ''; }
+        const select = document.getElementById('compare-select');
+        if (select) select.value = '';
+
+        // Empty string = user explicitly turned comparison off (vs undefined =
+        // never chosen, which allows auto-match on next load)
+        if (persist && routeData.userRouteId && typeof RouteStore !== 'undefined') {
+            RouteStore.updateRoute(routeData.userRouteId, { compareWith: '' }).catch(() => {});
+        }
+    }
+
+    /**
+     * Show the comparison panel for user-uploaded routes. Restores a saved
+     * choice, otherwise tries to auto-match the ride to a planned route.
+     */
+    async function setupComparison(routeFile) {
+        const panel = document.getElementById('compare-panel');
+        const select = document.getElementById('compare-select');
+        if (!panel || !select) return;
+
+        if (!routeFile.startsWith('user:')) {
+            panel.hidden = true;
+            return;
+        }
+
+        if (select.options.length <= 1) {
+            for (const [file, title] of Object.entries(ROUTE_TITLES)) {
+                const opt = document.createElement('option');
+                opt.value = file;
+                opt.textContent = title;
+                select.appendChild(opt);
+            }
+            select.addEventListener('change', () => {
+                if (select.value) {
+                    enableComparison(select.value, true).catch(e => {
+                        console.warn('Comparison failed:', e);
+                        showUploadToast('Could not load planned route for comparison');
+                    });
+                } else {
+                    disableComparison(true);
+                }
+            });
+        }
+        panel.hidden = false;
+
+        if (routeData.compareWith && ROUTE_TITLES[routeData.compareWith]) {
+            // Saved choice from a previous session
+            await enableComparison(routeData.compareWith, false);
+        } else if (routeData.compareWith === undefined || routeData.compareWith === null) {
+            // Never chosen - try to recognize the ride
+            const match = await autoMatchPlannedRoute();
+            if (match) {
+                await enableComparison(match, true);
+                showUploadToast(`Looks like ${ROUTE_TITLES[match]} — planned route shown as dashed line`);
+            }
+        }
+        // compareWith === '' means the user turned it off; leave it off
+    }
+
+    function updateRouteInfo(routeFile) {
+        const name = ROUTE_TITLES[routeFile] ||
             (routeFile.startsWith('user:') && routeData && routeData.name) ||
             routeFile.replace(/\.(fit|gpx)$/, '').replace(/_/g, ' ');
         document.getElementById('route-title').textContent = name;

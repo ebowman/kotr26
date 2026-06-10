@@ -110,6 +110,95 @@
             font-size: 0.875rem;
         }
 
+        /* Planned vs actual comparison panel (user-uploaded routes only) */
+        .compare-panel {
+            position: fixed;
+            top: 160px;  /* below the camera-mode (80px) and zoom (120px) indicators */
+            left: var(--space-md);
+            z-index: 90;
+            background: rgba(0, 0, 0, 0.55);
+            backdrop-filter: blur(6px);
+            -webkit-backdrop-filter: blur(6px);
+            border-radius: 10px;
+            padding: 10px 12px;
+            font-size: 0.8125rem;
+            max-width: 280px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+        }
+
+        .compare-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .compare-row label {
+            opacity: 0.85;
+            white-space: nowrap;
+        }
+
+        .compare-row select {
+            background: rgba(255,255,255,0.12);
+            color: white;
+            border: 1px solid rgba(255,255,255,0.25);
+            border-radius: 6px;
+            padding: 3px 6px;
+            font-size: 0.8125rem;
+            max-width: 160px;
+        }
+
+        .compare-row select option {
+            background: #1a1a1a;
+        }
+
+        .compare-stats {
+            margin-top: 8px;
+            line-height: 1.5;
+        }
+
+        .compare-stats .cmp-line {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+        }
+
+        .compare-stats .cmp-label {
+            opacity: 0.7;
+        }
+
+        .compare-legend {
+            margin-top: 6px;
+            padding-top: 6px;
+            border-top: 1px solid rgba(255,255,255,0.15);
+            display: flex;
+            gap: 12px;
+            font-size: 0.75rem;
+            opacity: 0.85;
+        }
+
+        .legend-swatch {
+            display: inline-block;
+            width: 18px;
+            height: 0;
+            border-bottom: 3px solid;
+            vertical-align: middle;
+            margin-right: 4px;
+            border-radius: 2px;
+        }
+
+        .legend-planned { border-bottom-style: dashed; border-color: rgba(255,255,255,0.9); }
+        .legend-offroute { border-color: #FF4D6D; }
+
+        @media (max-width: 768px) {
+            .compare-panel {
+                top: auto;
+                bottom: 96px;
+                left: var(--space-sm);
+                max-width: 230px;
+                font-size: 0.75rem;
+            }
+        }
+
         .stat-item {
             display: flex;
             align-items: baseline;
@@ -1183,6 +1272,17 @@
         🏔️ Mont Ventoux Summit - 1,909m
     </div>
 
+    <!-- Planned vs actual comparison (shown for user-uploaded routes) -->
+    <div class="compare-panel" id="compare-panel" hidden>
+        <div class="compare-row">
+            <label for="compare-select">👻 vs planned</label>
+            <select id="compare-select">
+                <option value="">Off</option>
+            </select>
+        </div>
+        <div class="compare-stats" id="compare-stats" hidden></div>
+    </div>
+
     <!-- Camera mode indicator -->
     <div class="camera-mode-indicator" id="camera-mode-indicator">
         <span class="mode-label">Cinematic</span>
@@ -1382,15 +1482,15 @@
     </div>
 
     <!-- Scripts -->
-    <script src="js/config.js?v=cb4c98c"></script>
-    <script src="js/geo.js?v=cb4c98c"></script>
-    <script src="js/poi-display.js?v=cb4c98c"></script>
-    <script src="js/fit-parser.js?v=cb4c98c"></script>
-    <script src="js/gpx-parser.js?v=cb4c98c"></script>
-    <script src="js/elevation-profile.js?v=cb4c98c"></script>
-    <script src="js/rider-profile.js?v=cb4c98c"></script>
-    <script src="js/power-calculator.js?v=cb4c98c"></script>
-    <script src="js/route-store.js?v=cb4c98c"></script>
-    <script src="js/flyover-engine.js?v=cb4c98c"></script>
+    <script src="js/config.js?v=869cd1a"></script>
+    <script src="js/geo.js?v=869cd1a"></script>
+    <script src="js/poi-display.js?v=869cd1a"></script>
+    <script src="js/fit-parser.js?v=869cd1a"></script>
+    <script src="js/gpx-parser.js?v=869cd1a"></script>
+    <script src="js/elevation-profile.js?v=869cd1a"></script>
+    <script src="js/rider-profile.js?v=869cd1a"></script>
+    <script src="js/power-calculator.js?v=869cd1a"></script>
+    <script src="js/route-store.js?v=869cd1a"></script>
+    <script src="js/flyover-engine.js?v=869cd1a"></script>
 </body>
 </html>
