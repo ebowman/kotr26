@@ -5441,6 +5441,15 @@
      * chase target, then hands the smoothing pipeline the final applied state.
      */
     function animateScrubZoomDown() {
+        // If a mode transition is still in progress, complete it immediately.
+        // Running both simultaneously causes double-interpolation of bearing and
+        // altitude, producing the large-bearing-swing jitter seen in recordings.
+        if (modeTransitionProgress < 1) {
+            modeTransitionProgress = 1;
+            currentCameraMode = targetCameraMode;
+            transitionStartState = null;
+        }
+
         const dotDistance = progress * totalDistance;
         const dotPoint = getPointAlongRoute(dotDistance);
 
@@ -7115,6 +7124,20 @@
                 const target = isCinematicHighZoom && window._cinematicState
                     ? window._cinematicState
                     : lookAtPoint;
+
+                // Guard against upward-looking pitch: if Mapbox terrain at the look-at
+                // target is above our camera altitude, lookAtPoint would orient the camera
+                // upward (+pitch). This happens when GPS altitude in uploaded FIT files
+                // is significantly lower than the Mapbox DEM at the same location.
+                // Raise the camera altitude to sit above the look-at terrain before
+                // calling lookAtPoint so the resulting pitch is always downward.
+                const lookAtTerrain = queryTerrainElevationWithCache(target.lng, target.lat);
+                if (lookAtTerrain !== null && state.alt < lookAtTerrain + RIDER_MIN_CLEARANCE) {
+                    camera.position = mapboxgl.MercatorCoordinate.fromLngLat(
+                        [state.lng, state.lat],
+                        lookAtTerrain + RIDER_MIN_CLEARANCE
+                    );
+                }
 
                 // Use Mapbox's native lookAtPoint - it's the most stable option
                 // The smoothed target position should eliminate any jitter from route data
