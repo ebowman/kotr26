@@ -198,6 +198,9 @@
     let cameraPath = null;
     let totalDistance = 0;
 
+    // Telemetry index for user-uploaded FIT files
+    let telemetryIndex = null;
+
     // Elapsed-time (ETA) state
     let elapsedSeries = null; // { elapsed, cumDistMeters, totalSeconds, IF, paceMode }
     let paceMode = (function() {
@@ -3761,6 +3764,9 @@
             // of an O(N) smoothing+threshold walk.
             routeData._cumGain = buildCumulativeGain(routeData.coordinates);
 
+            // Build telemetry lookup for user-uploaded FIT files
+            telemetryIndex = buildTelemetryIndex(routeData.records);
+
             // Check if we have valid coordinates
             if (!routeData.coordinates || routeData.coordinates.length === 0) {
                 throw new Error('No coordinates found in route file');
@@ -7186,6 +7192,9 @@
 
         // Check for Ventoux summit
         checkVentouxSummit(dotPoint);
+
+        // Update live telemetry HUD (power/cadence/speed/HR from uploaded FIT)
+        updateTelemetryHUD(progress);
     }
 
     // Build a cumulative-gain array indexed by coordinate index. Runs once at
@@ -7233,6 +7242,141 @@
      */
     function updateRouteGradient(progress) {
         // Route color is now constant - no gradient needed
+    }
+
+    // --- Ride telemetry HUD (power / cadence / speed / HR from uploaded FIT) ---
+
+    function buildTelemetryIndex(records) {
+        if (!records || records.length < 2) return null;
+        const hasPower   = records.some(r => r.power     != null);
+        const hasSpeed   = records.some(r => r.speed     != null);
+        const hasCadence = records.some(r => r.cadence   != null);
+        const hasHR      = records.some(r => r.heartRate != null);
+        if (!hasPower && !hasSpeed && !hasCadence && !hasHR) return null;
+
+        // Build distance-sorted sample array; fall back to index fraction when
+        // distance field is absent (uncommon but possible with some devices).
+        const hasDistance = records.some(r => r.distance != null);
+        let samples;
+        if (hasDistance) {
+            const maxDist = records.reduce((m, r) => r.distance != null ? Math.max(m, r.distance) : m, 0);
+            if (maxDist <= 0) return null;
+            samples = records
+                .filter(r => r.distance != null)
+                .map(r => ({
+                    frac: r.distance / maxDist,
+                    power:     r.power     ?? null,
+                    speed:     r.speed     ?? null,
+                    cadence:   r.cadence   ?? null,
+                    heartRate: r.heartRate ?? null,
+                    timestamp: r.timestamp ?? null,
+                }));
+        } else {
+            const n = records.length - 1;
+            samples = records.map((r, i) => ({
+                frac: i / n,
+                power:     r.power     ?? null,
+                speed:     r.speed     ?? null,
+                cadence:   r.cadence   ?? null,
+                heartRate: r.heartRate ?? null,
+                timestamp: r.timestamp ?? null,
+            }));
+        }
+
+        return { samples, hasPower, hasSpeed, hasCadence, hasHR };
+    }
+
+    function getTelemetryAt(frac) {
+        if (!telemetryIndex) return null;
+        const { samples } = telemetryIndex;
+        // Binary search for closest sample by distance fraction
+        let lo = 0, hi = samples.length - 1;
+        while (lo < hi) {
+            const mid = (lo + hi) >> 1;
+            if (samples[mid].frac < frac) lo = mid + 1;
+            else hi = mid;
+        }
+        if (lo > 0 && Math.abs(samples[lo - 1].frac - frac) < Math.abs(samples[lo].frac - frac)) {
+            lo = lo - 1;
+        }
+        return samples[lo];
+    }
+
+    // FTP-relative power zone colours (Coggan zones)
+    const POWER_ZONE_COLORS = [
+        { maxPct: 0.55, color: '#9CA3AF' }, // Z1 recovery
+        { maxPct: 0.75, color: '#60A5FA' }, // Z2 endurance
+        { maxPct: 0.90, color: '#34D399' }, // Z3 tempo
+        { maxPct: 1.05, color: '#FBBF24' }, // Z4 threshold
+        { maxPct: 1.20, color: '#F97316' }, // Z5 VO2max
+        { maxPct: Infinity, color: '#EF4444' }, // Z6 anaerobic
+    ];
+
+    function powerZoneColor(watts, ftp) {
+        if (!watts || !ftp || ftp <= 0) return '#ffffff';
+        const pct = watts / ftp;
+        for (const zone of POWER_ZONE_COLORS) {
+            if (pct <= zone.maxPct) return zone.color;
+        }
+        return '#EF4444';
+    }
+
+    function updateTelemetryHUD(frac) {
+        const hud = document.getElementById('ride-telemetry');
+        if (!hud) return;
+        if (!telemetryIndex) {
+            hud.hidden = true;
+            return;
+        }
+        hud.hidden = false;
+        const sample = getTelemetryAt(frac);
+        if (!sample) return;
+
+        const ftp = (typeof RiderProfile !== 'undefined' && RiderProfile.get().ftp) || 0;
+
+        const powerVal   = document.getElementById('telem-power');
+        const cadenceVal = document.getElementById('telem-cadence');
+        const speedVal   = document.getElementById('telem-speed');
+        const hrVal      = document.getElementById('telem-hr');
+        const powerChip  = document.getElementById('telem-power-chip');
+        const cadenceChip= document.getElementById('telem-cadence-chip');
+        const speedChip  = document.getElementById('telem-speed-chip');
+        const hrChip     = document.getElementById('telem-hr-chip');
+
+        if (powerVal && powerChip) {
+            const watts = sample.power;
+            if (watts != null) {
+                powerVal.textContent = `${watts}W`;
+                powerVal.style.color = powerZoneColor(watts, ftp);
+                powerChip.hidden = false;
+            } else {
+                powerChip.hidden = true;
+            }
+        }
+        if (cadenceVal && cadenceChip) {
+            if (sample.cadence != null) {
+                cadenceVal.textContent = `${sample.cadence}rpm`;
+                cadenceChip.hidden = false;
+            } else {
+                cadenceChip.hidden = true;
+            }
+        }
+        if (speedVal && speedChip) {
+            if (sample.speed != null) {
+                speedVal.textContent = `${sample.speed.toFixed(1)}km/h`;
+                speedChip.hidden = false;
+            } else {
+                speedChip.hidden = true;
+            }
+        }
+        if (hrVal && hrChip) {
+            if (sample.heartRate != null) {
+                hrVal.textContent = `${sample.heartRate}bpm`;
+                hrChip.hidden = false;
+            } else {
+                hrChip.hidden = true;
+            }
+        }
     }
 
     /**

@@ -199,6 +199,60 @@
             }
         }
 
+        /* Live telemetry HUD (user-uploaded FIT files with power/cadence/speed/HR) */
+        .ride-telemetry {
+            position: fixed;
+            top: 80px;
+            right: var(--space-lg);
+            z-index: 100;
+            background: rgba(0, 0, 0, 0.65);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            border-radius: 20px;
+            padding: 8px 16px;
+            display: flex;
+            gap: 14px;
+            align-items: center;
+            font-size: 0.875rem;
+            font-weight: 600;
+            color: white;
+            border: 1px solid rgba(255,255,255,0.12);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.35);
+            letter-spacing: 0.01em;
+        }
+
+        .telem-chip {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            white-space: nowrap;
+        }
+
+        .telem-chip .telem-icon {
+            opacity: 0.75;
+            font-size: 0.75rem;
+        }
+
+        .telem-val {
+            transition: color 0.4s ease;
+        }
+
+        .telem-sep {
+            opacity: 0.3;
+            font-weight: 300;
+        }
+
+        @media (max-width: 768px) {
+            .ride-telemetry {
+                top: auto;
+                bottom: 96px;
+                right: var(--space-sm);
+                font-size: 0.8125rem;
+                padding: 6px 12px;
+                gap: 10px;
+            }
+        }
+
         .stat-item {
             display: flex;
             align-items: baseline;
@@ -1283,6 +1337,25 @@
         <div class="compare-stats" id="compare-stats" hidden></div>
     </div>
 
+    <!-- Live ride telemetry HUD (shown for user-uploaded FIT files with power/cadence/speed/HR) -->
+    <div class="ride-telemetry" id="ride-telemetry" hidden>
+        <span class="telem-chip" id="telem-power-chip">
+            <span class="telem-icon">⚡</span><span class="telem-val" id="telem-power">--</span>
+        </span>
+        <span class="telem-sep">·</span>
+        <span class="telem-chip" id="telem-cadence-chip">
+            <span class="telem-icon">🔄</span><span class="telem-val" id="telem-cadence">--</span>
+        </span>
+        <span class="telem-sep">·</span>
+        <span class="telem-chip" id="telem-speed-chip">
+            <span class="telem-icon">↗</span><span class="telem-val" id="telem-speed">--</span>
+        </span>
+        <span class="telem-sep">·</span>
+        <span class="telem-chip" id="telem-hr-chip">
+            <span class="telem-icon">❤</span><span class="telem-val" id="telem-hr">--</span>
+        </span>
+    </div>
+
     <!-- Camera mode indicator -->
     <div class="camera-mode-indicator" id="camera-mode-indicator">
         <span class="mode-label">Cinematic</span>
@@ -1482,15 +1555,15 @@
     </div>
 
     <!-- Scripts -->
-    <script src="js/config.js?v=49e7d56"></script>
-    <script src="js/geo.js?v=49e7d56"></script>
-    <script src="js/poi-display.js?v=49e7d56"></script>
-    <script src="js/fit-parser.js?v=49e7d56"></script>
-    <script src="js/gpx-parser.js?v=49e7d56"></script>
-    <script src="js/elevation-profile.js?v=49e7d56"></script>
-    <script src="js/rider-profile.js?v=49e7d56"></script>
-    <script src="js/power-calculator.js?v=49e7d56"></script>
-    <script src="js/route-store.js?v=49e7d56"></script>
-    <script src="js/flyover-engine.js?v=49e7d56"></script>
+    <script src="js/config.js?v=fdbac7e"></script>
+    <script src="js/geo.js?v=fdbac7e"></script>
+    <script src="js/poi-display.js?v=fdbac7e"></script>
+    <script src="js/fit-parser.js?v=fdbac7e"></script>
+    <script src="js/gpx-parser.js?v=fdbac7e"></script>
+    <script src="js/elevation-profile.js?v=fdbac7e"></script>
+    <script src="js/rider-profile.js?v=fdbac7e"></script>
+    <script src="js/power-calculator.js?v=fdbac7e"></script>
+    <script src="js/route-store.js?v=fdbac7e"></script>
+    <script src="js/flyover-engine.js?v=fdbac7e"></script>
 </body>
 </html>
