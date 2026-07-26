@@ -21,3 +21,6 @@ node_modules/
 PRD-*.md
 PREDICTIVE_CAMERA_PLAN.md
 .screenshots/
+
+# Beads / Dolt files (added by bd init)
+.beads/proxieddb/
